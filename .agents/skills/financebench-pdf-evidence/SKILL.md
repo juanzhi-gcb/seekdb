@@ -95,4 +95,6 @@ catches it in a second instead of after a failed run.
   with the parameters that were measured.
 - `references/parsing-checklist.md` — review list for page identity, revisions
   and malformed input handling.
+Submission verification: OB-S:9uNSTpwajT5X8zDiHS7SCg
+
 <!-- OB-S:9uNSTpwajT5X8zDiHS7SCg -->
