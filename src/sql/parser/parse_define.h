@@ -22,6 +22,8 @@
 #define NULL_PTR(x)        (OB_UNLIKELY(NULL == (x)))
 
 static const int64_t OB_MAX_PARSER_INT16_VALUE = 32738;
+static const int64_t OB_DESCRIBE_QUERY_MARKER = 0x44534351;
+static const int64_t OB_FILE_COPY_MARKER = 0x46435059;
 //errno keep consistency with  with ob_define.h
 static const int32_t OB_PARSER_ERR_NO_MEMORY = -4013;
 static const int32_t OB_PARSER_ERR_UNEXPECTED = -4016;

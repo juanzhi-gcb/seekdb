@@ -205,6 +205,7 @@ public:
   int resolve_joined_table_item(const ParseNode &parse_node, JoinedTable *&joined_table);
   int resolve_function_table_item(const ParseNode &table_node,
                                   TableItem *&table_item);
+  int resolve_file_table_item(const ParseNode &table_node, TableItem *&table_item);
   int resolve_json_table_item(const ParseNode &table_node,
                               TableItem *&table_item);
   int resolve_unnest_item(const ParseNode &table_node, TableItem *&table_item);
@@ -225,6 +226,7 @@ public:
                                 ObIAllocator* allocator,
                                 ObString& path_str,
                                 MulModeTableType table_type);
+  int resolve_const_obj(const ParseNode &parse_tree, ObObjParam &val);
   int resolve_str_const(const ParseNode &parse_tree, ObString& path_str);
   int resolve_json_table_column_name_and_path(const ParseNode *name_node,
                                            const ParseNode *path_node,

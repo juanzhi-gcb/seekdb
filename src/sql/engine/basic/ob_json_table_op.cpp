@@ -21,6 +21,9 @@
 #include "sql/engine/expr/ob_expr_json_query.h"
 #include "common/xml/ob_binary_aggregate.h"
 #include "sql/engine/expr/ob_array_expr_utils.h"
+#include "sql/engine/basic/file_sql_reader.h"
+#include "share/schema/ob_schema_utils.h"
+#include "sql/engine/expr/ob_expr_lob_utils.h"
 
 namespace oceanbase
 {
@@ -326,7 +329,7 @@ OB_DEF_SERIALIZE(ObJsonTableSpec)
     OB_UNIS_ENCODE(info);
   }
   if (OB_FAIL(ret)) {
-  } else if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE) {
+  } else if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE || table_type_ == OB_FILE_TABLE_TYPE) {
     OB_UNIS_ENCODE(table_type_);
     int32_t value_exprs_count = value_exprs_.count() - 1;
     OB_UNIS_ENCODE(value_exprs_count);
@@ -354,7 +357,7 @@ OB_DEF_SERIALIZE_SIZE(ObJsonTableSpec)
     const ObJtColInfo& info = *cols_def_.at(i);
     OB_UNIS_ADD_LEN(info);
   }
-  if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE) {
+  if (table_type_ == MulModeTableType::OB_UNNEST_TABLE_TYPE || table_type_ == OB_FILE_TABLE_TYPE) {
     OB_UNIS_ADD_LEN(table_type_);
     int32_t value_exprs_count = value_exprs_.count() - 1;
     OB_UNIS_ADD_LEN(value_exprs_count);
@@ -393,7 +396,7 @@ OB_DEF_DESERIALIZE(ObJsonTableSpec)
       OB_UNIS_DECODE(tmp_col_info);
       *col_info = tmp_col_info;
       if (OB_FAIL(cols_def_.push_back(col_info))) {
-      } else if (col_info->col_type_ == COL_TYPE_UNNEST) {
+      } else if (col_info->col_type_ == COL_TYPE_UNNEST || col_info->col_type_ == COL_TYPE_FILE) {
         table_type_flag = OB_UNNEST_TABLE;
       }
     }
@@ -584,6 +587,7 @@ int ObJsonTableOp::generate_column_trees(JtColTreeNode*& root)
 int ObJsonTableOp::inner_open()
 {
   INIT_SUCC(ret);
+  if (MY_SPEC.table_type_ == OB_FILE_TABLE_TYPE) { return open_file_table(); }
   if (OB_FAIL(init())) {
   } else if (MY_SPEC.value_exprs_.empty()) {
     ret = OB_ERR_UNEXPECTED;
@@ -598,6 +602,11 @@ int ObJsonTableOp::inner_open()
 int ObJsonTableOp::inner_rescan()
 {
   int ret = OB_SUCCESS;
+  if (MY_SPEC.table_type_ == OB_FILE_TABLE_TYPE) {
+    OZ (ObOperator::inner_rescan());
+    if (OB_SUCC(ret)) { ret = open_file_table(); }
+    return ret;
+  }
   if (OB_FAIL(ObOperator::inner_rescan())) {
   } else {
     jt_ctx_.row_alloc_.reuse();
@@ -685,6 +694,7 @@ int ObJsonTableOp::init()
 int ObJsonTableOp::inner_close()
 {
   INIT_SUCC(ret);
+  if (file_reader_ != nullptr) { file_reader_->~FileSqlReader(); file_reader_ = nullptr; }
   if (OB_NOT_NULL(root_)) {
     if (OB_FAIL(root_->reset(&jt_ctx_))) {
     }
@@ -722,6 +732,7 @@ void ScanNode::reset_reg_columns(JtScanCtx* ctx)
 
 void ObJsonTableOp::destroy()
 {
+  if (file_reader_ != nullptr) { file_reader_->~FileSqlReader(); file_reader_ = nullptr; }
   ObOperator::destroy();
 }
 
@@ -1401,6 +1412,7 @@ int UnionNode::get_next_row(void* in, JtScanCtx* ctx, bool& is_null_value)
 int ObJsonTableOp::inner_get_next_row()
 {
   INIT_SUCC(ret);
+  if (MY_SPEC.table_type_ == OB_FILE_TABLE_TYPE) { return next_file_row(); }
   bool is_root_null = false;
   if (!(jt_ctx_.is_json_table_func()
         || jt_ctx_.is_unnest_table_func())) {
@@ -1424,6 +1436,82 @@ int ObJsonTableOp::inner_get_next_row()
     }
   }
 
+  return ret;
+}
+
+int ObJsonTableOp::open_file_table()
+{
+  int ret = OB_SUCCESS;
+  ObObj enabled;
+  ObString secure;
+  ObDatum *path = nullptr, *format = nullptr, *header = nullptr;
+  OZ (ctx_.get_my_session()->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled));
+  if (OB_SUCC(ret) && enabled.get_int() == 0) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file SQL while enable_file_sql is OFF");
+  }
+  if (OB_SUCC(ret) && (ctx_.get_my_session()->get_user_priv_set() & OB_PRIV_FILE) == 0) {
+    ret = OB_ERR_NO_PRIVILEGE;
+  }
+  OZ (share::schema::ObSchemaUtils::get_runtime_varchar_variable(*GCTX.schema_service_,
+       share::SYS_VAR_SECURE_FILE_PRIV, *allocator_, secure));
+  if (OB_SUCC(ret) && MY_SPEC.value_exprs_.count() != 3) { ret = OB_ERR_UNEXPECTED; }
+  if (OB_SUCC(ret)) {
+    OZ (MY_SPEC.value_exprs_[0]->eval(eval_ctx_, path));
+    OZ (MY_SPEC.value_exprs_[1]->eval(eval_ctx_, format));
+    OZ (MY_SPEC.value_exprs_[2]->eval(eval_ctx_, header));
+  }
+  if (OB_SUCC(ret) && file_reader_ == nullptr) {
+    void *buf = allocator_->alloc(sizeof(FileSqlReader));
+    if (buf == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else { file_reader_ = new (buf) FileSqlReader(); }
+  }
+  if (OB_SUCC(ret)) {
+    const ObString p = path->get_string(), f = format->get_string();
+    OZ (file_reader_->open(std::string(p.ptr(), p.length()), std::string(f.ptr(), f.length()),
+                          header->get_string() == "1", std::string(secure.ptr(), secure.length())));
+  }
+  return ret;
+}
+
+int ObJsonTableOp::next_file_row()
+{
+  int ret = OB_SUCCESS;
+  clear_evaluated_flag();
+  jt_ctx_.row_alloc_.reuse();
+  std::vector<FileSqlReader::Field> fields;
+  if (file_reader_ == nullptr) { return OB_NOT_INIT; }
+  OZ (ctx_.check_status());
+  OZ (file_reader_->next(fields));
+  const ObDataTypeCastParams params = ObBasicSessionInfo::create_dtc_params(ctx_.get_my_session());
+  for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.cols_def_.count(); ++i) {
+    const ObJtColInfo &col = *MY_SPEC.cols_def_[i];
+    if (col.col_type_ != COL_TYPE_FILE || col.output_column_idx_ < 0) { continue; }
+    if (col.output_column_idx_ >= MY_SPEC.column_exprs_.count()) { ret = OB_ERR_UNEXPECTED; break; }
+    ObExpr *expr = MY_SPEC.column_exprs_[col.output_column_idx_];
+    ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+    const std::string name(col.col_name_.ptr(), col.col_name_.length());
+    const auto field = std::find_if(fields.begin(), fields.end(), [&](const FileSqlReader::Field &f) {
+      return FileSqlReader::equal_name(f.name, name);
+    });
+    if (field == fields.end() || field->is_null) {
+      datum.set_null();
+    } else {
+      ObString owned;
+      ObObj source, output;
+      OZ (ob_write_string(jt_ctx_.row_alloc_, ObString(field->text.size(), field->text.data()), owned));
+      source.set_varchar(owned);
+      source.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      if (expr->datum_meta_.type_ == ObTinyIntType && field->type == ObTinyIntType) {
+        source.set_tinyint(FileSqlReader::equal_name(field->text, "true") ? 1 : 0);
+      }
+      ObAccuracy accuracy = col.data_type_.get_accuracy();
+      ObCastCtx cast_ctx(&jt_ctx_.row_alloc_, &params, CM_NONE, expr->datum_meta_.cs_type_, &accuracy);
+      OZ (ObObjCaster::to_type(expr->datum_meta_.type_, expr->datum_meta_.cs_type_, cast_ctx, source, output));
+      OZ (datum.from_obj(output, expr->obj_datum_map_));
+    }
+    if (OB_SUCC(ret)) { expr->set_evaluated_projected(eval_ctx_); }
+  }
   return ret;
 }
 

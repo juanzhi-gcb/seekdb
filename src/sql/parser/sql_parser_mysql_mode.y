@@ -57,6 +57,9 @@
 %destructor {destroy_tree($$);}<node>
 %destructor {oceanbase::common::ob_free($$);}<str_value_>
 
+%token <node> READ_CSV READ_JSON READ_PARQUET GLOB
+%type <node> file_table_name
+%type <node> file_copy_stmt file_copy_options file_copy_option
 %token <node> NAME_OB
 %token <node> STRING_VALUE
 %token <node> NATIONAL_LITERAL
@@ -556,6 +559,7 @@ opt_end_p:
 /* only preparable statement will set question mark size */
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
+  | file_copy_stmt          { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -10848,6 +10852,56 @@ tbl_name
 {
   $$ = $1;
 }
+| file_table_name '(' expr_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 3, $1, $3, NULL);
+  $$->value_ = 1; /* native file table */
+}
+| file_table_name '(' expr_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 3, $1, $3, $5);
+  $$->value_ = 1;
+}
+| file_table_name '(' expr_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 3, $1, $3, $6);
+  $$->value_ = 1;
+}
+;
+
+file_copy_stmt:
+COPY '(' select_no_parens ')' TO STRING_VALUE '(' file_copy_options ')'
+{
+  $$ = $3;
+  if ($$->children_[PARSE_SELECT_INTO] != NULL || $$->children_[PARSE_SELECT_INTO_EXTRA] != NULL) {
+    yyerror(&@1, result, "COPY query cannot contain INTO"); YYERROR;
+  }
+  ParseNode *options = NULL;
+  merge_nodes(options, result, T_ARGUMENT_LIST, $8);
+  malloc_non_terminal_node($$->children_[PARSE_SELECT_INTO_EXTRA], result->malloc_pool_,
+                           T_INTO_OUTFILE, 3, $6, options, NULL);
+  $$->children_[PARSE_SELECT_INTO_EXTRA]->value_ = OB_FILE_COPY_MARKER;
+}
+;
+
+file_copy_options:
+file_copy_option { $$ = $1; }
+| file_copy_options ',' file_copy_option
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3); }
+;
+
+file_copy_option:
+relation_name { malloc_non_terminal_node($$, result->malloc_pool_, T_ASSIGN_ITEM, 2, $1, NULL); }
+| relation_name relation_name { malloc_non_terminal_node($$, result->malloc_pool_, T_ASSIGN_ITEM, 2, $1, $2); }
+| relation_name STRING_VALUE { malloc_non_terminal_node($$, result->malloc_pool_, T_ASSIGN_ITEM, 2, $1, $2); }
+| relation_name BOOL_VALUE { malloc_non_terminal_node($$, result->malloc_pool_, T_ASSIGN_ITEM, 2, $1, $2); }
+;
+
+file_table_name:
+READ_CSV { (void)$1; make_name_node($$, result->malloc_pool_, "read_csv"); }
+| READ_JSON { (void)$1; make_name_node($$, result->malloc_pool_, "read_json"); }
+| READ_PARQUET { (void)$1; make_name_node($$, result->malloc_pool_, "read_parquet"); }
+| GLOB { (void)$1; make_name_node($$, result->malloc_pool_, "glob"); }
 ;
 
 tbl_name:
@@ -12265,7 +12319,15 @@ explain_or_desc relation_factor opt_desc_column_option
   malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_COLUMNS, 4, $$, $2, NULL, $3);
 }
 
-| explain_or_desc explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);}
+| explain_or_desc explainable_stmt
+{
+  if ($1 != NULL && $1->value_ == 1 && $2->type_ == T_SELECT) {
+    $$ = $2;
+    $$->reserved_ = OB_DESCRIBE_QUERY_MARKER;
+  } else {
+    GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);
+  }
+}
 | explain_or_desc PRETTY explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY, $3, NULL, NULL);}
 | explain_or_desc PRETTY_COLOR explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY_COLOR, $3, NULL, NULL);}
 
@@ -12306,8 +12368,8 @@ explain_or_desc relation_factor opt_desc_column_option
 
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+| DESCRIBE { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
+| DESC { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
 ;
 
 explainable_stmt:

@@ -307,6 +307,17 @@ int get_dml_stmt_need_privs(
       case stmt::T_UPDATE : {
         ObPrivSet priv_set = 0;
         ObString op_literal;
+        const ObDMLStmt *dml = static_cast<const ObDMLStmt*>(basic_stmt);
+        for (int64_t i = 0; OB_SUCC(ret) && i < dml->get_table_size(); ++i) {
+          const TableItem *table = dml->get_table_item(i);
+          if (table != nullptr && table->is_json_table() && table->json_table_def_ != nullptr
+              && table->json_table_def_->table_type_ == OB_FILE_TABLE_TYPE) {
+            ObNeedPriv file_priv;
+            file_priv.priv_set_ = OB_PRIV_FILE;
+            file_priv.priv_level_ = OB_PRIV_USER_LEVEL;
+            ADD_NEED_PRIV(file_priv);
+          }
+        }
         if (stmt::T_SELECT == stmt_type) {
           priv_set = OB_PRIV_SELECT;
           op_literal = ObString::make_string("SELECT");

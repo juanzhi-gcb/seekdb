@@ -43,6 +43,7 @@ class ObRegCol;
 class ScanNode;
 class UnionNode;
 class ObMultiModeTableNode;
+class FileSqlReader;
 
 enum table_type : int8_t {
   OB_INVALID_TABLE = 0,
@@ -197,7 +198,8 @@ public:
       input_(nullptr),
       j_null_(),
       j_arr_(allocator_),
-      j_obj_(allocator_)
+      j_obj_(allocator_),
+      file_reader_(nullptr)
   {
     const ObJsonTableSpec* spec_ptr = reinterpret_cast<const ObJsonTableSpec*>(&spec);
     col_count_ = spec_ptr->column_exprs_.count();
@@ -228,6 +230,8 @@ private:
   int generate_table_exec_tree(ObIAllocator* allocator, const JtColTreeNode& orig_col,
                                JoinNode*& join_col);
   int inner_get_next_row_jt();  // json table function inner
+  int open_file_table();
+  int next_file_row();
 
 private:
   JtColTreeNode* def_root_;
@@ -246,6 +250,7 @@ private:
   ObJsonNull j_null_;
   ObJsonArray j_arr_;
   ObJsonObject j_obj_;
+  FileSqlReader *file_reader_;
 };
 
 class MulModeTableFunc {

@@ -28,6 +28,8 @@
 #include "sql/engine/expr/ob_expr_regexp_context.h"
 #include "sql/engine/expr/ob_json_param_type.h"
 #include "sql/parser/ob_parser_utils.h"
+#include "sql/parser/ob_parser.h"
+#include "sql/engine/basic/file_sql_reader.h"
 
 #include "sql/executor/ob_memory_tracker.h"
 namespace oceanbase
@@ -1052,6 +1054,38 @@ int ObSelectResolver::resolve(const ParseNode &parse_tree)
     }
   }
 
+  if (OB_SUCC(ret) && parse_tree.reserved_ == OB_DESCRIBE_QUERY_MARKER) {
+    // Resolve the input query normally (including secure schema discovery),
+    // then expose its metadata through an ordinary constant relational query.
+    // The input file scan is never executed for DESCRIBE.
+    ObSqlString metadata;
+    for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_select_item_size(); ++i) {
+      const SelectItem &item = select_stmt->get_select_item(i);
+      const ObString &name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+      const ObObjType type = item.expr_->get_data_type();
+      const char *type_name = type == ObIntType ? "BIGINT" : type == ObDoubleType ? "DOUBLE"
+          : type == ObTinyIntType ? "BOOLEAN" : type == ObDateType ? "DATE"
+          : type == ObDateTimeType ? "DATETIME" : type == ObVarcharType ? "VARCHAR"
+          : type == ObJsonType ? "JSON" : ob_obj_type_str(type);
+      if (i > 0) { OZ (metadata.append(" UNION ALL ")); }
+      OZ (metadata.append("SELECT CONVERT(0x"));
+      for (int64_t j = 0; OB_SUCC(ret) && j < name.length(); ++j) {
+        OZ (metadata.append_fmt("%02x", static_cast<unsigned char>(name.ptr()[j])));
+      }
+      OZ (metadata.append_fmt(" USING utf8mb4) AS column_name, '%s' AS column_type, '%s' AS `null`, "
+          "CAST(NULL AS CHAR) AS `key`, CAST(NULL AS CHAR) AS `default`, CAST(NULL AS CHAR) AS extra",
+          type_name, item.expr_->get_result_type().has_result_flag(NOT_NULL_FLAG) ? "NO" : "YES"));
+    }
+    ParseResult parsed;
+    ObParser parser(*allocator_, session_info_->get_sql_mode());
+    ObSelectResolver resolver(params_);
+    OZ (parser.parse(metadata.string(), parsed));
+    if (OB_SUCC(ret) && (parsed.result_tree_ == nullptr || parsed.result_tree_->num_child_ < 1)) {
+      ret = OB_ERR_UNEXPECTED;
+    }
+    if (OB_SUCC(ret)) { OZ (resolver.resolve(*parsed.result_tree_->children_[0])); }
+    if (OB_SUCC(ret)) { stmt_ = resolver.get_stmt(); }
+  }
   return ret;
 }
 
@@ -3081,6 +3115,98 @@ int ObSelectResolver::resolve_into_outfile_without_format(const ParseNode *node,
   return ret;
 }
 
+int ObSelectResolver::resolve_file_copy(const ParseNode *node, ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  ObObj enabled;
+  bool header = false;
+  bool saw_header = false, saw_format = false, saw_null = false;
+  ObString nullstr("");
+  OZ (session_info_->get_sys_variable(SYS_VAR_ENABLE_FILE_SQL, enabled));
+  if (OB_SUCC(ret) && enabled.get_int() == 0) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "COPY while enable_file_sql is OFF");
+  }
+  OZ (resolve_into_const_node(node->children_[0], into_item.outfile_name_));
+  // Option values in the COPY grammar are bare relation names (for example
+  // `format csv`), which are not constant literals; read them directly.
+  auto resolve_option_string = [&](const ParseNode *value_node, ObString &out) -> int {
+    int ret = OB_SUCCESS;
+    if (OB_ISNULL(value_node)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (T_IDENT == value_node->type_) {
+      out.assign_ptr(value_node->str_value_, value_node->str_len_);
+    } else {
+      ret = resolve_str_const(*value_node, out);
+    }
+    return ret;
+  };
+  const ParseNode *options = node->children_[1];
+  for (int64_t i = 0; OB_SUCC(ret) && i < options->num_child_; ++i) {
+    const ParseNode *opt = options->children_[i];
+    const ParseNode *key = opt->children_[0], *value = opt->children_[1];
+    const std::string name(key->str_value_, key->str_len_);
+    if (FileSqlReader::equal_name(name, "format") && !saw_format && value != nullptr) {
+      saw_format = true;
+      ObString format;
+      OZ (resolve_option_string(value, format));
+      if (OB_SUCC(ret) && format.case_compare("csv") != 0) { ret = OB_NOT_SUPPORTED; }
+    } else if (FileSqlReader::equal_name(name, "header") && !saw_header) {
+      saw_header = true;
+      if (value == nullptr) {
+        header = true;
+      } else if (T_BOOL == value->type_) {
+        header = value->value_ != 0;
+      } else if (T_IDENT == value->type_) {
+        ObString word(value->str_len_, value->str_value_);
+        if (0 == word.case_compare("true")) {
+          header = true;
+        } else if (0 == word.case_compare("false")) {
+          header = false;
+        } else {
+          ret = OB_INVALID_ARGUMENT;
+        }
+      } else {
+        ObObjParam header_val;
+        int64_t int_val = 0;
+        if (OB_FAIL(resolve_const_obj(*value, header_val))) {
+        } else if (OB_FAIL(FileSqlReader::const_to_int(header_val, int_val))) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          header = (int_val != 0);
+        }
+      }
+    } else if (FileSqlReader::equal_name(name, "nullstr") && !saw_null && value != nullptr) {
+      saw_null = true;
+      OZ (resolve_option_string(value, nullstr));
+      if (OB_SUCC(ret) && (nullstr.find(',') != nullptr || nullstr.find('\n') != nullptr
+          || nullstr.find('\r') != nullptr || nullstr.find('"') != nullptr)) { ret = OB_INVALID_ARGUMENT; }
+    } else {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "COPY option");
+    }
+  }
+  ObJsonObject opts(allocator_);
+  ObJsonBoolean is_copy(true);
+  ObJsonArray names(allocator_);
+  ObJsonString null_value(nullstr);
+  for (int64_t i = 0; OB_SUCC(ret) && header && i < get_select_stmt()->get_select_item_size(); ++i) {
+    const SelectItem &item = get_select_stmt()->get_select_item(i);
+    ObJsonString *name = OB_NEWx(ObJsonString, allocator_, item.alias_name_.empty() ? item.expr_name_ : item.alias_name_);
+    if (name == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else { OZ (names.array_append(name)); }
+  }
+  OZ (opts.add("file_sql_copy", &is_copy));
+  OZ (opts.add("headers", &names));
+  OZ (opts.add("nullstr", &null_value));
+  ObJsonBuffer buffer(allocator_);
+  OZ (opts.print(buffer, false));
+  OZ (ob_write_string(*allocator_, buffer.string(), into_item.external_properties_));
+  get_stmt()->get_query_ctx()->query_hint_.get_global_hint().plan_cache_policy_ = OB_USE_PLAN_CACHE_NONE;
+  if (OB_FAIL(ret)) { LOG_WARN("failed to resolve native file COPY", K(ret)); }
+  return ret;
+}
+
 int ObSelectResolver::resolve_into_clause(const ParseNode *node)
 {
   int ret = OB_SUCCESS;
@@ -3105,7 +3231,9 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
       new(into_item) ObSelectIntoItem();
       into_item->into_type_ = node->type_;
       if (T_INTO_OUTFILE == node->type_) { // into outfile
-        if (is_in_set_query()) {
+        if (node->value_ == OB_FILE_COPY_MARKER) {
+          OZ (resolve_file_copy(node, *into_item));
+        } else if (is_in_set_query()) {
           ret = OB_INAPPROPRIATE_INTO;
         } else if (node->num_child_ == 3 && NULL != node->children_[1]
             && T_EXTERNAL_FILE_FORMAT == node->children_[1]->type_) { // Handle with `FORMAT`
