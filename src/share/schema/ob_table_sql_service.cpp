@@ -17,6 +17,9 @@
 #define USING_LOG_PREFIX SHARE_SCHEMA
 #include "ob_table_sql_service.h"
 #include "lib/literals/ob_literals.h"
+#include "lib/allocator/page_arena.h"
+#include "share/ob_dml_sql_splicer.h"
+#include "share/schema/ob_ai_column_spec.h"
 #include "share/ob_global_stat_proxy.h"
 #include "share/schema/ob_constraint.h"
 #include "share/schema/ob_partition_sql_helper.h"
@@ -697,6 +700,21 @@ int ObTableSqlService::drop_table(const ObTableSchema &table_schema,
     }
   }
 
+  // Remove AI definitions and pending work in the same DDL transaction.
+  bool has_ai_columns = false;
+  for (int64_t i = 0; i < table_schema.get_column_count(); ++i) {
+    const ObColumnSchemaV2 *column = table_schema.get_column_schema_by_idx(i);
+    has_ai_columns |= column != nullptr && column->is_hidden()
+        && AiColumnSpec::has_prefix(column->get_comment_str());
+  }
+  if (OB_SUCC(ret) && has_ai_columns) {
+    int64_t affected = 0;
+    OZ(sql.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task WHERE table_id = %lu", table_id));
+    OZ(sql_client.write(sql.ptr(), affected));
+    OZ(sql.assign_fmt("DELETE FROM oceanbase.__all_ai_column WHERE table_id = %lu", table_id));
+    OZ(sql_client.write(sql.ptr(), affected));
+  }
+
   // delete from __all_table_stat, __all_monitor_modified, __all_column_usage, __all_optstat_user_prefs
   if (OB_SUCC(ret)) {
     if (OB_FAIL(delete_from_all_table_stat(sql_client, table_id))) {
@@ -888,6 +906,7 @@ int ObTableSqlService::insert_single_column(
   int ret = OB_SUCCESS;
   if (OB_FAIL(check_ddl_allowed(new_table_schema))) {
   } else if (OB_FAIL(add_single_column(sql_client, new_column_schema))) {
+  } else if (OB_FAIL(add_ai_column_metadata(sql_client, new_table_schema, new_column_schema))) {
   }
   if (OB_SUCC(ret)) {
     if (new_column_schema.is_autoincrement()) {
@@ -1142,6 +1161,110 @@ int ObTableSqlService::batch_add_columns_for_create_table(common::ObISQLClient &
     } else if (OB_FAIL(dml.set_default_columns("is_deleted", "0"))) {
     } else if (OB_FAIL(exec_dml(sql_client, OB_ALL_COLUMN_HISTORY_TNAME, dml, column_count))) {
     } else if (FALSE_IT(time_guard.click("insert_all_column_history"))) {
+    }
+  }
+  return ret;
+}
+
+
+int ObTableSqlService::add_ai_column_metadata(ObISQLClient &sql_client,
+                                              const ObTableSchema &table_schema,
+                                              const ObColumnSchemaV2 &spec_column)
+{
+  int ret = OB_SUCCESS;
+  const ObString &comment = spec_column.get_comment_str();
+  if (!AiColumnSpec::has_prefix(comment)) {
+    // Not a hidden AI spec column, nothing to persist.
+  } else {
+    ObArenaAllocator allocator;
+    AiColumnSpec spec;
+    ObString state_name;
+    ObString request_name;
+    ObString spec_name;
+    const ObColumnSchemaV2 *result_column = nullptr;
+    const ObColumnSchemaV2 *state_column = nullptr;
+    const ObColumnSchemaV2 *request_column = nullptr;
+    const ObColumnSchemaV2 *spec_column_schema = nullptr;
+    if (OB_FAIL(AiColumnSpec::decode_from_comment(allocator, comment, spec))) {
+      LOG_WARN("decode ai column spec failed", K(ret), K(table_schema.get_table_id()));
+    } else if (spec.column_name_.empty() || spec.model_name_.empty()) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("invalid ai column spec", K(ret), K(spec));
+    } else if (OB_FAIL(AiColumnSpec::build_state_column_name(allocator, spec.column_name_,
+                                                             state_name))) {
+    } else if (OB_FAIL(AiColumnSpec::build_request_column_name(allocator, spec.column_name_,
+                                                               request_name))) {
+    } else if (OB_FAIL(AiColumnSpec::build_spec_column_name(allocator, spec.column_name_,
+                                                            spec_name))) {
+    } else if (OB_ISNULL(result_column = table_schema.get_column_schema(spec.column_name_))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ai result column not found", K(ret), K(spec.column_name_),
+               K(table_schema.get_table_id()));
+    } else if (OB_ISNULL(state_column = table_schema.get_column_schema(state_name))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ai state column not found", K(ret), K(state_name));
+    } else if (OB_ISNULL(request_column = table_schema.get_column_schema(request_name))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ai request column not found", K(ret), K(request_name));
+    } else if (OB_ISNULL(spec_column_schema = table_schema.get_column_schema(spec_name))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ai spec column not found", K(ret), K(spec_name));
+    } else {
+      ObDMLSqlSplicer dml;
+      ObSqlString buffer;
+      int64_t affected_rows = 0;
+      const int64_t table_id = static_cast<int64_t>(table_schema.get_table_id());
+      if (OB_FAIL(dml.add_pk_column("table_id", table_id))) {
+      } else if (OB_FAIL(dml.add_pk_column("column_id",
+                     static_cast<int64_t>(result_column->get_column_id())))) {
+      } else if (OB_FAIL(dml.add_column("database_name",
+                     ObHexEscapeSqlStr(spec.database_name_)))) {
+      } else if (OB_FAIL(dml.add_column("table_name", ObHexEscapeSqlStr(spec.table_name_)))) {
+      } else if (OB_FAIL(dml.add_column("column_name",
+                     ObHexEscapeSqlStr(spec.column_name_)))) {
+      } else if (OB_FAIL(dml.add_column("model_name", ObHexEscapeSqlStr(spec.model_name_)))) {
+      } else if (OB_FAIL(dml.add_column("function_type", spec.function_type_))) {
+      } else if (OB_FAIL(dml.add_column("result_type", spec.result_type_))) {
+      } else if (OB_FAIL(dml.add_column("prompt_expr", ObHexEscapeSqlStr(spec.prompt_expr_)))) {
+      } else if (OB_FAIL(dml.add_column("normalized_expr",
+                     ObHexEscapeSqlStr(spec.normalized_expr_)))) {
+      } else if (OB_FAIL(dml.add_column("sync_mode", ObHexEscapeSqlStr(spec.sync_mode_)))) {
+      } else if (OB_FAIL(dml.add_column("max_retries", spec.max_retries_))) {
+      } else if (OB_FAIL(dml.add_column("embed_dim", spec.embed_dim_))) {
+      } else if (OB_FAIL(dml.add_column("state_column_id",
+                     static_cast<int64_t>(state_column->get_column_id())))) {
+      } else if (OB_FAIL(dml.add_column("request_column_id",
+                     static_cast<int64_t>(request_column->get_column_id())))) {
+      } else if (OB_FAIL(dml.add_column("result_spec_column_id",
+                     static_cast<int64_t>(spec_column_schema->get_column_id())))) {
+      } else if (OB_FAIL(dml.splice_insert_sql(OB_ALL_AI_COLUMN_TNAME, buffer))) {
+      } else if (OB_FAIL(sql_client.write(buffer.ptr(), affected_rows))) {
+      } else if (!is_single_row(affected_rows)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected affected rows for ai column metadata", K(ret), K(affected_rows));
+      }
+    }
+  }
+  return ret;
+}
+
+int ObTableSqlService::batch_add_ai_column_metadata(ObISQLClient &sql_client,
+                                                    const ObIArray<ObTableSchema> &tables)
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < tables.count(); i++) {
+    const ObTableSchema &table = tables.at(i);
+    ObTableSchema::const_column_iterator iter = table.column_begin();
+    ObTableSchema::const_column_iterator end = table.column_end();
+    for (; OB_SUCC(ret) && iter != end; ++iter) {
+      const ObColumnSchemaV2 *column = *iter;
+      if (OB_ISNULL(column)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("column schema is null", K(ret));
+      } else if (AiColumnSpec::has_prefix(column->get_comment_str())) {
+        if (OB_FAIL(add_ai_column_metadata(sql_client, table, *column))) {
+        }
+      }
     }
   }
   return ret;
@@ -2044,6 +2167,18 @@ int ObTableSqlService::delete_single_column(
     }
   }
 
+  if (OB_SUCC(ret) && orig_column_schema.is_hidden()
+      && AiColumnSpec::has_prefix(orig_column_schema.get_comment_str())) {
+    ObSqlString cleanup;
+    int64_t affected = 0;
+    OZ(cleanup.assign_fmt("DELETE FROM oceanbase.__all_ai_column_task "
+        "WHERE table_id = %lu AND column_id IN (SELECT column_id FROM oceanbase.__all_ai_column "
+        "WHERE table_id = %lu AND result_spec_column_id = %lu)", table_id, table_id, column_id));
+    OZ(sql_client.write(cleanup.ptr(), affected));
+    OZ(cleanup.assign_fmt("DELETE FROM oceanbase.__all_ai_column WHERE table_id = %lu "
+        "AND result_spec_column_id = %lu", table_id, column_id));
+    OZ(sql_client.write(cleanup.ptr(), affected));
+  }
   return ret;
 }
 
@@ -2151,6 +2286,8 @@ int ObTableSqlService::batch_create_table(ObIArray<ObTableSchema> &tables,
     } else if (FALSE_IT(time_guard.click("insert_all_table"))) {
     } else if (OB_FAIL(batch_add_columns_for_create_table(sql_client, tables))) {
     } else if (FALSE_IT(time_guard.click("insert_all_column"))) {
+    } else if (OB_FAIL(batch_add_ai_column_metadata(sql_client, tables))) {
+    } else if (FALSE_IT(time_guard.click("insert_all_ai_column"))) {
     } else if (OB_FAIL(batch_add_constraints_for_create_table(sql_client, tables))) {
     } else if (FALSE_IT(time_guard.click("insert_all_cst"))) {
     } else if (OB_FAIL(batch_add_table_part_info(sql_client, tables))) {

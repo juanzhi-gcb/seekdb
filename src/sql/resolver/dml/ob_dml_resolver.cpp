@@ -15,6 +15,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_RESV
+#include "share/schema/ob_ai_column_spec.h"
 #include "config_bridge.h"
 #include "ob_dml_resolver.h"
 #include "sql/resolver/dml/ob_view_table_resolver.h"
@@ -1837,6 +1838,9 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
   int ret = OB_SUCCESS;
   ObColumnRefRawExpr *col_expr = NULL;
   ObSchemaGetterGuard *schema_guard = NULL;
+  if (params_.query_ctx_ != nullptr && params_.query_ctx_->ai_retry_column_id_ != OB_INVALID_ID) {
+    include_hidden = true;
+  }
   ColumnItem column_item;
   if (NULL == stmt) {
     stmt = get_stmt();
@@ -1960,6 +1964,53 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
       } else {
         col_item = stmt->get_column_item(stmt->get_column_size() - 1);
       }
+    }
+  }
+  if (OB_SUCC(ret) && col_item != nullptr && params_.query_ctx_ != nullptr
+      && (params_.query_ctx_->ai_collect_reference_ || current_scope_ == T_FIELD_LIST_SCOPE)) {
+    const uint64_t tid = table_item.ref_id_;
+    const ObTableSchema *table_schema = nullptr;
+    const ObColumnSchemaV2 *col_schema = nullptr;
+    OZ(schema_checker_->get_table_schema(tid, table_schema));
+    if (OB_SUCC(ret) && table_schema != nullptr) {
+      col_schema = table_schema->get_column_schema(col_item->column_id_);
+    }
+    if (OB_SUCC(ret) && col_schema != nullptr) {
+    if (OB_SUCC(ret) && !col_schema->is_hidden() && OB_NOT_NULL(params_.query_ctx_)) {
+      ObString spec_name, state_name;
+      using share::schema::AiColumnSpec;
+      if (OB_FAIL(AiColumnSpec::build_spec_column_name(*allocator_, column_name, spec_name))) {
+      } else {
+        const ObColumnSchemaV2 *spec = table_schema->get_column_schema(spec_name);
+        if (OB_NOT_NULL(spec) && spec->is_hidden() && AiColumnSpec::has_prefix(spec->get_comment_str())) {
+          ObSqlString check;
+          auto quote_identifier = [&](const ObString &name) -> int {
+            int r = check.append("`");
+            for (int64_t i = 0; OB_SUCCESS == r && i < name.length(); ++i) {
+              r = name.ptr()[i] == '`' ? check.append("``") : check.append(name.ptr() + i, 1);
+            }
+            return OB_SUCCESS == r ? check.append("`") : r;
+          };
+          OZ(AiColumnSpec::build_state_column_name(*allocator_, column_name, state_name));
+          OZ(check.append_fmt("SELECT %lu, %lu FROM ", tid, col_schema->get_column_id()));
+          OZ(quote_identifier(table_item.database_name_));
+          OZ(check.append("."));
+          OZ(quote_identifier(table_schema->get_table_name_str()));
+          OZ(check.append(" WHERE NOT ("));
+          OZ(quote_identifier(state_name));
+          OZ(check.append(" <=> 'READY') LIMIT 1"));
+          ObString copy;
+          OZ(ob_write_string(*allocator_, check.string(), copy, true));
+          if (OB_SUCC(ret)) {
+            bool exists = false;
+            for (int64_t i = 0; i < params_.query_ctx_->ai_column_read_checks_.count(); ++i) {
+              exists |= params_.query_ctx_->ai_column_read_checks_.at(i) == copy;
+            }
+            if (!exists) { OZ(params_.query_ctx_->ai_column_read_checks_.push_back(copy)); }
+          }
+        }
+      }
+    }
     }
   }
   return ret;
@@ -3042,6 +3093,13 @@ int ObDMLResolver::resolve_table_column_expr(const ObQualifiedName &q_name, ObRa
   //1. joined table column
   //2. basic table column or generated table column
   int ret = OB_SUCCESS;
+  struct ReferenceGuard {
+    bool &value_;
+    bool old_;
+    explicit ReferenceGuard(bool &value) : value_(value), old_(value) { value_ = true; }
+    ~ReferenceGuard() { value_ = old_; }
+  } reference_guard(params_.query_ctx_->ai_collect_reference_);
+
   if (OB_ISNULL(session_info_) || OB_ISNULL(get_stmt())) {
     ret = OB_NOT_INIT;
   } else {

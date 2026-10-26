@@ -24,6 +24,7 @@
 #include "sql/optimizer/ob_log_update.h"
 #include "sql/das/ob_domain_id.h"
 #include "query/vector/ob_vector_index_util.h"
+#include "share/schema/ob_ai_column_spec.h"
 
 namespace oceanbase
 {
@@ -2086,6 +2087,34 @@ int ObDmlCgService::check_is_heap_table(ObLogicalOperator &op,
   return ret;
 }
 
+int ObDmlCgService::check_is_ai_column_table(ObLogicalOperator &op,
+                                             uint64_t ref_table_id,
+                                             bool &is_ai_column_table)
+{
+  int ret = OB_SUCCESS;
+  ObLogPlan *log_plan = op.get_plan();
+  ObSchemaGetterGuard *schema_guard = NULL;
+  const ObTableSchema *table_schema = NULL;
+  is_ai_column_table = false;
+  if (OB_ISNULL(log_plan) ||
+      OB_ISNULL(schema_guard = log_plan->get_optimizer_context().get_schema_guard())) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(schema_guard->get_table_schema(ref_table_id, table_schema))) {
+  } else if (OB_ISNULL(table_schema)) {
+    ret = OB_ERR_UNEXPECTED;
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && !is_ai_column_table
+                      && i < table_schema->get_column_count(); ++i) {
+    const ObColumnSchemaV2 *column = table_schema->get_column_schema_by_idx(i);
+    if (OB_ISNULL(column)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (column->is_hidden() && AiColumnSpec::has_prefix(column->get_comment_str())) {
+      is_ai_column_table = true;
+    }
+  }
+  return ret;
+}
+
 int ObDmlCgService::generate_dml_base_ctdef(ObLogicalOperator &op,
                                             const IndexDMLInfo &index_dml_info,
                                             ObDMLBaseCtDef &dml_base_ctdef,
@@ -2101,9 +2130,14 @@ int ObDmlCgService::generate_dml_base_ctdef(ObLogicalOperator &op,
   } else if (OB_FAIL(cg_.generate_rt_exprs(new_row, dml_base_ctdef.new_row_))) {
   } else if (index_dml_info.is_primary_index_) {
     bool is_heap_table = false;
+    bool is_ai_column_table = false;
     if (OB_FAIL(check_is_heap_table(op, index_dml_info.ref_table_id_, is_heap_table))) {
+    } else if (OB_FAIL(check_is_ai_column_table(op, index_dml_info.ref_table_id_,
+                                                is_ai_column_table))) {
     } else {
       dml_base_ctdef.is_table_without_pk_ = is_heap_table;
+      dml_base_ctdef.is_ai_column_table_ = is_ai_column_table;
+      dml_base_ctdef.ai_retry_column_id_ = op.get_plan()->get_stmt()->get_query_ctx()->ai_retry_column_id_;
     }
   }
 

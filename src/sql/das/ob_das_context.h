@@ -219,7 +219,8 @@ public:
       uint64_t iter_uncommitted_row_            : 1; //iter uncommitted row in fk_checker
       uint64_t in_das_group_scan_               : 1; //the current execution in das group scan
       uint64_t in_ignore_cascading_             : 1; //is an ignore stmt when cascading
-      uint64_t reserved_                        : 60;
+      uint64_t ai_column_processing_            : 1; //the ai column hook is running its inner sql
+      uint64_t reserved_                        : 59;
     };
   };
 };

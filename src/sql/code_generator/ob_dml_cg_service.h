@@ -112,6 +112,9 @@ public:
   int check_is_heap_table(ObLogicalOperator &op,
                           uint64_t ref_table_id,
                           bool &is_heap_table);
+  int check_is_ai_column_table(ObLogicalOperator &op,
+                               uint64_t ref_table_id,
+                               bool &is_ai_column_table);
   int get_column_ref_base_cid(const ObLogicalOperator &op, const ObColumnRefRawExpr *col, uint64_t &base_cid);
 
 private:

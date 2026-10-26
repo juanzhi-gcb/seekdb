@@ -10988,5 +10988,18 @@
     "info_cn": "允许查询本地文件",
     "background_cn": "默认关闭以限制本地文件访问",
     "ref_url": ""
+  },
+  "ai_column_strict_read": {
+    "id": 10755,
+    "name": "ai_column_strict_read",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Reject reads of referenced AI columns with unfinished rows",
+    "flags": "SESSION | INFLUENCE_PLAN | NEED_SERIALIZE",
+    "publish_version": "1.0.0.0",
+    "info_cn": "拒绝读取存在未完成行的 AI 列",
+    "background_cn": "默认关闭",
+    "ref_url": ""
   }
 }

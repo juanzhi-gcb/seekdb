@@ -309,7 +309,7 @@ END_P SET_VAR DELIMITER
         LIST_ LISTAGG LOB_INROW_THRESHOLD LOCAL LOCATION LOCKED LOCKS LOGFILE LOGS LOCK_
         LOGICAL_READS LEVEL LN LOG LINK LS LINE_DELIMITER
 
-        MAJOR MAP MANHATTAN MANUAL MASTER MASTER_AUTO_POSITION MASTER_CONNECT_RETRY MASTER_DELAY MASTER_HEARTBEAT_PERIOD
+        RETRY MAJOR MAP MANHATTAN MANUAL MASTER MASTER_AUTO_POSITION MASTER_CONNECT_RETRY MASTER_DELAY MASTER_HEARTBEAT_PERIOD
         MASTER_HOST MASTER_LOG_FILE MASTER_LOG_POS MASTER_PASSWORD MASTER_PORT MASTER_RETRY_COUNT
         MASTER_SERVER_ID MASTER_SSL MASTER_SSL_CA MASTER_SSL_CAPATH MASTER_SSL_CERT MASTER_SSL_CIPHER
         MASTER_SSL_CRL MASTER_SSL_CRLPATH MASTER_SSL_KEY MASTER_USER MAX MAX_CONNECTIONS_PER_HOUR
@@ -424,6 +424,7 @@ END_P SET_VAR DELIMITER
 %type <node> opt_equal_mark opt_default_mark read_only_or_write not not2
 %type <node> int_or_decimal
 %type <node> opt_column_attribute_list column_attribute column_attribute_list opt_column_default_value opt_column_default_value_list
+%type <node> ai_column_option_list ai_column_option ai_retry_tail
 %type <node> show_stmt from_or_in columns_or_fields database_or_schema index_or_indexes_or_keys opt_from_or_in_database_clause opt_show_condition opt_desc_column_option opt_status opt_storage opt_show_engine check_table_options check_table_option
 %type <node> prepare_stmt stmt_name preparable_stmt
 %type <node> variable_set_stmt var_and_val_list var_and_val to_or_eq set_expr_or_default sys_var_and_val
@@ -6242,6 +6243,34 @@ not NULLX
 | INVISIBLE
 {
   malloc_terminal_node($$, result->malloc_pool_, T_INVISIBLE);
+}
+| AI COLUMN '(' expr ')' WITH '(' ai_column_option_list ')'
+{
+  dup_expr_string($4, result, @4.first_column, @4.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, $8);
+}
+| AI COLUMN '(' expr ')'
+{
+  dup_expr_string($4, result, @4.first_column, @4.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, NULL);
+}
+;
+
+ai_column_option_list:
+ai_column_option
+{
+  $$ = $1;
+}
+| ai_column_option_list ',' ai_column_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+ai_column_option:
+column_name COMP_EQ expr
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTION, 2, $1, $3);
 }
 ;
 
@@ -14715,7 +14744,26 @@ relation_factor TO relation_factor
  *
  *****************************************************************************/
 alter_table_stmt:
-alter_with_opt_hint TABLE relation_factor alter_table_actions
+alter_with_opt_hint TABLE relation_factor RETRY AI COLUMN column_name opt_where ai_retry_tail
+{
+  ParseNode *table_ref = NULL;
+  ParseNode *tables = NULL;
+  ParseNode *column = NULL;
+  ParseNode *null_value = NULL;
+  ParseNode *assign = NULL;
+  ParseNode *assigns = NULL;
+  malloc_non_terminal_node(table_ref, result->malloc_pool_, T_ORG, 4, $3, NULL, NULL, NULL);
+  malloc_non_terminal_node(tables, result->malloc_pool_, T_TABLE_REFERENCES, 1, table_ref);
+  malloc_non_terminal_node(column, result->malloc_pool_, T_COLUMN_REF, 3, NULL, NULL, $7);
+  malloc_terminal_node(null_value, result->malloc_pool_, T_NULL);
+  malloc_non_terminal_node(assign, result->malloc_pool_, T_ASSIGN_ITEM, 2, column, null_value);
+  malloc_non_terminal_node(assigns, result->malloc_pool_, T_ASSIGN_LIST, 1, assign);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_UPDATE, 11,
+      NULL, tables, assigns, $8, NULL, NULL, NULL, $1, NULL, NULL, NULL);
+  $$->reserved_ = $9 == NULL ? 0x41494352 : 0x41494353;
+  /* Root value_ is reserved for the parser's parameter count. */
+}
+| alter_with_opt_hint TABLE relation_factor alter_table_actions
 {
   ParseNode *table_actions = NULL;
   merge_nodes(table_actions, result, T_ALTER_TABLE_ACTION_LIST, $4);
@@ -14724,6 +14772,11 @@ alter_with_opt_hint TABLE relation_factor alter_table_actions
 }
 ;
 
+
+ai_retry_tail:
+/* EMPTY */ { $$ = NULL; }
+| ',' alter_table_actions { $$ = $2; }
+;
 
 alter_table_actions:
 alter_table_action_list
@@ -17560,6 +17613,7 @@ ACCOUNT
 |       ADMIN
 |       AFTER
 |       AI
+|       RETRY
 |       AGAINST
 |       AGGREGATE
 |       ALGORITHM

@@ -25,6 +25,7 @@
 #include "sql/das/ob_das_lock_op.h"
 #include "sql/das/ob_das_utils.h"
 #include "sql/engine/dml/ob_trigger_handler.h"
+#include "sql/engine/dml/ob_ai_column_dml_handler.h"
 #include "share/autoincrement/ob_i_tablet_autoincrement_service.h"
 #include "data_plane/lob/ob_lob_read.h"
 #include "data_plane/transaction/ob_i_transaction_service.h"
@@ -2179,6 +2180,12 @@ int ObDMLService::handle_after_processing_multi_row(ObDMLModifyRowsList *dml_mod
           } else if (OB_FAIL(TriggerHandle::do_handle_after_row(op, dml_ctdef.trig_ctdef_, dml_rtdef.trig_rtdef_, dml_event))) {
           }
         }
+        // process ai column
+        if (OB_SUCC(ret) && dml_ctdef.is_ai_column_table_) {
+          if (OB_FAIL(AiColumnDmlHandler::process_row(op, dml_ctdef, modify_row, dml_event))) {
+            LOG_WARN("failed to process ai column", K(ret), K(dml_event));
+          }
+        }
       }
     }
 
@@ -2218,6 +2225,12 @@ int ObDMLService::handle_after_processing_single_row(ObDMLModifyRowNode &modify_
       }
     }
     if (OB_SUCC(ret) && OB_FAIL(TriggerHandle::do_handle_after_row(op, dml_ctdef.trig_ctdef_, dml_rtdef.trig_rtdef_, dml_event))) {
+    }
+    // process ai column
+    if (OB_SUCC(ret) && dml_ctdef.is_ai_column_table_) {
+      if (OB_FAIL(AiColumnDmlHandler::process_row(op, dml_ctdef, modify_row, dml_event))) {
+        LOG_WARN("failed to process ai column", K(ret), K(dml_event));
+      }
     }
   }
   return ret;

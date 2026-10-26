@@ -688,6 +688,9 @@ public:
   int64_t temp_table_count_;
   int64_t anonymous_view_count_;
   // record all system variables or user variables in this statement
+  bool ai_collect_reference_ = false;
+  uint64_t ai_retry_column_id_ = common::OB_INVALID_ID;
+  common::ObSEArray<common::ObString, 4> ai_column_read_checks_;
   common::ObSArray<ObVarInfo, common::ModulePageAllocator, true> variables_;
   common::ObSArray<ObPCConstParamInfo, common::ModulePageAllocator, true> all_plan_const_param_constraints_;
   common::ObSArray<ObPCConstParamInfo, common::ModulePageAllocator, true> all_possible_const_param_constraints_;

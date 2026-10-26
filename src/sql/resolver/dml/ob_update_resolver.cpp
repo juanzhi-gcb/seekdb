@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/dml/ob_update_resolver.h"
+#include "share/schema/ob_ai_column_spec.h"
 
 namespace oceanbase
 {
@@ -39,7 +40,10 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
   int ret = OB_SUCCESS;
   ObUpdateStmt *update_stmt = NULL;
   ObSEArray<ObTableAssignment, 2> tables_assign;
-  if (T_UPDATE != parse_tree.type_
+  if (parse_tree.reserved_ == 0x41494353) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI COLUMN RETRY with another ALTER action");
+  } else if (T_UPDATE != parse_tree.type_
       || 3 > parse_tree.num_child_
       || OB_ISNULL(parse_tree.children_)
       || OB_ISNULL(session_info_)) {
@@ -74,6 +78,47 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
   if (OB_SUCC(ret)) {
     ParseNode *table_node = parse_tree.children_[TABLE];
     if (OB_FAIL(resolve_table_list(*table_node))) {
+    }
+  }
+
+  if (OB_SUCC(ret) && parse_tree.reserved_ == 0x41494352) {
+    const ObTableSchema *table = nullptr;
+    ParseNode *target = parse_tree.children_[UPDATE_LIST]->children_[0]->children_[0]->children_[2];
+    ObString name(target->str_len_, target->str_value_);
+    ObString spec_name, state_name;
+    if (update_stmt->get_table_items().count() != 1) {
+      ret = OB_NOT_SUPPORTED;
+    } else if (OB_FAIL(schema_checker_->get_table_schema(update_stmt->get_table_items().at(0)->ref_id_, table))) {
+    } else if (OB_ISNULL(table)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      using share::schema::AiColumnSpec;
+      OZ(AiColumnSpec::build_spec_column_name(*allocator_, name, spec_name));
+      const ObColumnSchemaV2 *spec = table->get_column_schema(spec_name);
+      const ObColumnSchemaV2 *column = table->get_column_schema(name);
+      if (OB_SUCC(ret) && (spec == nullptr || !spec->is_hidden()
+          || !AiColumnSpec::has_prefix(spec->get_comment_str()) || column == nullptr)) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "retrying a column that is not an AI column");
+      }
+      if (OB_SUCC(ret)) {
+        params_.query_ctx_->ai_retry_column_id_ = column->get_column_id();
+        OZ(AiColumnSpec::build_state_column_name(*allocator_, name, state_name));
+        auto replace_status = [&](auto &&self, ParseNode *node) -> void {
+          if (node == nullptr) { return; }
+          if (node->type_ == T_COLUMN_REF && node->num_child_ == 3
+              && node->children_[0] == nullptr && node->children_[1] == nullptr
+              && node->children_[2] != nullptr) {
+            ParseNode *id = node->children_[2];
+            if (!id->is_input_quoted_ && ObString(id->str_len_, id->str_value_).case_compare("status") == 0) {
+              id->str_value_ = state_name.ptr();
+              id->str_len_ = state_name.length();
+            }
+          }
+          for (int64_t i = 0; i < node->num_child_; ++i) { self(self, node->children_[i]); }
+        };
+        replace_status(replace_status, parse_tree.children_[WHERE]);
+      }
     }
   }
 

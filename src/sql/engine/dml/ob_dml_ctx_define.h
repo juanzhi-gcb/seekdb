@@ -414,6 +414,7 @@ public:
                        K_(view_check_exprs),
                        K_(is_primary_index),
                        K_(is_table_without_pk),
+                       K_(is_ai_column_table),
                        KPC_(trans_info_expr));
 
   ObDMLOpType dml_type_;
@@ -438,6 +439,10 @@ public:
   bool reserved_advanced_trigger_;
   ObExpr *trans_info_expr_;
   bool is_vec_hnsw_index_vid_opt_;
+  // the target table has at least one AI column, so the after row hook has to
+  // maintain the hidden AI column state and the async task rows
+  uint64_t ai_retry_column_id_;
+  bool is_ai_column_table_;
 protected:
   ObDMLBaseCtDef(common::ObIAllocator &alloc,
                  ObDASDMLBaseCtDef &das_base_ctdef,
@@ -456,7 +461,9 @@ protected:
       is_table_without_pk_(false),
       reserved_advanced_trigger_(false),
       trans_info_expr_(nullptr),
-      is_vec_hnsw_index_vid_opt_(false)
+      is_vec_hnsw_index_vid_opt_(false),
+      ai_retry_column_id_(common::OB_INVALID_ID),
+      is_ai_column_table_(false)
   { }
 };
 

@@ -364,6 +364,13 @@ private:
       int64_t &column_count);
   int batch_add_columns_for_create_table(common::ObISQLClient &sql_client,
       const ObIArray<ObTableSchema> &table);
+  // AI column: persist the definition carried by a hidden spec column into
+  // __all_ai_column.  Columns without an AI spec comment are ignored.
+  int add_ai_column_metadata(common::ObISQLClient &sql_client,
+      const ObTableSchema &table_schema,
+      const ObColumnSchemaV2 &spec_column);
+  int batch_add_ai_column_metadata(common::ObISQLClient &sql_client,
+      const ObIArray<ObTableSchema> &tables);
   int add_columns_for_core(common::ObISQLClient &sql_client, const ObTableSchema &table);
   int add_columns_for_not_core(common::ObISQLClient &sql_client, const ObTableSchema &table);
   int add_constraints(common::ObISQLClient &sql_client, const ObTableSchema &table);

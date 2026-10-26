@@ -2446,6 +2446,65 @@ all_ai_model_endpoint_def = dict(
 )
 def_table_schema(**all_ai_model_endpoint_def)
 
+all_ai_column_def = dict(
+    owner = 'shenyunlong.syl',
+    table_name = '__all_ai_column',
+    table_id = '1131',
+    table_type = 'SYSTEM_TABLE',
+    gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [
+      ('table_id', 'int'),
+      ('column_id', 'int')
+    ],
+
+    is_cluster_private = False,
+    meta_record_in_sys = False,
+    normal_columns = [
+        ('database_name', 'varchar:128'),
+        ('table_name', 'varchar:128'),
+        ('column_name', 'varchar:128', 'false'),
+        ('model_name', 'varchar:128', 'false'),
+        ('function_type', 'int', 'false'),
+        ('result_type', 'int', 'false'),
+        ('prompt_expr', 'varchar:8192', 'true'),
+        ('normalized_expr', 'varchar:8192', 'true'),
+        ('sync_mode', 'varchar:16'),
+        ('max_retries', 'int', 'false'),
+        ('embed_dim', 'int'),
+        ('state_column_id', 'int', 'false'),
+        ('request_column_id', 'int', 'false'),
+        ('result_spec_column_id', 'int', 'false')
+    ]
+)
+def_table_schema(**all_ai_column_def)
+
+all_ai_column_task_def = dict(
+    owner = 'shenyunlong.syl',
+    table_name = '__all_ai_column_task',
+    table_id = '1132',
+    table_type = 'SYSTEM_TABLE',
+    gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [
+      ('table_id', 'int'),
+      ('column_id', 'int'),
+      ('rowkey_predicate', 'varchar:512')
+    ],
+
+    is_cluster_private = False,
+    meta_record_in_sys = False,
+    normal_columns = [
+        ('database_name', 'varchar:128'),
+        ('table_name', 'varchar:128'),
+        ('column_name', 'varchar:128'),
+        ('request_id', 'varchar:128', 'false'),
+        ('request_text', 'varchar:8192', 'true'),
+        ('state', 'int', 'false'),
+        ('retry_count', 'int', 'false', '0'),
+        ('eligible_ts', 'timestamp', 'true')
+    ]
+)
+def_table_schema(**all_ai_column_task_def)
+
 
 all_objauth_mysql_def = dict(
     owner = 'cjl476581',

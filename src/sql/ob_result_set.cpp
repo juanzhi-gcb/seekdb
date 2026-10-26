@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL
 #include "ob_result_set.h"
+#include "query/session/ob_inner_sql_connection_access.h"
+#include "sql/session/ob_inner_sql_connection.h"
 #include "data_plane/transaction/ob_tx_desc_access.h"
 #include "share/rc/ob_server_runtime.h"
 #include "sql/resolver/dml/ob_del_upd_stmt.h"
@@ -41,6 +43,70 @@ namespace sql
 {
 namespace
 {
+// Run on every plan execution, including cache hits, in the user's transaction.
+int check_ai_column_reads(ObExecContext &ctx, const ObPhysicalPlan &plan)
+{
+  int ret = OB_SUCCESS;
+  ObSQLSessionInfo *session = ctx.get_my_session();
+  ObObj strict;
+  int64_t unfinished_table_id = 0, unfinished_column_id = 0;
+  if (plan.get_ai_column_read_checks().empty() || session->is_inner()
+      || ctx.get_das_ctx().ai_column_processing_
+      || (ctx.get_parent_ctx() != nullptr && ctx.get_parent_ctx()->get_das_ctx().ai_column_processing_)) {
+    return ret;
+  }
+  if (OB_FAIL(session->get_sys_variable(SYS_VAR_AI_COLUMN_STRICT_READ, strict))) {
+  } else if (strict.get_int() != 0) {
+    common::sqlclient::ObISQLConnectionGuard guard;
+    bool created = session->get_inner_conn() == nullptr;
+    if (created && OB_FAIL(query::ObInnerSQLConnectionAccess::create_connection_with_external_session(session, guard))) {
+    } else {
+      if (created) { session->set_inner_conn(guard.get_ptr()); }
+      ObIInnerSQLConnection *conn = as_inner_sql_connection(session->get_inner_conn());
+      ObSQLSessionInfo::StmtSavedValue saved_session;
+      ObIInnerSQLConnection::SavedValue saved_conn;
+      if (OB_ISNULL(conn)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(conn->begin_nested_session(saved_session, saved_conn, true))) {
+      } else {
+        const bool processing = ctx.get_das_ctx().ai_column_processing_;
+        ctx.get_das_ctx().ai_column_processing_ = true;
+        for (int64_t i = 0; OB_SUCC(ret) && i < plan.get_ai_column_read_checks().count(); ++i) {
+          SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+            if (OB_FAIL(conn->execute_read(plan.get_ai_column_read_checks().at(i).ptr(), result))) {
+            } else if (OB_ISNULL(result.get_result())) {
+              ret = OB_ERR_UNEXPECTED;
+            } else {
+              int next_ret = result.get_result()->next();
+              if (OB_ITER_END == next_ret) {
+              } else if (OB_SUCCESS != next_ret) {
+                ret = next_ret;
+              } else {
+                int64_t tid = 0, cid = 0;
+                OZ(result.get_result()->get_int(int64_t(0), tid));
+                OZ(result.get_result()->get_int(int64_t(1), cid));
+                if (OB_SUCC(ret)) {
+                  ret = OB_ERR_AI_COLUMN_UNFINISHED;
+                  unfinished_table_id = tid;
+                  unfinished_column_id = cid;
+                }
+              }
+            }
+          }
+        }
+        ctx.get_das_ctx().ai_column_processing_ = processing;
+        const int end_ret = conn->end_nested_session(saved_session, saved_conn);
+        if (OB_SUCC(ret)) { ret = end_ret; }
+      }
+      if (created) { session->set_inner_conn(nullptr); }
+    }
+  }
+  if (ret == OB_ERR_AI_COLUMN_UNFINISHED) {
+    LOG_USER_ERROR(OB_ERR_AI_COLUMN_UNFINISHED, unfinished_table_id, unfinished_column_id);
+  }
+  return ret;
+}
+
 int find_table_scan_table_id(const ObOpSpec *spec, uint64_t &table_id)
 {
   int ret = OB_SUCCESS;
@@ -462,6 +528,7 @@ OB_INLINE int ObResultSet::do_open_plan(ObExecContext &ctx)
 
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(start_stmt())) {
+  } else if (OB_FAIL(check_ai_column_reads(ctx, *physical_plan_))) {
   } else {
     /* Set exec_result_ to the executor's runtime environment for returning data */
     /* execute plan,
