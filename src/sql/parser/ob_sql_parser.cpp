@@ -33,7 +33,7 @@ int ObSQLParser::parse(const char * str_ptr, const int64_t str_len, ParseResult 
   if (OB_FAIL(parse_init(&result))) {
     // do nothing
   } else if (OB_FAIL(parse_sql(&result, str_ptr, static_cast<size_t>(str_len)))) {
-    LOG_WARN("file SQL parser diagnostic", K(ret), KCSTRING(result.error_msg_), K(result.extra_errno_));
+    // do nothing
   }
   return ret;
 }
