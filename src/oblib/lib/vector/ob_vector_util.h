@@ -80,6 +80,9 @@ int add_index(obvsag::VectorIndexPtr index_handler,float* vector_list, int64_t* 
 int add_index(obvsag::VectorIndexPtr &index_handler, uint32_t *lens, uint32_t *dims, float *vals, int64_t *ids, int size,
     char *extra_infos = nullptr);
 
+int append_batch_index(obvsag::VectorIndexPtr index_handler, float *vectors, int64_t *ids,
+    int dim, char *extra_info, int size);
+int finalize_batch_build(obvsag::VectorIndexPtr index_handler);
 int get_index_number(obvsag::VectorIndexPtr index_handler, int64_t &size);
 
 int get_index_type(obvsag::VectorIndexPtr index_handler);

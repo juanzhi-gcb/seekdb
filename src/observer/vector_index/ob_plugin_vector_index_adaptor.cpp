@@ -1675,7 +1675,7 @@ int ObPluginVectorIndexAdaptor::parse_sparse_vector(char *data, int num, uint32_
    In the scenario where a large amount of data is written, there will be a lot of unnecessary performance consumption,
    so the caller needs to ensure this.
 **************************************************************************/
-int ObPluginVectorIndexAdaptor::add_snap_index(float *vectors, int64_t *vids, ObVecExtraInfoObj *extra_objs, int64_t extra_column_count, int num, uint32_t *sparse_byte_lens /* nullptr */)
+int ObPluginVectorIndexAdaptor::add_snap_index(float *vectors, int64_t *vids, ObVecExtraInfoObj *extra_objs, int64_t extra_column_count, int num, uint32_t *sparse_byte_lens /* nullptr */, bool batch_build /* false */)
 {
   INIT_SUCC(ret);
   int64_t dim = 0;
@@ -1714,7 +1714,10 @@ int ObPluginVectorIndexAdaptor::add_snap_index(float *vectors, int64_t *vids, Ob
           lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr("VIndexVsagADP"));
           lib::ObLightBacktraceGuard light_backtrace_guard(false);
           if (!is_sparse_vector_index_type()) {
-            if (OB_FAIL(obvectorutil::add_index(snap_data_->index_, vectors, vids, dim, extra_info_buf, num))) {
+            if (batch_build && param->type_ == ObVectorIndexAlgorithmType::VIAT_HNSW) {
+              if (OB_FAIL(obvectorutil::append_batch_index(snap_data_->index_, vectors, vids, dim, extra_info_buf, num))) {
+              }
+            } else if (OB_FAIL(obvectorutil::add_index(snap_data_->index_, vectors, vids, dim, extra_info_buf, num))) {
             }
           } else {
             if (OB_FAIL(obvectorutil::add_index(snap_data_->index_, lens, dims, vals, vids, num, extra_info_buf))) {
@@ -1994,6 +1997,19 @@ int ObPluginVectorIndexAdaptor::inherit_index_id_watermarks_from(ObPluginVectorI
       if (old_last_read_scn.is_valid() && old_last_read_scn > incr_data_->last_read_scn_) {
         incr_data_->last_read_scn_.atomic_set(old_last_read_scn);
       }
+    }
+  }
+  return ret;
+}
+
+int ObPluginVectorIndexAdaptor::finalize_snap_batch_build()
+{
+  int ret = OB_SUCCESS;
+  if (OB_NOT_NULL(snap_data_)) {
+    lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr("VIndexVsagADP"));
+    lib::ObLightBacktraceGuard light_backtrace_guard(false);
+    if (OB_FAIL(obvectorutil::finalize_batch_build(snap_data_->index_))) {
+      LOG_WARN("[HIPVS_BUILD] failed to finalize DDL snapshot batch; no CPU fallback", K(ret));
     }
   }
   return ret;

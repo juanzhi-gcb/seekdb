@@ -134,6 +134,17 @@ int build_index(obvsag::VectorIndexPtr &index_handler, uint32_t *lens, uint32_t 
   return obvsag::build_index(index_handler, lens, dims, vals, ids, size, extra_infos);
 }
 
+int append_batch_index(obvsag::VectorIndexPtr index_handler, float *vectors, int64_t *ids,
+    int dim, char *extra_info, int size)
+{
+  return obvsag::append_batch_index(index_handler, vectors, ids, dim, size, extra_info);
+}
+
+int finalize_batch_build(obvsag::VectorIndexPtr index_handler)
+{
+  return obvsag::finalize_batch_build(index_handler);
+}
+
 int add_index(obvsag::VectorIndexPtr index_handler, float* vector_list, int64_t* ids, int dim, char *extra_info, int size)
 {
   return obvsag::add_index(index_handler, vector_list, ids, dim, size, extra_info);

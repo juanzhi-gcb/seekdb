@@ -18,6 +18,10 @@
 
 #include "ob_vsag_adaptor.h"
 #include <map>
+#include <mutex>
+#include <cstring>
+#include <stdexcept>
+#include "hipvs_batch.h"
 #include "vsag/vsag.h"
 #include "vsag/errors.h"
 #include "vsag/dataset.h"
@@ -145,7 +149,9 @@ public:
     LOG_INFO("[OBVSAG] after deconstruction, hnsw index", KP(allocator_), K(index_.use_count()), K(lbt()));
   }
   int build_index(const vsag::DatasetPtr &base);
-  int get_index_number();
+  int64_t get_index_number();
+  int append_batch_index(float *vectors, int64_t *ids, int dim, int count, char *extra_info);
+  int finalize_batch_build();
   int add_index(const vsag::DatasetPtr &incremental);
   int cal_distance_by_id(const float *vector, const int64_t *ids, int64_t count,
                          const float *&dist);
@@ -213,6 +219,11 @@ private:
   bool use_reorder_;
   float doc_prune_ratio_;
   int window_size_;
+  // Only the DDL append API enters this state; online Add retains its existing behavior.
+  std::mutex batch_mutex_;
+  std::unique_ptr<hipvs::BuildBatch> batch_;
+  hipvs::BuildOptions batch_options_{};
+  bool batch_finalized_ = false;
 };
 
 int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
@@ -234,9 +245,114 @@ int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
   return ret;
 }
 
-int HnswIndexHandler::get_index_number()
+int64_t HnswIndexHandler::get_index_number()
 {
-  return index_->GetNumElements();
+  std::lock_guard<std::mutex> guard(batch_mutex_);
+  return index_->GetNumElements() + (batch_ ? batch_->count() : 0);
+}
+
+int HnswIndexHandler::append_batch_index(float *vectors, int64_t *ids, int dim,
+                                       int count, char *extra_info)
+{
+  int ret = OB_SUCCESS;
+  std::lock_guard<std::mutex> guard(batch_mutex_);
+  try {
+    if (index_type_ != HNSW_TYPE || dtype_ == nullptr || std::strcmp(dtype_, "float32") != 0 ||
+        metric_ == nullptr || (std::strcmp(metric_, "l2") != 0 && std::strcmp(metric_, "ip") != 0) ||
+        extra_info_size_ != 0 || extra_info != nullptr || use_static_) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_WARN("[HIPVS_BUILD] unsupported HNSW batch configuration; no CPU fallback", K(ret), K(index_type_), K(dim));
+    } else if (batch_finalized_ || index_->GetNumElements() != 0) {
+      ret = OB_STATE_NOT_MATCH;
+      LOG_WARN("[HIPVS_BUILD] cannot append to a finalized or nonempty index; no CPU fallback", K(ret));
+    } else {
+      if (!batch_) {
+        batch_options_ = hipvs::BuildOptions::from_environment();
+        batch_.reset(new hipvs::BuildBatch(dim_, batch_options_.input_limit));
+      }
+      batch_->append(vectors, ids, dim, count);
+    }
+  } catch (const std::bad_alloc &error) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("[HIPVS_BUILD] append failed; no CPU fallback", K(ret), "what", error.what());
+  } catch (const std::invalid_argument &error) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("[HIPVS_BUILD] append failed; no CPU fallback", K(ret), "what", error.what());
+  } catch (const std::exception &error) {
+    ret = OB_ERR_VSAG_RETURN_ERROR;
+    LOG_WARN("[HIPVS_BUILD] append failed; no CPU fallback", K(ret), "what", error.what());
+  } catch (...) {
+    ret = OB_ERR_VSAG_RETURN_ERROR;
+    LOG_WARN("[HIPVS_BUILD] append failed with unknown exception; no CPU fallback", K(ret));
+  }
+  return ret;
+}
+
+int HnswIndexHandler::finalize_batch_build()
+{
+  int ret = OB_SUCCESS;
+  std::lock_guard<std::mutex> guard(batch_mutex_);
+  if (batch_ && batch_->count() > 0) {
+    const uint64_t input_count = batch_->count();
+    const int degree = max_degree_;
+    const int device = batch_options_.device;
+    SeekdbHipvsBuildStats stats{};
+    char factory_parameters[1024] = {};
+    try {
+      if (OB_FAIL(construct_vsag_create_param(uint8_t(index_type_), dtype_, metric_, dim_,
+          max_degree_, ef_construction_, ef_search_, allocator_, extra_info_size_,
+          refine_type_, bq_bits_query_, bq_use_fht_, factory_parameters))) {
+        LOG_WARN("[HIPVS_BUILD] failed to construct VSAG parameters; no CPU fallback", K(ret));
+      } else {
+        const hipvs::ImportConfig config{dim_, max_degree_, metric_, factory_parameters};
+        auto replacement = batch_->finalize(batch_options_.library_path, config,
+            ef_construction_, batch_options_.cpu_threads, device,
+            batch_options_.export_limit, stats, allocator_,
+            batch_options_.worker_path, batch_options_.worker_timeout_seconds);
+        // Publish only after the complete graph has passed validation, import and VID remapping.
+        index_ = std::move(replacement);
+        batch_finalized_ = true;
+        batch_.reset();
+      }
+    } catch (const std::bad_alloc &error) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("[HIPVS_BUILD] finalize exception; no CPU fallback", K(ret), "what", error.what());
+    } catch (const std::invalid_argument &error) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_WARN("[HIPVS_BUILD] finalize exception; no CPU fallback", K(ret), "what", error.what());
+    } catch (const std::exception &error) {
+      ret = OB_ERR_VSAG_RETURN_ERROR;
+      LOG_WARN("[HIPVS_BUILD] finalize exception; no CPU fallback", K(ret), "what", error.what());
+    } catch (...) {
+      ret = OB_ERR_VSAG_RETURN_ERROR;
+      LOG_WARN("[HIPVS_BUILD] unknown finalize exception; no CPU fallback", K(ret));
+    }
+    if (OB_SUCC(ret)) {
+      LOG_INFO("[HIPVS_BUILD] success", K(input_count), K(degree), K(device),
+          "actual_backend", "hipvs", "indexed_count", index_->GetNumElements(),
+          "device_name", stats.device_name, "version", stats.version,
+          "bridge_wall_ms", stats.bridge_wall_ms, "gpu_build_ms", stats.gpu_build_ms,
+          "gpu_build_submissions", stats.gpu_build_submissions);
+    } else {
+      // Keep the original batch alive for the caller's failure cleanup (or retry).
+      LOG_WARN("[HIPVS_BUILD] explicit failure; no CPU fallback", K(ret), K(input_count), K(degree), K(device),
+          "device_name", stats.device_name, "version", stats.version,
+          "bridge_wall_ms", stats.bridge_wall_ms, "gpu_build_ms", stats.gpu_build_ms,
+          "gpu_build_submissions", stats.gpu_build_submissions);
+    }
+  } else if (!batch_finalized_ && hipvs::selected_build_backend() == hipvs::BuildBackend::HIPVS) {
+    const int64_t input_count = index_->GetNumElements();
+    if (input_count > 0) {
+      LOG_INFO("[HIPVS_BUILD] actual_backend=cpu, gpu_build_submissions=0, reason=no_eligible_ddl_batch",
+          K(input_count), K(index_type_));
+    } else {
+      LOG_INFO("[HIPVS_BUILD] skipped_empty, gpu_build_submissions=0", K(input_count), K(index_type_));
+    }
+  } else if (!batch_finalized_) {
+    LOG_INFO("[HIPVS_BUILD] actual_backend=cpu, gpu_build_submissions=0, reason=cpu_selected",
+        "indexed_count", index_->GetNumElements(), K(index_type_));
+  }
+  return ret;
 }
 
 int HnswIndexHandler::add_index(const vsag::DatasetPtr &incremental)
@@ -326,7 +442,7 @@ int HnswIndexHandler::get_vid_bound(int64_t &min_vid, int64_t &max_vid)
 
 uint64_t HnswIndexHandler::estimate_memory(const uint64_t row_count, const bool is_build)
 {
-  
+  std::lock_guard<std::mutex> guard(batch_mutex_);
   uint64_t size = 0;
   if (IPIVF_TYPE == index_type_) {
     // TODO(ningxin.ning): use vsag EstimateMemory
@@ -345,6 +461,11 @@ uint64_t HnswIndexHandler::estimate_memory(const uint64_t row_count, const bool 
     } else {
       size += (row_count * dim_ * sizeof(float));
     }
+  }
+  if (batch_) {
+    // The buffer payload limit does not bound graph/export/import workspace or process RSS.
+    const uint64_t buffered_bytes = batch_->reserved_bytes();
+    size = size > UINT64_MAX - buffered_bytes ? UINT64_MAX : size + buffered_bytes;
   }
   return size;
 }
@@ -1005,6 +1126,43 @@ int build_index(VectorIndexPtr &index_handler, uint32_t *lens, uint32_t *dims, f
     }
     if (OB_FAIL(handler->build_index(dataset))) {
     }
+  }
+  return ret;
+}
+
+int append_batch_index(VectorIndexPtr &index_handler, float *vectors, int64_t *ids,
+                       int dim, int count, char *extra_info)
+{
+  int ret = OB_SUCCESS;
+  if (index_handler == nullptr) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    try {
+      if (hipvs::selected_build_backend() == hipvs::BuildBackend::CPU) {
+        ret = add_index(index_handler, vectors, ids, dim, count, extra_info);
+      } else {
+        ret = static_cast<HnswIndexHandler *>(index_handler)->append_batch_index(vectors, ids, dim, count, extra_info);
+      }
+    } catch (const std::invalid_argument &error) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_WARN("[HIPVS_BUILD] backend selection failed; no CPU fallback", K(ret), "what", error.what());
+    }
+  }
+  return ret;
+}
+
+int finalize_batch_build(VectorIndexPtr &index_handler)
+{
+  int ret = OB_SUCCESS;
+  try {
+    if (index_handler != nullptr) {
+      ret = static_cast<HnswIndexHandler *>(index_handler)->finalize_batch_build();
+    } else if (hipvs::selected_build_backend() == hipvs::BuildBackend::HIPVS) {
+      LOG_INFO("[HIPVS_BUILD] skipped_empty, input_count=0, gpu_build_submissions=0");
+    }
+  } catch (const std::invalid_argument &error) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("[HIPVS_BUILD] backend selection failed; no CPU fallback", K(ret), "what", error.what());
   }
   return ret;
 }

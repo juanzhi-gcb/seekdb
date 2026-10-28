@@ -125,6 +125,10 @@ int build_index(VectorIndexPtr &index_handler, uint32_t *lens, uint32_t *dims, f
 int add_index(VectorIndexPtr& index_handler, float* vector, int64_t* ids, int dim, int size, char *extra_info = nullptr);
 int add_index(VectorIndexPtr &index_handler, uint32_t *lens, uint32_t *dims, float *vals, int64_t *ids, int size,
     char *extra_info = nullptr);
+// DDL-only: CPU builds use Add immediately; explicit hipvs builds own a batch until finalize.
+int append_batch_index(VectorIndexPtr &index_handler, float *vectors, int64_t *ids,
+    int dim, int count, char *extra_info = nullptr);
+int finalize_batch_build(VectorIndexPtr &index_handler);
 int get_index_number(VectorIndexPtr& index_handler, int64_t &size);
 int get_index_type(VectorIndexPtr& index_handler);
 int cal_distance_by_id(VectorIndexPtr& index_handler, const float* vector, const int64_t* ids, int64_t count, const float *&distances);

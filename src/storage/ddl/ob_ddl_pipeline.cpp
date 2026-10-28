@@ -886,7 +886,7 @@ int ObHNSWIndexAppendBufferOperator::append_row(
     uint32_t vec_length = vec_str.length();
     if (OB_FAIL(ret)) {
     } else if (OB_FAIL(adaptor_guard.get_adatper()->add_snap_index(reinterpret_cast<float *>(vec_str.ptr()),
-                                                                   &vec_vid, extra_obj, extra_column_count, 1, &vec_length))) {
+                                                                   &vec_vid, extra_obj, extra_column_count, 1, &vec_length, true))) {
     } else {
     }
   }
@@ -1009,6 +1009,8 @@ int ObHNSWIndexBuildOperator::serialize_vector_index(
       ObPluginVectorIndexAdaptor *adp = adaptor_guard.get_adatper();
       if (OB_FAIL(adp->check_snap_hnswsq_index())) {
         LOG_WARN("failed to check snap hnswsq index", K(ret));
+      } else if (OB_FAIL(adp->finalize_snap_batch_build())) {
+        LOG_WARN("[HIPVS_BUILD] failed to finalize snapshot batch; no CPU fallback", K(ret));
       } else if (OB_FAIL(adp->set_snapshot_key_prefix(tablet_id_.id(), ctx.snapshot_version_, OB_VEC_IDX_SNAPSHOT_KEY_LENGTH))) {
         LOG_WARN("failed to set snapshot key prefix", K(ret), K(tablet_id_.id()), K(ctx.snapshot_version_));
       } else if (OB_FAIL(adp->serialize(&row_allocator_, param, cb))) {

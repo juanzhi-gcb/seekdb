@@ -1365,6 +1365,9 @@ OBLIB_HEADER_TARGETS = {
     "oblib_vector": {
         "hdrs": [
         "lib/vector/ob_vector_util.h",
+        "lib/vector/hipvs_bridge_abi.h",
+        "lib/vector/hipvs_hnsw_import.h",
+        "lib/vector/hipvs_batch.h",
     ],
         "deps": [
         ":oblib_memory_utilities",
@@ -1772,6 +1775,9 @@ OBLIB_HEADER_TARGET_FOR_HEADER = {
     "lib/utility/serialization.h": ":oblib_foundation_support",
     "lib/utility/utility.h": ":oblib_core_advanced",
     "lib/vector/ob_vector_util.h": ":oblib_vector",
+    "lib/vector/hipvs_bridge_abi.h": ":oblib_vector",
+    "lib/vector/hipvs_hnsw_import.h": ":oblib_vector",
+    "lib/vector/hipvs_batch.h": ":oblib_vector",
     "lib/vector/ob_vsag_adaptor.h": ":oblib_vector_primitives",
     "lib/wait_event/ob_inner_sql_wait_type.h": ":oblib_diagnostics_primitives",
     "lib/wait_event/ob_wait_class.h": ":oblib_foundation_base",
