@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "share/schema/ob_ai_column_spec.h"
+#include "sql/engine/basic/ob_file_sql_engine.h"
 #include "config_bridge.h"
 #include "ob_dml_resolver.h"
 #include "sql/resolver/dml/ob_view_table_resolver.h"
@@ -2743,6 +2744,10 @@ int ObDMLResolver::resolve_table(const ParseNode &parse_tree,
         } else {
           table_item = root;
         }
+        break;
+      }
+      case T_FILE_TABLE_EXPRESSION: {
+        OZ(resolve_file_table_item(*table_node, table_item));
         break;
       }
       case T_TABLE_COLLECTION_EXPRESSION: {
@@ -7690,6 +7695,8 @@ int ObDMLResolver::resolve_function_table_column_item_sys_func(const TableItem &
   CK (OB_NOT_NULL(table_expr = table_item.function_table_expr_));
   OZ (table_expr->deduce_type(session_info_));
   if (OB_FAIL(ret)) { // do nothing ...
+  } else if (is_file_table_expression(table_expr)) {
+    return resolve_file_table_columns(table_item, col_items);
   } else if (!ObResolverUtils::is_expr_can_be_used_in_table_function(*table_expr)) {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "access rows from a non-nested table item");
