@@ -62,6 +62,7 @@ struct ObTokenizeMemoEntry
 
   bool valid_;
   uint64_t hash_;
+  bool raw_arguments_;
   int64_t mode_;
   int64_t collation_;
   int64_t parser_name_len_;
@@ -80,6 +81,8 @@ struct ObTokenizeMemo
   int64_t next_;
 };
 
+// Raw SQL names and normalized internal names use distinct memo identities:
+// "space.1" is valid internally but must still be rejected as a public name.
 // Zero initialized for every thread, no constructor needed.
 thread_local ObTokenizeMemo TLS_TOKENIZE_MEMO;
 
@@ -137,6 +140,7 @@ bool tokenize_memo_lookup(const common::ObString &parser_name,
                           const common::ObString &text,
                           const int64_t mode,
                           const int64_t collation,
+                          const bool raw_arguments,
                           common::ObString &result)
 {
   bool found = false;
@@ -145,6 +149,7 @@ bool tokenize_memo_lookup(const common::ObString &parser_name,
   for (int64_t i = 0; !found && i < TOKENIZE_MEMO_ENTRY_CNT; ++i) {
     ObTokenizeMemoEntry &entry = entries[i];
     if (entry.valid_
+        && entry.raw_arguments_ == raw_arguments
         && entry.hash_ == hash
         && entry.mode_ == mode
         && entry.collation_ == collation
@@ -163,6 +168,7 @@ void tokenize_memo_store(const common::ObString &parser_name,
                          const common::ObString &text,
                          const int64_t mode,
                          const int64_t collation,
+                         const bool raw_arguments,
                          const common::ObString &result)
 {
   if (tokenize_memo_fits(parser_name, properties, text)
@@ -171,6 +177,7 @@ void tokenize_memo_store(const common::ObString &parser_name,
     ObTokenizeMemoEntry &entry = memo.entries_[memo.next_ % TOKENIZE_MEMO_ENTRY_CNT];
     memo.next_ = (memo.next_ + 1) % TOKENIZE_MEMO_ENTRY_CNT;
     entry.hash_ = tokenize_memo_hash(parser_name, properties, text, mode, collation);
+    entry.raw_arguments_ = raw_arguments;
     entry.mode_ = mode;
     entry.collation_ = collation;
     entry.parser_name_len_ = parser_name.length();
@@ -235,7 +242,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
       const bool memo_eligible = tokenize_memo_fits(name, no_properties, text);
       ObString cached_result;
       if (memo_eligible
-          && tokenize_memo_lookup(name, no_properties, text, mode, collation, cached_result)) {
+          && tokenize_memo_lookup(name, no_properties, text, mode, collation, true/*raw arguments*/, cached_result)) {
         if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, cached_result))) {
         }
       } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
@@ -255,7 +262,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
                                                     json_result,
                                                     expr_datum))) {
         } else if (has_raw_result) {
-          tokenize_memo_store(name, no_properties, text, mode, collation, raw_result);
+          tokenize_memo_store(name, no_properties, text, mode, collation, true/*raw arguments*/, raw_result);
         }
       }
     }
@@ -272,6 +279,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
                                 param.fulltext_,
                                 static_cast<int64_t>(param.output_mode_),
                                 static_cast<int64_t>(param.meta_.get_collation_type()),
+                                false/*normalized arguments*/,
                                 cached_result)) {
       // Same text, parser and options as a recent call on this thread: reuse its result.
       if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr,
@@ -300,6 +308,7 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
                             param.fulltext_,
                             static_cast<int64_t>(param.output_mode_),
                             static_cast<int64_t>(param.meta_.get_collation_type()),
+                            false/*normalized arguments*/,
                             raw_result);
       }
     }
