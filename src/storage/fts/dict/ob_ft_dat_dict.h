@@ -60,6 +60,8 @@ public:
 
   size_t capacity() const { return header_.capacity_; }
 
+  const Entry *entries() const { return header_.data; }
+
   int init(size_t word_num);
 
   // no duplicate should be inserted
@@ -170,9 +172,13 @@ public:
   ObFTDATReader(ObFTDAT *dat) : dat_(dat) {}
 
   // Match single word with hit.
+  // bmp_code_table is an optional flat table (size 65536) that maps a BMP
+  // unicode code point to its word code; zero entry means absent. When it is
+  // provided, single BMP characters can skip the hash map probe.
   int match_with_hit(const ObString &single_word,
                      const ObDATrieHit &last_hit,
-                     ObDATrieHit &hit) const;
+                     ObDATrieHit &hit,
+                     const uint32_t *bmp_code_table = nullptr) const;
 
 private:
   ObFTDAT *dat_;

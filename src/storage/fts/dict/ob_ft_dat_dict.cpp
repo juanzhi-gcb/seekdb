@@ -22,6 +22,8 @@
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/ob_allocator.h"
 #include "lib/allocator/page_arena.h"
+#include "lib/charset/ob_charset.h"
+#include "lib/charset/ob_charset_string_helper.h"
 #include "lib/list/ob_list.h"
 #include "lib/oblog/ob_log_module.h"
 #include "lib/utility/ob_macro_utils.h"
@@ -249,22 +251,43 @@ int ObFTDATBuilder<DATA_TYPE>::encode(const ObString &word, ObFTWordCode &code, 
 template <typename DATA_TYPE>
 int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
                                              const ObDATrieHit &last_hit,
-                                             ObDATrieHit &hit) const
+                                             ObDATrieHit &hit,
+                                             const uint32_t *bmp_code_table) const
 {
   int ret = OB_SUCCESS;
-  ObFTWordCode code;
+  ObFTWordCode code = 0;
+  bool code_found = false;
   hit.set_unmatch();
-  auto *map = dat_->get_map();
   int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
   int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
 
-  ObFTSingleWord word;
-  word.set_word(ft_char.ptr(), ft_char.length());
-  if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
-  } else if (OB_ENTRY_NOT_EXIST == ret) {
-    ret = OB_SUCCESS;
-    hit.set_unmatch();
-  } else {
+  if (nullptr != bmp_code_table) {
+    // Fast path: decode the single character and get its code directly from
+    // the flat BMP code table, instead of hashing and probing the map. Word
+    // codes start from 1, so a zero entry means the char is absent.
+    ob_wc_t wc = 0;
+    const unsigned char *start = reinterpret_cast<const unsigned char *>(ft_char.ptr());
+    const unsigned char *end = start + ft_char.length();
+    const int char_len = common::ob_charset_decode_unicode<CHARSET_UTF8MB4>(start, end, wc);
+    if (char_len > 0 && char_len == ft_char.length() && wc <= 0xFFFF) {
+      code = static_cast<ObFTWordCode>(bmp_code_table[wc]);
+      code_found = (0 != code);
+    }
+  }
+
+  if (!code_found) {
+    ObFTSingleWord word;
+    word.set_word(ft_char.ptr(), ft_char.length());
+    if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
+    } else if (OB_ENTRY_NOT_EXIST == ret) {
+      ret = OB_SUCCESS;
+      hit.set_unmatch();
+    } else {
+      code_found = true;
+    }
+  }
+
+  if (OB_SUCC(ret) && code_found) {
     if (&last_hit == &hit) {
       // sameone
     } else {

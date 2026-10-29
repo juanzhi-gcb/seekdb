@@ -21,6 +21,7 @@
 
 #include "lib/allocator/ob_allocator.h"
 #include "lib/charset/ob_charset.h"
+#include "lib/charset/ob_charset_string_helper.h"
 #include "lib/ob_errno.h"
 #include "lib/oblog/ob_log_module.h"
 #include "lib/string/ob_string.h"
@@ -41,7 +42,7 @@ int ObFTCacheDict::init()
 
 int ObFTCacheDict::match(const ObString &single_word, ObDATrieHit &hit) const
 {
-  return reader_.match_with_hit(single_word, hit, hit);
+  return reader_.match_with_hit(single_word, hit, hit, bmp_code_table_);
 }
 
 int ObFTCacheDict::match(const ObString &words, bool &is_match) const
@@ -73,7 +74,42 @@ int ObFTCacheDict::match_with_hit(const ObString &single_word,
                                   const ObDATrieHit &last_hit,
                                   ObDATrieHit &hit) const
 {
-  return reader_.match_with_hit(single_word, last_hit, hit);
+  return reader_.match_with_hit(single_word, last_hit, hit, bmp_code_table_);
+}
+
+void ObFTCacheDict::build_bmp_code_table()
+{
+  if (OB_ISNULL(dat_)) {
+    // nothing to build
+  } else {
+    ObArrayHashMap *map = dat_->get_map();
+    if (OB_ISNULL(map)) {
+      // nothing to build
+    } else {
+      constexpr size_t BMP_TABLE_SIZE = 65536;
+      uint32_t *table =
+          static_cast<uint32_t *>(table_alloc_.alloc(BMP_TABLE_SIZE * sizeof(uint32_t)));
+      if (OB_NOT_NULL(table)) {
+        MEMSET(table, 0, BMP_TABLE_SIZE * sizeof(uint32_t));
+        const ObArrayHashMap::Entry *entries = map->entries();
+        for (size_t i = 0; i < map->capacity(); ++i) {
+          const ObArrayHashMap::Entry &entry = entries[i];
+          if (entry.used) {
+            const ObString word = entry.word.get_word();
+            ob_wc_t wc = 0;
+            const unsigned char *start = reinterpret_cast<const unsigned char *>(word.ptr());
+            const unsigned char *end = start + word.length();
+            const int char_len =
+                common::ob_charset_decode_unicode<CHARSET_UTF8MB4>(start, end, wc);
+            if (char_len > 0 && char_len == word.length() && wc <= 0xFFFF) {
+              table[wc] = static_cast<uint32_t>(entry.code);
+            }
+          }
+        }
+        bmp_code_table_ = table;
+      }
+    }
+  }
 }
 
 int ObFTCacheDict::make_and_fetch_cache_entry(const ObFTDictDesc &desc,

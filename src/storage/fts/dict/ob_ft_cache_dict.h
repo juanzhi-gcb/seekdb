@@ -17,7 +17,9 @@
 #ifndef _OCEANBASE_STORAGE_FTS_DICT_OB_FT_CACHE_DICT_H_
 #define _OCEANBASE_STORAGE_FTS_DICT_OB_FT_CACHE_DICT_H_
 
+#include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/ob_allocator.h"
+#include "lib/allocator/page_arena.h"
 #include "lib/charset/ob_charset.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "share/cache/ob_kv_storecache.h"
@@ -34,8 +36,13 @@ class ObFTCacheDict final : public ObIFTDict
 {
 public:
   ObFTCacheDict(ObCollationType coll_type, ObFTDAT *dat)
-      : coll_type_(coll_type), dat_(dat), reader_(dat)
+      : coll_type_(coll_type),
+        dat_(dat),
+        reader_(dat),
+        table_alloc_(lib::ObMemAttr("FtsDictBmp")),
+        bmp_code_table_(nullptr)
   {
+    build_bmp_code_table();
   }
   int init() override;
   int match(const ObString &single_word, ObDATrieHit &hit) const override;
@@ -53,10 +60,19 @@ public:
                                         ObKVCacheHandle &handle);
 
 private:
+  // Build a flat table that maps a BMP unicode code point to its word code,
+  // so single character lookups can skip the hash map probe.
+  void build_bmp_code_table();
+
+private:
   ObKVCacheHandle handle_; // used to pin the mem block later
   ObCollationType coll_type_;
   ObFTDAT *dat_ = nullptr;
   ObFTDATReader<void> reader_;
+  // Allocator for the bmp code table, whose lifetime follows this dict.
+  common::ObArenaAllocator table_alloc_;
+  // bmp_code_table_[wc] == word code of the BMP char wc, 0 if absent.
+  uint32_t *bmp_code_table_ = nullptr;
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObFTCacheDict);
