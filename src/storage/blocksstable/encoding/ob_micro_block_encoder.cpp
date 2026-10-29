@@ -17,6 +17,8 @@
 #define USING_LOG_PREFIX STORAGE
 
 #include "ob_micro_block_encoder.h"
+#include "lib/charset/ob_charset.h"
+#include "share/schema/ob_col_desc.h"
 #include "storage/blocksstable/index_block/ob_index_block_aggregator.h"
 
 namespace oceanbase
