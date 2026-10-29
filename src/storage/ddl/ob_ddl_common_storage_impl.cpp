@@ -227,7 +227,12 @@ int oceanbase::storage::ObDDLStorageUtil::report_ddl_sstable_checksum(
         break;
       }
     }
-    ob_usleep(100L * 1000L);
+    // No settle delay here. report_ddl_checksum() writes __all_ddl_checksum through
+    // sql_proxy synchronously, so once it returns the record is committed and visible to
+    // the reader that polls it (check_finish_report_checksum). A blind 100ms sleep after
+    // every DDL sstable build put a fixed 100ms on the critical path of each of the four
+    // auxiliary tables a fulltext index build has to materialize; if a reader ever does
+    // observe the record late it already returns OB_EAGAIN and retries the task.
   }
   return ret;
 }
