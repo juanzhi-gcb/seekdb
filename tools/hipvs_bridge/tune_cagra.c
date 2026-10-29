@@ -95,23 +95,35 @@ int main(int argc, char** argv) {
   rc = cuvsCagraSearch(res, sp, idx, &qt, &nt, &dt, f);
   if (rc != CUVS_SUCCESS) { fprintf(stderr, "search failed: %s\n", cuvsGetLastErrorText()); return 1; }
   unsigned* hid = (unsigned*)malloc(sizeof(unsigned) * nq * topk);
+  float* hdist = (float*)malloc(sizeof(float) * nq * topk);
   cudaMemcpy(hid, nd, sizeof(unsigned) * nq * topk, cudaMemcpyDefault);
+  cudaMemcpy(hdist, dd, sizeof(float) * nq * topk, cudaMemcpyDefault);
   double t_search = now_s() - t2;
 
-  long h10 = 0, h100 = 0;
+  int sorted = 1;
+  for (long i = 0; i < nq && sorted; i++)
+    for (long j = 1; j < topk; j++)
+      if (hdist[i * topk + j] < hdist[i * topk + j - 1]) { sorted = 0; break; }
+
+  /* recall@K compares against the first K returned ids, not the whole list;
+     in100 is the looser "true top-10 anywhere in the top-100" figure. */
+  long j10 = topk < 10 ? topk : 10;
+  long h10 = 0, h100 = 0, h10_in100 = 0;
   for (long i = 0; i < nq; i++) {
     for (long k = 0; k < 10; k++) {
-      for (long j = 0; j < topk; j++)
+      for (long j = 0; j < j10; j++)
         if (hid[i * topk + j] == (unsigned)gt[i * 100 + k]) { h10++; break; }
+      for (long j = 0; j < topk; j++)
+        if (hid[i * topk + j] == (unsigned)gt[i * 100 + k]) { h10_in100++; break; }
     }
     for (long k = 0; k < 100; k++) {
       for (long j = 0; j < topk; j++)
         if (hid[i * topk + j] == (unsigned)gt[i * 100 + k]) { h100++; break; }
     }
   }
-  printf("algo=%d deg=%d ideg=%d niter=%d sw=%d itopk=%zu build=%.3fs h2d=%.3fs search=%.3fs "
-         "recall@10=%.4f recall@100=%.4f\n",
-         algo, deg, ideg, niter, sw, sp->itopk_size, t_build, t_h2d, t_search,
-         h10 / (nq * 10.0), h100 / (nq * 100.0));
+  printf("algo=%d deg=%d ideg=%d niter=%d sw=%d itopk=%zu sorted=%d build=%.3fs h2d=%.3fs search=%.3fs "
+         "recall@10=%.4f recall@10_in100=%.4f recall@100=%.4f\n",
+         algo, deg, ideg, niter, sw, sp->itopk_size, sorted, t_build, t_h2d, t_search,
+         h10 / (nq * 10.0), h10_in100 / (nq * 10.0), h100 / (nq * 100.0));
   return 0;
 }
