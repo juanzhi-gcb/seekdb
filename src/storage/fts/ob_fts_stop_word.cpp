@@ -244,19 +244,36 @@ int ObAddWord::casedown_word(const ObFTWord &src, ObFTWord &dst)
     if (OB_ISNULL(cs)) {
       ret = OB_INVALID_ARGUMENT;
     } else if (1 == cs->casedn_multiply && src_str.length() <= STACK_CASEDOWN_LEN) {
-      char buf[STACK_CASEDOWN_LEN];
-      MEMCPY(buf, src_str.ptr(), src_str.length());
-      const size_t size = cs->cset->casedn(cs, buf, src_str.length(), buf, src_str.length());
-      if (size == src_str.length() && 0 == MEMCMP(buf, src_str.ptr(), size)) {
+      // utf8mb4_general_ci only folds ASCII 'A'-'Z', two-byte chars (leads
+      // 0xC2-0xDF) and the three-byte planes 0xE0-0xE2/0xEF. A token without
+      // any such lead byte (CJK words, digits, already folded words) is its
+      // own lowercase form, so the casedn call and the copy can be skipped.
+      bool may_fold = false;
+      for (int64_t i = 0; i < src_str.length(); ++i) {
+        const unsigned char byte = static_cast<unsigned char>(src_str.ptr()[i]);
+        if ((byte >= 'A' && byte <= 'Z') || (byte >= 0xC2 && byte <= 0xDF)
+            || 0xE0 == byte || 0xE1 == byte || 0xE2 == byte || 0xEF == byte) {
+          may_fold = true;
+          break;
+        }
+      }
+      if (!may_fold) {
         dst = src;
       } else {
-        char *ptr = nullptr;
-        if (OB_ISNULL(ptr = static_cast<char *>(allocator_.alloc(src_str.length())))) {
-          ret = OB_ALLOCATE_MEMORY_FAILED;
+        char buf[STACK_CASEDOWN_LEN];
+        MEMCPY(buf, src_str.ptr(), src_str.length());
+        const size_t size = cs->cset->casedn(cs, buf, src_str.length(), buf, src_str.length());
+        if (size == src_str.length() && 0 == MEMCMP(buf, src_str.ptr(), size)) {
+          dst = src;
         } else {
-          MEMCPY(ptr, buf, size);
-          ObFTWord tmp(size, ptr, word_meta_);
-          dst = tmp;
+          char *ptr = nullptr;
+          if (OB_ISNULL(ptr = static_cast<char *>(allocator_.alloc(src_str.length())))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else {
+            MEMCPY(ptr, buf, size);
+            ObFTWord tmp(size, ptr, word_meta_);
+            dst = tmp;
+          }
         }
       }
     } else {

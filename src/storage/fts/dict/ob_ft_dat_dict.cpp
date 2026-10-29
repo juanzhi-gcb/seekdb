@@ -261,6 +261,7 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
   int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
   int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
 
+  bool decoded_bmp = false;
   if (nullptr != bmp_code_table) {
     // Fast path: decode the single character and get its code directly from
     // the flat BMP code table, instead of hashing and probing the map. Word
@@ -270,12 +271,16 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
     const unsigned char *end = start + ft_char.length();
     const int char_len = common::ob_charset_decode_unicode<CHARSET_UTF8MB4>(start, end, wc);
     if (char_len > 0 && char_len == ft_char.length() && wc <= 0xFFFF) {
+      // The table is authoritative for valid BMP chars: it was built from
+      // every used map entry and the decoder is injective on canonical
+      // UTF-8, so a zero entry is exactly the char being absent.
+      decoded_bmp = true;
       code = static_cast<ObFTWordCode>(bmp_code_table[wc]);
       code_found = (0 != code);
     }
   }
 
-  if (!code_found) {
+  if (!decoded_bmp) {
     ObFTSingleWord word;
     word.set_word(ft_char.ptr(), ft_char.length());
     if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
