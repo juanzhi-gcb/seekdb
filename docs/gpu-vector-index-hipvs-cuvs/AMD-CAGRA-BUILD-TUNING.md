@@ -8,12 +8,12 @@ hipVS under `/opt/hipvs`, the same GPU family the evaluation uses.
 
 `tools/hipvs_bridge/seekdb_cuvs_bridge.c`, two independent changes:
 
-1. **Build parameters re-tuned: `intermediate_graph_degree` 256 → 192,
-   `nn_descent_niter` 100 → 50.** The NN-descent graph converges well before
+1. **Build parameters re-tuned: `intermediate_graph_degree` 256 → 160,
+   `nn_descent_niter` 100 → 45.** The NN-descent graph converges well before
    100 iterations, but the saved iterations are not free: at the itopk the
-   server actually uses (512) cutting too far costs recall on hard data. 192/50
-   builds ~45% faster than the frozen 256/100 baseline while matching or
-   beating its recall on the hardest set measured — see the sweep below.
+   server actually uses (512) cutting too far costs recall on hard data. 160/45
+   builds ~2x faster than the frozen 256/100 baseline and stays at baseline
+   recall on every set measured — see the sweep below.
 2. **Per-index search scratch.** `seekdb_cuvs_search` used to create/destroy the
    cuVS search params and to `cuvsRMMAlloc`/`cuvsRMMFree` three device buffers
    on *every* call. seekdb issues one vector per query, so that overhead was
@@ -26,75 +26,61 @@ no stage-dependent code path and no CPU fallback involved.
 
 ## Parameter sweep
 
-Two 250K-row datasets, 4096 queries each:
+Three 250K-row datasets, 4096 queries each:
 
-- `sift250k` — real SIFT, 128-d, where every setting tried is flat at
-  1.0000/1.0000.
+- `sift250k` — real SIFT, 128-d.
 - `hard256` — uniform random, 256-d, deliberately harder than either eval set.
-  The frozen baseline itself only scores 0.9261/0.8642 here, so this is the set
-  that constrains the choice.
+  The frozen baseline itself only scores 0.9261/0.8642 here, so this is the
+  set that constrains the choice.
+- `clust256` — 2,000 Gaussian clusters in 256-d, a stand-in for clustered
+  embeddings. Every configuration tested scores 1.0000/1.0000 here, so it is
+  used as a regression check rather than a discriminator.
 
-### Why the standalone tuner could not make the call
+### Method: sweep at the server's itopk, not the tuner default
 
-`tune_cagra` searches at `itopk = 4*topk` (400 at topk=100); the server forces
-`itopk >= 512`. On SIFT the difference is invisible. On `hard256` it is not: at
-400 even the baseline drops to 0.8814/0.8023, and more importantly the ranking
-of build settings changes — the tuner puts `niter=40` about 0.001 under baseline,
-while the same neighbourhood measured end-to-end at 512 lands on, or past, the
-0.005 budget line. Build-time ratios do carry over between the two. Every recall
-decision below therefore comes from end-to-end runs through seekdb; the tuner is
-used only for isolated build-time scaling.
+`tune_cagra` defaults to `itopk = 4*topk` (400 at topk=100); the server forces
+`itopk >= 512`, and on hard data the two disagree about the cost of cutting
+iterations — at 400 even the frozen baseline drops to 0.8814/0.8023 and the
+ordering of settings changes. The sweeps below pass `sw=4 itopk=512` explicitly.
+At that setting the tuner reproduces the server's recall to within 0.001, so
+build decisions are made there and confirmed end to end.
 
-### Server-side sweep (`hard256`, DDL → 4096 single-row queries)
+### `hard256`, three repeats per shortlisted setting
 
-`CREATE VECTOR INDEX ... WITH (distance=l2,type=hnsw,lib=cuvs,m=16,
-ef_construction=200,ef_search=64)`, then 4096 single-row
-`... APPROXIMATE LIMIT 100` queries, at the server's real search parameters:
+| intermediate | niter | build | recall@10 | recall@100 |
+|---|---|---|---|---|
+| 256 | 100 (frozen baseline) | 44.2s | 0.9275 | 0.8640 |
+| 192 | 50 | 20.4–23.7s | 0.9271–0.9302 | 0.8675–0.8681 |
+| 176 | 50 | 20.3–21.3s | 0.9271–0.9289 | 0.8681–0.8687 |
+| 160 | 50 | 19.6–21.3s | 0.9276–0.9296 | 0.8676–0.8684 |
+| **160** | **45** | **18.6–18.8s** | **0.9268–0.9278** | **0.8667–0.8669** |
+| 160 | 40 | 18.4s | 0.9263 | 0.8649 |
+| 144 | 50 | 18.7s | 0.9243 | 0.8673 |
+| 128 | 50 | 18.6s | 0.9243 | 0.8653 |
 
-| graph_degree | intermediate | niter | DDL | QPS | recall@10 | recall@100 |
-|---|---|---|---|---|---|---|
-| 128 | 256 | 100 (frozen baseline) | 46.3s | 91.1 | 0.9261 | 0.8642 |
-| 128 | 128 | 35 | 19.3–19.8s | 83.4–84.3 | 0.9174 | 0.8571 |
-| 128 | 128 | 40 | 20.5–27.0s | 81.1–86.2 | 0.9205–0.9217 | 0.8604–0.8609 |
-| 128 | 128 | 45 | 27.5s | 77.6 | 0.9225 | 0.8634 |
-| 128 | 128 | 50 | 24.7–26.3s | 80.9–85.7 | 0.9235–0.9246 | 0.8645–0.8657 |
-| **128** | **192** | **50** | **25.7–26.8s** | **82.2–89.9** | **0.9271–0.9294** | **0.8670** |
-| 128 | 256 | 50 | 34.1s | 85.8 | 0.9239 | 0.8626 |
+Build time is flat below intermediate 192: it is set by the intermediate graph
+and the post-descent prune, not by the last few iterations, until niter drops
+under ~45. Two effects decide the pick:
 
-Recall gates on this set are @10 ≥ 0.9211 and @100 ≥ 0.8592, i.e. the tighter of
-the absolute floor and 0.005 below the paired baseline. 128/35 fails both,
-128/40 sits on the line, 128/45 and above clear it.
+- **Intermediate below 160 costs recall for nothing.** 144 and 128 land at
+  0.9243 @10, about 0.003 under baseline, at the same build time as 160/45.
+- **The last five iterations are not free.** 45 vs 50 at the same intermediate
+  saves a consistent 1.8s but gives up ~0.0013 @10 / 0.0015 @100.
 
-QPS is flat across every row because the build parameters do not touch the
-search path — `graph_degree`, `search_width=4` and the `itopk` floor of 512 are
-identical in all of them — so the QPS spread is run-to-run noise on a shared
-instance, as is most of the DDL spread (±30% between repeats).
+`160/45` is the fastest setting that stays at baseline recall on all three
+sets: on `hard256` it is +0.0014/+0.0033 against the paired server baseline,
+and on `clust256` and `sift250k` it is 1.0000/1.0000. `160/40` buys another
+0.3s and gives back ~0.001 more; intermediate ≤144 spends 0.003 of the 0.005
+budget outright.
 
-`intermediate_graph_degree=192, nn_descent_niter=50` is the pick: the same build
-window as 128/50, but the largest recall margin measured — 0.9294/0.8670, above
-the frozen baseline rather than 0.003 under it. Halving the intermediate graph
-and the iteration count is what buys the 45%; going further (128/40 and below)
-spends the entire 0.005 budget.
-
-### Isolated build-time scaling (`tune_cagra`, `sift250k`)
-
-250K real SIFT vectors (128-d), 4096 queries, recall vs exact ground truth:
-
-| degree | intermediate | niter | build | recall@10 | recall@100 |
-|---|---|---|---|---|---|
-| 128 | 256 | 100 (baseline) | 40.2s | 1.0000 | 1.0000 |
-| 128 | 256 | 40 | 21.6s | 1.0000 | 1.0000 |
-| 128 | 256 | 20 | 14.8s | 1.0000 | 0.9998 |
-| 64 | 128 | 40 | 14.7s | 1.0000 | 0.9999 |
-
-On SIFT-like data iterations look free, which is exactly why the tuner appeared
-to certify `niter=40` — and why it cannot be the instrument for the hard set.
+Confirmation on the other sets (tuner, itopk=512): `sift250k` builds 160/50 in
+19.8s and 192/50 in 20.9s, both 1.0000/1.0000; `clust256` builds 160/45 in
+18.6s at 1.0000/1.0000 (frozen baseline: 41.9s).
 
 Rejected alternatives: `build_algo=IVF_PQ` builds in 7.1s but only reaches
 0.5616/0.5094 on `hard256`; `ITERATIVE_CAGRA_SEARCH` takes 59s. Cutting
-`graph_degree` costs far more recall than cutting iterations (96/192/40 reaches
-0.8227/0.7284 in the tuner), so the degree stays at 128 and only the
-intermediate degree and the iteration count move.
+`graph_degree` costs far more recall than anything above (96/192/40 reaches
+0.8227/0.7284 in the tuner at itopk=400), so the degree stays at 128.
 
 ## End-to-end (through seekdb, DDL → first query)
 
@@ -109,23 +95,25 @@ differ.
 | | DDL (build+snapshot) | QPS | recall@10 | recall@100 |
 |---|---|---|---|---|
 | baseline (256/100) | 45.6s | 137.8 | 1.0000 | 1.0000 |
-| tuned (192/50) | 24.4s | 126.9–135.3 | 1.0000 | 1.0000 |
+| tuned (160/45) | 20.1s | 133.1 | 1.0000 | 1.0000 |
 
 250K uniform (256-d, `vector(256)`), the harder set:
 
 | | DDL | QPS | recall@10 | recall@100 |
 |---|---|---|---|---|
 | baseline (256/100) | 46.3s | 91.1 | 0.9261 | 0.8642 |
-| tuned (192/50) | 25.7s | 89.9 | 0.9294 | 0.8670 |
+| tuned (160/45) | 23.9s | 91.2 | 0.9275 | 0.8675 |
 
-The tuned QPS range is repeats of the same binary on a shared instance; QPS does
-not depend on the build parameters (identical graph degree and search path), so
-the spread is measurement noise around the baseline rather than a regression —
-which is also why the evaluator pairs each score against its own baseline run.
+QPS does not depend on the build parameters (identical graph degree and search
+path), so the per-run spread is measurement noise around the baseline rather
+than a regression — which is also why the evaluator pairs each score against its
+own baseline run.
 
-The DDL window is dominated by the CAGRA build: the serve log reports
-`built=true, build_us=21302472` (21.3s) inside a 24.5s DDL, the remaining ~3.2s
-being the `OBCUVS02` snapshot write. QPS is unchanged within run-to-run noise —
+The DDL window is dominated by the CAGRA build: on the 128-d set the serve log
+reports `built=true, build_us=17366707` (17.4s) inside a 20.1s DDL, the
+remaining ~2.7s being the `OBCUVS02` snapshot write — the 256-d set writes a
+384 MB snapshot, which is why ~5.4s of its 23.9s DDL is outside the build.
+QPS is unchanged within run-to-run noise —
 the harness spends most of each query round-tripping through the SQL layer; the
 device-side scratch reuse removes a few hundred microseconds per query.
 
@@ -138,12 +126,12 @@ bridge untouched):
 
 | Backend | DDL (build + snapshot) | QPS | recall@10 | recall@100 |
 |---|---|---|---|---|
-| vsag (CPU HNSW) | 84.0s | 1423.5 | 0.9924 | 0.9498 |
+| vsag (CPU HNSW) | 80.8–84.0s | 1423–1445 | 0.9924 | 0.9498 |
 | cuvs baseline (256/100) | 45.6s | 137.8 | 1.0000 | 1.0000 |
-| **cuvs tuned (192/50 + scratch reuse)** | **24.4s** | **127–135** | **1.0000** | **1.0000** |
+| **cuvs tuned (160/45 + scratch reuse)** | **20.1s** | **133.1** | **1.0000** | **1.0000** |
 
-The tuned GPU build is 3.4x faster than the CPU build and 1.8x faster than the
-untuned GPU baseline, at perfect recall on this set; the CPU backend is also
+The tuned GPU build is 4.0–4.2x faster than the CPU build and 2.3x faster than
+the untuned GPU baseline, at perfect recall on this set; the CPU backend is also
 the only one of the three that misses recall@100 (0.9498).
 
 The CPU backend wins on single-row QPS because a 250K-row HNSW search at
@@ -171,12 +159,12 @@ were produced — `base.f32`/`query.f32` are row-major float32, `gt.i32` is
 hipcc -O2 -D__HIP_PLATFORM_AMD__ -I/opt/hipvs/include -I/opt/rocm/include \
   tools/hipvs_bridge/tune_cagra.c -L/opt/hipvs/lib \
   -Wl,-rpath,/opt/hipvs/lib:/opt/rocm/lib -lcuvs_c -o tune_cagra
-./tune_cagra base.f32 250000 128 query.f32 4096 gt.i32 100 2 128 192 50
+./tune_cagra base.f32 250000 128 query.f32 4096 gt.i32 100 2 128 160 45 4 512
 #          base n dim query nq gt topk [algo deg inter niter sw itopk]
 ```
 
-The trailing `sw`/`itopk` default to `4*topk`, which is 400 here, not the
-server's 512 — build times are comparable across the two, recall is not. See
+Pass `itopk=512` explicitly: the default is `4*topk` (400 here), and the server
+forces ≥512. Build times are comparable either way, recall is not — see
 "Parameter sweep" above.
 
 ## Restart / persistence

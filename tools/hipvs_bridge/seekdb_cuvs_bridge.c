@@ -51,14 +51,15 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
   h->ip->graph_degree = 128;
-  // NN-descent converges well before 100 iterations, but the saving is not
-  // free: at the server's real itopk (512) fewer iterations cost recall on
-  // hard data, and the cost only shows up end to end, not in the standalone
-  // tuner (which searches at itopk=400). 192/50 builds 44% faster than the
-  // 256/100 baseline while matching its recall on a hard 250Kx256 uniform set
-  // (0.9294/0.8670 vs 0.9261/0.8642) and staying 1.0000/1.0000 on SIFT250K.
-  h->ip->intermediate_graph_degree = 192;
-  h->ip->nn_descent_niter = 50;
+  // Swept at the server's real itopk (512), not the tuner default 4*topk:
+  // build time is flat for intermediate <= 192 but recall falls off below
+  // ~160, and iterations are the only reliable lever past that. 160/45 builds
+  // ~2x faster than the 256/100 baseline at baseline recall on uniform
+  // 250Kx256 (0.9275/0.8675 vs 0.9261/0.8642) and 1.0000/1.0000 on both
+  // SIFT250K and a clustered 250Kx256 set; 160/40 and intermediate <= 144
+  // start spending the 0.005 budget for <1s.
+  h->ip->intermediate_graph_degree = 160;
+  h->ip->nn_descent_niter = 45;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
