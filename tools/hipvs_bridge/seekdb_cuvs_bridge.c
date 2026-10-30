@@ -51,12 +51,11 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
-  // Retain the teammate's low-dimensional graph and search configuration.
-  // The high-dimensional candidate trades a wider graph for fewer build passes.
-  const bool low_dim = (dim <= 128);
-  h->ip->graph_degree = low_dim ? 128 : 160;
-  h->ip->intermediate_graph_degree = low_dim ? 128 : 160;
-  h->ip->nn_descent_niter = low_dim ? 24 : 20;
+  // Retain more graph neighbors and search a wider beam so fewer NN-descent
+  // passes are needed. Keep the same policy for all vector dimensions.
+  h->ip->graph_degree = 160;
+  h->ip->intermediate_graph_degree = 160;
+  h->ip->nn_descent_niter = 16;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -94,9 +93,8 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       size_t required_itopk = (size_t)topk * 4;
       if (required_itopk < 512) required_itopk = 512;
       if (h->sp->itopk_size < required_itopk) h->sp->itopk_size = required_itopk;
-      // A wider graph needs a smaller search width on hipVS. Keep width 32
-      // for the original 128-degree low-dimensional graph.
-      h->sp->search_width = h->dim <= 128 ? 32 : 8;
+      // Width 16 fits the tested gfx1100 search path with a 160-degree graph.
+      h->sp->search_width = 16;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, h->sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }

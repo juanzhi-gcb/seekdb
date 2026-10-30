@@ -1,5 +1,10 @@
 # CAGRA build-path tuning (AMD gfx1100 / hipVS)
 
+Historical experiments: the current candidate configuration and reproduction
+procedure are in [AMD-BUILD-MARGIN.md](AMD-BUILD-MARGIN.md). Tables and parameter
+choices below describe earlier versions and must not be combined into a claim
+about the current candidate's score.
+
 Baseline: V5 frozen commit `634888d9b037153fa143d2c913ba4b25503e1d62`.
 All numbers below are from a Radeon PRO W7900D (gfx1100, 48 GB), ROCm 7.2.4,
 hipVS under `/opt/hipvs`, the same GPU family the evaluation uses.
