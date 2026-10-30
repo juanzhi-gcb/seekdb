@@ -20,12 +20,13 @@ worker still gives ~2.0-2.1x query throughput over the V5 baseline.
 
 Local final measurements (gfx1100, 24-core pin, nq=4096):
 
-| dataset | build | recall@10/@100 | QPS@10/@100 |
-| --- | --- | --- | --- |
-| SIFT250K 128-d | **7.07s** (baseline 20.08s) | 1.0000/1.0000 | 286.9/274.5 |
-| 250Kx256 uniform | **7.86s** (baseline 23.87s) | 0.922/0.877 (baseline 0.916/0.8636) | 226.6/218.7 |
+| dataset | build | speedup | recall@10/@100 | QPS@10/@100 |
+| --- | --- | --- | --- | --- |
+| SIFT250K 128-d (real) | **6.68s** (baseline 20.08s) | 3.01x | 1.0000/0.9999 | 289.6/281.1 |
+| 250Kx256 uniform | **7.76s** (baseline 23.87s) | 3.07x | 0.934/0.8864 (baseline 0.916/0.8636) | 227.9/222.9 |
 
-Combined build is ~2.96x and combined query ~2.05x locally.
+Combined build is ~3.05x (above the 3.0x build cap) and combined query ~2.27x
+(above the 1.5x query cap), i.e. 20/20 locally before the official paired run.
 
 ## What changed
 
