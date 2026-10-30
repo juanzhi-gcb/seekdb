@@ -10,6 +10,7 @@
 #endif
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
   cuvsResources_t        res;
@@ -104,6 +105,29 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
   }
 done:
   if (rc) fprintf(stderr, "[seekdb_cuvs] search rc=%d: %s\n", rc, cuvsGetLastErrorText());
+  return rc;
+}
+
+int seekdb_cuvs_copy_dataset(void* handle, float* out, long n, long dim)
+{
+  sk_cuvs_index* h = (sk_cuvs_index*)handle;
+  if (!h || !out || n <= 0 || dim <= 0) return 1;
+  DLManagedTensor ds;
+  memset(&ds, 0, sizeof(ds));
+  if (cuvsCagraIndexGetDataset(h->idx, &ds) != CUVS_SUCCESS) {
+    fprintf(stderr, "[seekdb_cuvs] copy_dataset: get failed: %s\n", cuvsGetLastErrorText());
+    return 2;
+  }
+  int rc = 0;
+  if (ds.dl_tensor.ndim != 2 || ds.dl_tensor.shape == NULL ||
+      ds.dl_tensor.shape[0] != (int64_t)n || ds.dl_tensor.shape[1] != (int64_t)dim) {
+    rc = 3;
+  } else if (cudaMemcpy(out, ds.dl_tensor.data, sizeof(float) * (size_t)n * (size_t)dim,
+                        cudaMemcpyDefault) != cudaSuccess) {
+    rc = 4;
+  }
+  if (ds.deleter != NULL) { ds.deleter(&ds); }
+  if (rc != 0) { fprintf(stderr, "[seekdb_cuvs] copy_dataset failed rc=%d\n", rc); }
   return rc;
 }
 
