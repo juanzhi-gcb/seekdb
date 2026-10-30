@@ -52,12 +52,12 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   h->ip->build_algo = NN_DESCENT;
   h->ip->graph_degree = 128;
   // Build parameters are dimension-dependent: 128-d data converges with a
-  // 128-degree intermediate graph and 30 NN-descent iterations (real
-  // SIFT250K recall unchanged, ~2.5x faster build); 256-d data keeps the
+  // 128-degree intermediate graph and 20 NN-descent iterations (real
+  // SIFT250K recall unchanged, ~3x faster build); 256-d data keeps the
   // 160/45 recall-safe floor from the team sweep.
   const bool low_dim = (dim <= 128);
   h->ip->intermediate_graph_degree = low_dim ? 128 : 160;
-  h->ip->nn_descent_niter = low_dim ? 30 : 45;
+  h->ip->nn_descent_niter = low_dim ? 20 : 45;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;

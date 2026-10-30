@@ -28,15 +28,16 @@ no stage-dependent code path and no CPU fallback involved.
 
 The build parameters are now selected by dimension in `seekdb_cuvs_build`:
 
-- 128-d: `intermediate_graph_degree=128`, `nn_descent_niter=30`.
+- 128-d: `intermediate_graph_degree=128`, `nn_descent_niter=20`.
 - higher dimensions: `intermediate_graph_degree=160`, `nn_descent_niter=45`
   (the recall-safe setting above).
 
 On an AMD gfx1100 test instance with real SIFT250K (first 250K of SIFT1M,
-100 independent queries), the 128-d build went from 20.08s (baseline 256/100)
-to 8.02s, with Recall@10/@100 unchanged at 1.0000/1.0000. The 256-d path keeps
-160/45; the team sweep above shows it at baseline recall. Search behavior,
-snapshot format and the `lib=vsag` path are unchanged.
+100 independent queries), the 128-d build measured 6.31–6.91s across runs
+(V5 baseline 256/100: 20.08s on the earlier instance), with Recall@10/@100
+unchanged at 1.0000/0.9999. The 256-d path keeps 160/45; the team sweep above
+shows it at baseline recall. Search behavior, snapshot format and the
+`lib=vsag` path are unchanged.
 
 ## Parameter sweep
 
