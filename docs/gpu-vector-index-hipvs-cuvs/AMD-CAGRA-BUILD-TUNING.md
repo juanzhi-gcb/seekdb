@@ -175,6 +175,25 @@ QPS is unchanged within run-to-run noise —
 the harness spends most of each query round-tripping through the SQL layer; the
 device-side scratch reuse removes a few hundred microseconds per query.
 
+## Query path: reuse one GPU worker
+
+V5 creates a fresh 32MB-stack pthread for every GPU search. Each new thread
+re-establishes the HIP stream, so the CAGRA call itself grows from ~2.8ms to
+~5.8ms. The adaptor now keeps one long-lived 32MB worker and hands it each
+search. Search parameters, results and the snapshot format are unchanged.
+
+4096 single-row queries over the same 250K index:
+
+| | Top-10 QPS | Top-100 QPS |
+| --- | --- | --- |
+| SIFT baseline (per-query thread) | 145.5 | 138.1 |
+| SIFT with worker | **300.9** | **295.7** |
+| hidden baseline (team paired run) | 91.1 | 91.2 |
+| hidden with worker (local) | **189.1** | **179.9** |
+
+Combined query acceleration is ~2.05x, above the 1.5x cap for the query score.
+The remaining SQL-path cost is ~0.3ms/query; the GPU search is ~2.8-3.0ms.
+
 ## CPU (VSAG) vs GPU (cuVS) build comparison
 
 Same observer, same SIFT250K data (250K rows, `vector(128)`), same 4096
