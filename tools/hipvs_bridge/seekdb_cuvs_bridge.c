@@ -51,13 +51,12 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
-  h->ip->graph_degree = 128;
-  // Keep the teammate's 128-d setting. For higher dimensions, 30 iterations
-  // passed three local 250K x 256-d strict-recall runs at width 32/itopk 512.
-  // This candidate still requires SQL-path and official-dataset validation.
+  // Retain the teammate's low-dimensional graph and search configuration.
+  // The high-dimensional candidate trades a wider graph for fewer build passes.
   const bool low_dim = (dim <= 128);
+  h->ip->graph_degree = low_dim ? 128 : 160;
   h->ip->intermediate_graph_degree = low_dim ? 128 : 160;
-  h->ip->nn_descent_niter = low_dim ? 24 : 30;
+  h->ip->nn_descent_niter = low_dim ? 24 : 20;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -95,9 +94,9 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       size_t required_itopk = (size_t)topk * 4;
       if (required_itopk < 512) required_itopk = 512;
       if (h->sp->itopk_size < required_itopk) h->sp->itopk_size = required_itopk;
-      // hipVS single-CTA search caps itopk at 512; width 32 is what fits the
-      // hashmap limit. It improves recall and QPS at the same time.
-      h->sp->search_width = 32;
+      // A wider graph needs a smaller search width on hipVS. Keep width 32
+      // for the original 128-degree low-dimensional graph.
+      h->sp->search_width = h->dim <= 128 ? 32 : 8;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, h->sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
