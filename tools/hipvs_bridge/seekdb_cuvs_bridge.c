@@ -52,12 +52,12 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
   h->ip->graph_degree = 128;
-  // The wide search below makes a smaller NN-descent budget safe: 128-d
-  // 128/24 builds ~3.4x faster and 256-d 160/32 ~2.8x, with paired recall
-  // still inside the 0.005 window (width 4 needed 30/45 for the same recall).
+  // Keep the teammate's 128-d setting. For higher dimensions, 30 iterations
+  // passed three local 250K x 256-d strict-recall runs at width 32/itopk 512.
+  // This candidate still requires SQL-path and official-dataset validation.
   const bool low_dim = (dim <= 128);
   h->ip->intermediate_graph_degree = low_dim ? 128 : 160;
-  h->ip->nn_descent_niter = low_dim ? 24 : 32;
+  h->ip->nn_descent_niter = low_dim ? 24 : 30;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
