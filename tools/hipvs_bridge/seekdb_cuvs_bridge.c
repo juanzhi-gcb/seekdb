@@ -51,12 +51,13 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
-  h->ip->graph_degree = 160;
+  const bool low_dim = (dim <= 128);
+  h->ip->graph_degree = low_dim ? 160 : 192;
   // A 160-degree graph carries enough neighbors that 20 NN-descent iterations
   // stay at baseline recall and build faster than the 128-degree 45-iteration
   // baseline. Measured 3.04x on 250Kx256 and 2.84x on SIFT250K.
-  h->ip->intermediate_graph_degree = 160;
-  h->ip->nn_descent_niter = 20;
+  h->ip->intermediate_graph_degree = low_dim ? 160 : 192;
+  h->ip->nn_descent_niter = low_dim ? 20 : 18;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
