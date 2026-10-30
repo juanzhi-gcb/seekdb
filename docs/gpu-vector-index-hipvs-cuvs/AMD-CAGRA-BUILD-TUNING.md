@@ -6,38 +6,40 @@ hipVS under `/opt/hipvs`, the same GPU family the evaluation uses.
 
 ## What changed
 
-`tools/hipvs_bridge/seekdb_cuvs_bridge.c`, two independent changes:
+`tools/hipvs_bridge/seekdb_cuvs_bridge.c`, three independent changes:
 
 1. **Build parameters re-tuned: `intermediate_graph_degree` 256 → 160,
-   `nn_descent_niter` 100 → 45.** The NN-descent graph converges well before
-   100 iterations, but the saved iterations are not free: at the itopk the
-   server actually uses (512) cutting too far costs recall on hard data. 160/45
-   builds ~2x faster than the frozen 256/100 baseline and stays at baseline
-   recall on every set measured — see the sweep below.
-2. **Per-index search scratch.** `seekdb_cuvs_search` used to create/destroy the
+   `nn_descent_niter` 100 → 45, then cut further by dimension** once the search
+   side was widened (see below). The NN-descent graph converges well before
+   100 iterations, but at width 4 the saved iterations were not free; the wide
+   search is what makes a 24/32 budget safe.
+2. **Wide search: `search_width` 4 → 32.** Within the hipVS single-CTA limits
+   (`itopk_size` ≤ 512, width ≤ 32) the wider search improves recall and query
+   throughput at the same time, which pays for the smaller NN-descent budget.
+3. **Per-index search scratch.** `seekdb_cuvs_search` used to create/destroy the
    cuVS search params and to `cuvsRMMAlloc`/`cuvsRMMFree` three device buffers
    on *every* call. seekdb issues one vector per query, so that overhead was
    paid per query. The bridge now keeps the params and buffers on the index
    handle and only grows them when a larger batch shows up.
 
-Nothing else on the GPU path moved: `graph_degree` stays at 128, search stays at
-`search_width=4` / `itopk>=512`, same snapshot format, same FP32 data. There is
-no stage-dependent code path and no CPU fallback involved.
+Nothing else on the GPU path moved: `graph_degree` stays at 128,
+`itopk_size` stays at the 512 floor, same snapshot format, same FP32 data.
+There is no stage-dependent code path and no CPU fallback involved.
 
-## Dimension split (2026-10-29)
+## Build parameters (final, 2026-10-30)
 
-The build parameters are now selected by dimension in `seekdb_cuvs_build`:
+Selected by dimension in `seekdb_cuvs_build`:
 
-- 128-d: `intermediate_graph_degree=128`, `nn_descent_niter=20`.
-- higher dimensions: `intermediate_graph_degree=160`, `nn_descent_niter=45`
-  (the recall-safe setting above).
+- 128-d: `intermediate_graph_degree=128`, `nn_descent_niter=24`.
+- higher dimensions: `intermediate_graph_degree=160`, `nn_descent_niter=32`.
 
-On an AMD gfx1100 test instance with real SIFT250K (first 250K of SIFT1M,
-100 independent queries), the 128-d build measured 6.31–6.91s across runs
-(V5 baseline 256/100: 20.08s on the earlier instance), with Recall@10/@100
-unchanged at 1.0000/0.9999. The 256-d path keeps 160/45; the team sweep above
-shows it at baseline recall. Search behavior, snapshot format and the
-`lib=vsag` path are unchanged.
+This is the 160/45 sweep below with the NN-descent budget traded for search
+width. At width 4 the 256-d budget cannot go below ~34 without losing recall
+(0.9215/0.8604 against a 0.9260/0.8638 baseline); at width 32 the same budget
+measures 0.9282/0.8720, and 32 iterations still measure 0.9269/0.8690. The
+end-to-end paired runs below are the authority: 3.61x (128-d) and 2.91x (256-d)
+faster DDL at recall deltas of −0.0025/−0.0011 and +0.0008/+0.0058. Search
+behavior, snapshot format and the `lib=vsag` path are unchanged.
 
 ## Parameter sweep
 
@@ -58,9 +60,9 @@ Three 250K-row datasets, 4096 queries each:
 `tune_cagra` defaults to `itopk = 4*topk` (400 at topk=100); the server forces
 `itopk >= 512`, and on hard data the two disagree about the cost of cutting
 iterations — at 400 even the frozen baseline drops to 0.8814/0.8023 and the
-ordering of settings changes. The sweeps below pass `sw=4 itopk=512` explicitly.
-At that setting the tuner reproduces the server's recall to within 0.001, so
-build decisions are made there and confirmed end to end.
+ordering of settings changes. The `hard256` sweep below passes `sw=4 itopk=512`
+explicitly. At that setting the tuner reproduces the server's recall to within
+0.001, so build decisions are made there and confirmed end to end.
 
 ### Recall is measured strictly
 
@@ -69,8 +71,8 @@ the **first K returned ids**, not "true top-K anywhere in the returned
 top-100". The two coincide when the candidate distances are distinct, because a
 true top-10 point inside the returned list is necessarily ranked in the first
 slot that can hold it; they diverge only with near-ties (the clustered set) or
-exact ties (SIFT's integer distances). Both harnesses previously used the loose
-top-100 convention; both are corrected, and every run also asserts that the
+exact ties (SIFT's integer distances). The tuner previously used the loose
+top-100 convention; it is corrected, and every run also asserts that the
 returned list is distance-sorted (`sorted=1`) so the first-K slice is meaningful.
 On `hard256` the two conventions measure identically (no ties), so the repeated
 runs used for that table remain valid; the loose figure is still printed as
@@ -130,50 +132,72 @@ Rejected alternatives: `build_algo=IVF_PQ` builds in 7.1s but only reaches
 `graph_degree` costs far more recall than anything above (96/192/40 reaches
 0.8227/0.7284 in the tuner at itopk=400), so the degree stays at 128.
 
+## Wide search (2026-10-30)
+
+The earlier sweeps kept `search_width=4`. On hipVS the search is single-CTA:
+`itopk_size` is capped at 512 and `search_width` at 32 by the hashmap
+(`hash_bitlen cannot be larger than 20`). Width 64 fails the search (rc=15);
+seekdb then silently falls back to the SQL path, which looks like a 0.16-recall
+result at ~900 QPS after a ~220s DDL. These are hard limits, not knobs.
+
+Within them, widening the search costs nothing at query time and pays on the
+build side. 256-d uniform, igd=160/niter=34, paired against a 50.7s baseline:
+
+| search width | DDL | recall@10 | recall@100 | QPS@10 | QPS@100 |
+|---|---|---|---|---|---|
+| 4 | 18.2s | 0.9215 | 0.8604 | 254 | 221 |
+| 8 | 17.7s | 0.9187 | 0.8620 | 319 | 304 |
+| 16 | 17.9s | 0.9224 | 0.8661 | 406 | 349 |
+| 32 | 17.8s | 0.9282 | 0.8720 | 428 | 373 |
+
+Baseline for the same round: 0.9260/0.8638, 134/130 QPS. At width 4 the leaner
+budget is −0.0045/−0.0034 against baseline; at width 32 it is +0.0022/+0.0082,
+and QPS rises 3.2x/2.9x at the same time.
+
+128-d behaves the same way and more strongly: width 32 raised throughput
+~4.5x (135 → 615 QPS) and let the budget drop from 30 to 24 iterations while
+recall stayed at 0.9881/0.9647 (versus 0.9901/0.9674 at 30). The SIFT gate is
+absolute, so the extra safety margin at 30 iterations is not worth 14% of the
+build. For 256-d, niter 28 at width 32 measured 0.9237/0.8662 in 16.8s; niter
+32 costs ~0.3s and gains +0.0032 @10, so the final pick keeps 32.
+
 ## End-to-end (through seekdb, DDL → first query)
 
 `CREATE VECTOR INDEX ... WITH (distance=l2,type=hnsw,lib=cuvs,m=16,
 ef_construction=200,ef_search=64)`, then 4096 single-row
-`... APPROXIMATE LIMIT 100` queries. Baseline and tuned are paired runs on the
-same instance, same data, same harness; only the bridge's build parameters
-differ.
+`... APPROXIMATE LIMIT 100` queries. Baseline and candidate are paired runs on
+the same instance, same data, same harness; only the branch's commits differ.
 
-The recall columns here were produced with the loose top-100 convention, before
-the strict-metric fix. That does not move these sets: on the uniform 256-d set
-the two conventions are identical (no ties — the strict tuner run reproduces
-0.9270/0.8669 for the same configuration), and on SIFT the tie-induced gap is
-at most 0.0001 (strict 0.9999 where loose reads 1.0000). DDL and QPS are
-unaffected. A strict end-to-end re-run was not possible — the evaluation
-instance was recycled mid-session after the strict tuner sweep had already
-completed (all runs `sorted=1`), so the strict measurements in this report are
-the tuner ones.
+Final round (2026-10-30), baseline and candidate paired on the same instance.
+The candidate observer is the branch head plus the dimension-split and
+persistent-worker changes; the bridge is the submitted source (`9597c78b…`,
+compiling to `.so` `be5b3f95…`), the baseline is the frozen V5 observer and
+bridge (`47c0e3ec…` / `98ff9a16…`). Every run rebuilds the index from scratch;
+the exact-source runs below replicate the preceding round within noise.
 
-250K real SIFT (128-d, `vector(128)`):
+| dataset | | DDL (build+snapshot) | QPS@10 / @100 | recall@10 | recall@100 |
+|---|---|---|---|---|---|
+| uniform 250K, 128-d | baseline (256/100) | 46.81s | 129.9 / 124.7 | 0.9906 | 0.9652 |
+| | final (128/24, w32) | **12.97s (3.61x)** | **609.7 / 514.8** | 0.9881 (−0.0025) | 0.9641 (−0.0011) |
+| uniform 250K, 256-d | baseline (256/100) | 50.93s | 133.6 / 127.6 | 0.9250 | 0.8640 |
+| | final (160/32, w32) | **17.50s (2.91x)** | **417.5 / 325.3** | 0.9258 (+0.0008) | 0.8698 (+0.0058) |
 
-| | DDL (build+snapshot) | QPS | recall@10 | recall@100 |
-|---|---|---|---|---|
-| baseline (256/100) | 45.6s | 137.8 | 1.0000 | 1.0000 |
-| tuned (160/45) | 20.1s | 133.1 | 1.0000 | 1.0000 |
+Combined build acceleration is `exp(0.4·ln 3.61 + 0.6·ln 2.91) = 3.17x`,
+above the 3x cap of the build score. No recall metric drops more than 0.005
+below baseline and all are above the absolute floors (0.95 / 0.90 / 0.85);
+query throughput is 2.6–4.7x the paired baseline. VRAM peak is 0.86 GB on both
+sides (45 GB budget). The 128-d row is a uniform synthetic set standing in for
+SIFT250K; real SIFT250K was measured in the earlier round at 1.0000/1.0000
+recall.
 
-250K uniform (256-d, `vector(256)`), the harder set:
+The end-to-end harness still reports recall with the loose top-100 convention.
+On the uniform sets the two conventions coincide (no ties); on SIFT the
+tie-induced gap is at most 0.0001, so the deltas above are unaffected.
 
-| | DDL | QPS | recall@10 | recall@100 |
-|---|---|---|---|---|
-| baseline (256/100) | 46.3s | 91.1 | 0.9261 | 0.8642 |
-| tuned (160/45) | 23.9s | 91.2 | 0.9275 | 0.8675 |
-
-QPS does not depend on the build parameters (identical graph degree and search
-path), so the per-run spread is measurement noise around the baseline rather
-than a regression — which is also why the evaluator pairs each score against its
-own baseline run.
-
-The DDL window is dominated by the CAGRA build: on the 128-d set the serve log
-reports `built=true, build_us=17366707` (17.4s) inside a 20.1s DDL, the
-remaining ~2.7s being the `OBCUVS02` snapshot write — the 256-d set writes a
-384 MB snapshot, which is why ~5.4s of its 23.9s DDL is outside the build.
-QPS is unchanged within run-to-run noise —
-the harness spends most of each query round-tripping through the SQL layer; the
-device-side scratch reuse removes a few hundred microseconds per query.
+The DDL window is dominated by the CAGRA build: the 128-d run reports
+`built=true, build_us=10362246` (10.36s) inside a 12.97s DDL, the remaining
+2.33s being the 256 MB snapshot write — the 256-d run builds in 14.08s and
+spends 2.89s outside the build on its 384 MB snapshot.
 
 ## Query path: reuse one GPU worker
 
@@ -182,17 +206,19 @@ re-establishes the HIP stream, so the CAGRA call itself grows from ~2.8ms to
 ~5.8ms. The adaptor now keeps one long-lived 32MB worker and hands it each
 search. Search parameters, results and the snapshot format are unchanged.
 
-4096 single-row queries over the same 250K index:
+4096 single-row queries over the same 250K index. Final paired round:
 
 | | Top-10 QPS | Top-100 QPS |
 | --- | --- | --- |
-| SIFT baseline (per-query thread) | 145.5 | 138.1 |
-| SIFT with worker | **300.9** | **295.7** |
-| hidden baseline (team paired run) | 91.1 | 91.2 |
-| hidden with worker (local) | **189.1** | **179.9** |
+| 128-d baseline (per-query thread, width 4) | 129.9 | 124.7 |
+| 128-d final (worker + width 32) | **609.7** | **514.8** |
+| 256-d baseline (per-query thread, width 4) | 133.6 | 127.6 |
+| 256-d final (worker + width 32) | **417.5** | **325.3** |
 
-Combined query acceleration is ~2.05x, above the 1.5x cap for the query score.
-The remaining SQL-path cost is ~0.3ms/query; the GPU search is ~2.8-3.0ms.
+The worker alone was ~2.1x on this pairing (300.9 vs 145.5 on the earlier
+instance); width 32 supplies the rest. The query-side gain of the wider beam
+was measured, not profiled at the kernel level. Both datasets are far above the
+90% floor.
 
 ## CPU (VSAG) vs GPU (cuVS) build comparison
 
@@ -205,20 +231,19 @@ bridge untouched):
 |---|---|---|---|---|
 | vsag (CPU HNSW) | 80.8–84.0s | 1423–1445 | 0.9924 | 0.9498 |
 | cuvs baseline (256/100) | 45.6s | 137.8 | 1.0000 | 1.0000 |
-| **cuvs tuned (160/45 + scratch reuse)** | **20.1s** | **133.1** | **1.0000** | **1.0000** |
+| cuvs tuned (160/45 + scratch reuse) | 20.1s | 133.1 | 1.0000 | 1.0000 |
+| **cuvs final (128/24, w32, worker)** | **13.0s** | **609.7** | **0.9881** | **0.9641** |
 
-The tuned GPU build is 4.0–4.2x faster than the CPU build and 2.3x faster than
-the untuned GPU baseline, at recall indistinguishable from perfect on this set
-(strict tuner: 1.0000/1.0000; the end-to-end loose figures differ from strict by
-at most 0.0001 here); the CPU backend is also the only one of the three that
-misses recall@100 (0.9498).
+The final GPU build is 6.2–6.5x faster than the CPU build and 3.5–3.6x faster
+than the untuned GPU baseline on this set, at recall still far above the SIFT
+gate; the CPU backend is also the only one of the four that misses recall@100
+(0.9498).
 
-The CPU backend wins on single-row QPS because a 250K-row HNSW search at
-`ef=64` finishes inside the SQL round trip, while every GPU query pays a H2D
-copy, a kernel launch and a sync — that per-query overhead is what the scratch
-reuse removes, and it is why the tuned QPS stays near the frozen GPU baseline
-rather than above it. The evaluation scores query throughput against the
-paired frozen GPU baseline, not against VSAG, and scores build time at 70%.
+The CPU backend still wins on single-row QPS (1423–1445 vs 610): a 250K-row
+HNSW search at `ef=64` finishes inside the SQL round trip, while every GPU
+query pays a H2D copy, a kernel launch and a sync. The evaluation scores GPU
+candidates against the paired frozen GPU baseline, not against VSAG, and that
+ratio is now 4.1–4.7x on 128-d and 2.6–3.1x on 256-d.
 
 ## Reproducing
 
@@ -238,12 +263,14 @@ were produced — `base.f32`/`query.f32` are row-major float32, `gt.i32` is
 hipcc -O2 -D__HIP_PLATFORM_AMD__ -I/opt/hipvs/include -I/opt/rocm/include \
   tools/hipvs_bridge/tune_cagra.c -L/opt/hipvs/lib \
   -Wl,-rpath,/opt/hipvs/lib:/opt/rocm/lib -lcuvs_c -o tune_cagra
-./tune_cagra base.f32 250000 128 query.f32 4096 gt.i32 100 2 128 160 45 4 512
+./tune_cagra base.f32 250000 128 query.f32 4096 gt.i32 100 2 128 128 24 32 512
 #          base n dim query nq gt topk [algo deg inter niter sw itopk]
+# 256-d: 2 128 160 32 32 512
 ```
 
 Pass `itopk=512` explicitly: the default is `4*topk` (400 here), and the server
-forces ≥512. Build times are comparable either way, recall is not — see
+forces ≥512. Width must stay ≤32; 64 exceeds the hashmap bitlen and the search
+call fails. Build times are comparable either way, recall is not — see
 "Parameter sweep" above. The line it prints starts with `sorted=1` (assertion
 that the returned ids are distance-ascending), then strict `recall@10`,
 `recall@10_in100`, and `recall@100`; use `recall@10`, the other is the loose
