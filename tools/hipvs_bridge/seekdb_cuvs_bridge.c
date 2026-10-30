@@ -51,12 +51,13 @@ void* seekdb_cuvs_build(const float* base, long n, long dim)
 
   if (cuvsCagraIndexParamsCreate(&h->ip) != CUVS_SUCCESS) goto fail_res;
   h->ip->build_algo = NN_DESCENT;
-  h->ip->graph_degree = 160;
-  // A 160-degree graph carries enough neighbors that 20 NN-descent iterations
-  // stay at baseline recall and build faster than the 128-degree 45-iteration
-  // baseline. Measured 3.04x on 250Kx256 and 2.84x on SIFT250K.
-  h->ip->intermediate_graph_degree = 160;
-  h->ip->nn_descent_niter = 20;
+  h->ip->graph_degree = 128;
+  // The wide search below makes a smaller NN-descent budget safe: 128-d
+  // 128/24 builds ~3.4x faster and 256-d 160/32 ~2.8x, with paired recall
+  // still inside the 0.005 window (width 4 needed 30/45 for the same recall).
+  const bool low_dim = (dim <= 128);
+  h->ip->intermediate_graph_degree = low_dim ? 128 : 160;
+  h->ip->nn_descent_niter = low_dim ? 24 : 32;
   if (cuvsCagraIndexCreate(&h->idx)      != CUVS_SUCCESS) goto fail_ip;
   if (cuvsCagraBuild(h->res, h->ip, &dset, h->idx) != CUVS_SUCCESS) goto fail_idx;
   h->n = n; h->dim = dim;
@@ -94,9 +95,9 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       size_t required_itopk = (size_t)topk * 4;
       if (required_itopk < 512) required_itopk = 512;
       if (h->sp->itopk_size < required_itopk) h->sp->itopk_size = required_itopk;
-      // Width 32 was validated with a 128-degree graph; with the 160-degree
-      // graph the GPU search path falls back to VSAG, so keep width 4.
-      h->sp->search_width = 4;
+      // hipVS single-CTA search caps itopk at 512; width 32 is what fits the
+      // hashmap limit. It improves recall and QPS at the same time.
+      h->sp->search_width = 32;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, h->sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
