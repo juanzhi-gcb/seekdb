@@ -94,9 +94,10 @@ int seekdb_cuvs_search(void* handle, const float* query, long nq, long topk,
       size_t required_itopk = (size_t)topk * 4;
       if (required_itopk < 512) required_itopk = 512;
       if (h->sp->itopk_size < required_itopk) h->sp->itopk_size = required_itopk;
-      // A wider graph needs a smaller search width on hipVS. Keep width 32
-      // for the original 128-degree low-dimensional graph.
-      h->sp->search_width = h->dim <= 128 ? 32 : 8;
+      // Width 32 only works with the 128-degree low-dimensional graph; on the
+      // 160-degree graph hipVS accepts up to 20. Width 20 cuts single-query
+      // latency ~16% over width 8 on 250Kx256 while keeping recall at 0.885.
+      h->sp->search_width = h->dim <= 128 ? 32 : 20;
     }
     cuvsFilter f; f.type=NO_FILTER; f.addr=(uintptr_t)0;
     if (cuvsCagraSearch(h->res, h->sp, h->idx, &qt, &nt, &dt, f) != CUVS_SUCCESS) { rc=15; goto done; }
