@@ -228,6 +228,56 @@ static void *ob_cuvs_job(void *arg) {
   return nullptr;
 }
 
+
+// Persistent large-stack worker: cuVS search overflows the OB worker stack, and
+// creating a thread per query costs more than the search itself because each
+// fresh thread re-establishes the HIP stream. One worker serves all searches.
+static pthread_mutex_t g_cuvs_w_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_cuvs_w_cv = PTHREAD_COND_INITIALIZER;
+static pthread_once_t g_cuvs_w_once = PTHREAD_ONCE_INIT;
+static ObCuvsJob *g_cuvs_w_job = nullptr;
+static bool g_cuvs_w_done = false;
+static bool g_cuvs_w_ok = false;
+
+static void *ob_cuvs_worker_main(void *)
+{
+  for (;;) {
+    pthread_mutex_lock(&g_cuvs_w_mu);
+    while (g_cuvs_w_job == nullptr) { pthread_cond_wait(&g_cuvs_w_cv, &g_cuvs_w_mu); }
+    ObCuvsJob *job = g_cuvs_w_job;
+    g_cuvs_w_job = nullptr;
+    pthread_mutex_unlock(&g_cuvs_w_mu);
+    ob_cuvs_job(job);
+    pthread_mutex_lock(&g_cuvs_w_mu);
+    g_cuvs_w_done = true;
+    pthread_cond_broadcast(&g_cuvs_w_cv);
+    pthread_mutex_unlock(&g_cuvs_w_mu);
+  }
+  return nullptr;
+}
+
+static void ob_cuvs_start_worker(void)
+{
+  pthread_t tid;
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) { return; }
+  pthread_attr_setstacksize(&attr, 32UL * 1024 * 1024);
+  g_cuvs_w_ok = (pthread_create(&tid, &attr, ob_cuvs_worker_main, nullptr) == 0);
+  pthread_attr_destroy(&attr);
+}
+
+static void ob_cuvs_run_job(ObCuvsJob *job)
+{
+  pthread_once(&g_cuvs_w_once, ob_cuvs_start_worker);
+  if (!g_cuvs_w_ok) { ob_cuvs_job(job); return; }
+  pthread_mutex_lock(&g_cuvs_w_mu);
+  g_cuvs_w_job = job;
+  g_cuvs_w_done = false;
+  pthread_cond_broadcast(&g_cuvs_w_cv);
+  while (!g_cuvs_w_done) { pthread_cond_wait(&g_cuvs_w_cv, &g_cuvs_w_mu); }
+  pthread_mutex_unlock(&g_cuvs_w_mu);
+}
+
 // [BATCH] Feed nq probe vectors to ONE cuVS call (nq>1). Same large-stack
 // pthread pattern as the single-query path (cuVS overflows the OB worker stack).
 struct ObCuvsBatchJob {
@@ -290,10 +340,7 @@ static bool ob_cuvs_try_search(void *key, vsag::Allocator *alloc,
   std::vector<unsigned> off(topk);
   std::vector<float> dst(topk);
   ObCuvsJob job{ent, query, topk, static_cast<int>(ent->dim_), n, need_build, &off, &dst, -1, false};
-  pthread_t tid; pthread_attr_t attr; pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, 32UL * 1024 * 1024);
-  if (pthread_create(&tid, &attr, ob_cuvs_job, &job) == 0) { pthread_join(tid, nullptr); }
-  pthread_attr_destroy(&attr);
+  ob_cuvs_run_job(&job);
   if (job.built_) { ob_vsag_trace("cuvs_build", key, static_cast<long>(ent->dim_), static_cast<long>(n)); }
   if (ent->bridge_ == nullptr || job.rc_ != 0) { return false; }
   // Post-filter: cuVS returned UNFILTERED top-k. Apply the query's row filter
