@@ -4,6 +4,29 @@ Baseline: V5 frozen commit `634888d9b037153fa143d2c913ba4b25503e1d62`.
 All numbers below are from a Radeon PRO W7900D (gfx1100, 48 GB), ROCm 7.2.4,
 hipVS under `/opt/hipvs`, the same GPU family the evaluation uses.
 
+## Final configuration (2026-10-30)
+
+The submitted bridge builds every CAGRA index with `graph_degree=160`,
+`intermediate_graph_degree=160` and `nn_descent_niter=20`, and searches at
+`search_width=4`, `itopk>=512`. The 160-degree graph carries enough neighbors
+that 20 iterations stay at baseline recall, while building faster than the
+128-degree 45-iteration baseline on both datasets.
+
+The earlier `search_width=32` tuning below was measured with a 128-degree
+graph. With the 160-degree graph the hipVS search path fails and the adaptor
+falls back to a lazily built VSAG index (first query ~210s, recall ~0.17), so
+the final configuration keeps width 4. Width 4 with the persistent search
+worker still gives ~2.0-2.1x query throughput over the V5 baseline.
+
+Local final measurements (gfx1100, 24-core pin, nq=4096):
+
+| dataset | build | recall@10/@100 | QPS@10/@100 |
+| --- | --- | --- | --- |
+| SIFT250K 128-d | **7.07s** (baseline 20.08s) | 1.0000/1.0000 | 286.9/274.5 |
+| 250Kx256 uniform | **7.86s** (baseline 23.87s) | 0.922/0.877 (baseline 0.916/0.8636) | 226.6/218.7 |
+
+Combined build is ~2.96x and combined query ~2.05x locally.
+
 ## What changed
 
 `tools/hipvs_bridge/seekdb_cuvs_bridge.c`, three independent changes:
