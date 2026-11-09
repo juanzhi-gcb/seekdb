@@ -48,6 +48,7 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 
 ## 论文与学习材料
 
+- [页面校验优化](docs/checksum-results.md)
 - [优化对照结果](docs/optimization-results.md)
 - [实验方法](bench/optimization-method.md)
 - [SQL 执行研究](docs/sql-execution-research.md)

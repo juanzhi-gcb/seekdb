@@ -17,6 +17,7 @@ parser.add_argument("--rounds", type=int, default=3)
 parser.add_argument("--image", default="minivectordb:dev")
 parser.add_argument("--source", required=True)
 parser.add_argument("--root", default="/mnt/d/Codex/MiniVectorDB/data/optimization-bench")
+parser.add_argument("--combined-only", action="store_true", help="measure only selective decode and batch writes together")
 parser.add_argument("--batch-only", action="store_true", help="compare decoding with batch writes fixed on")
 parser.add_argument("--timeout", type=int, default=1800)
 args = parser.parse_args()
@@ -41,6 +42,8 @@ docker = ["docker", "--config", "/var/lib/minivectordb-docker-client"]
 records = []
 for round_number in range(args.rounds):
     for decode, batch in orders[round_number % len(orders)]:
+        if args.combined_only and not (decode and batch):
+            continue
         if args.batch_only and not batch:
             continue
         mode = f"decode{decode}-batch{batch}"
@@ -96,7 +99,7 @@ for mode in sorted({r["mode"] for r in records}):
                                  "vector_values_filtered", "vector_values_unfiltered", "cells_materialized",
                                  "process_maxrss_kib", "local_cgroup_peak_bytes"]}
 report = {"source": args.source, "rows": args.rows, "queries": args.queries, "rounds": args.rounds,
-          "batch_only": args.batch_only,
+          "batch_only": args.batch_only, "combined_only": args.combined_only,
           "scope": "Local warm SQL API + sink, batch100 autocommits, shuffled inserts, exact truth and reopen checks. "
                    "No stdin/stdout request transport timing; file growth is logical, not physical IO. "
                    "Memory includes benchmark data/driver and local container page cache; swap/IO attribution not official.",

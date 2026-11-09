@@ -34,6 +34,16 @@
       "id": "u06",
       "role": "user",
       "content": "继续下一阶段，先看看正式题包和测试驱动有没有更新，再做按需解码和降低写入放大的优化，跑对照实验确认收益。还是全部放 D 盘，别动初赛分支，先不推送、不提测。"
+    },
+    {
+      "id": "u07",
+      "role": "user",
+      "content": "持续优化，继续"
+    },
+    {
+      "id": "u08",
+      "role": "user",
+      "content": "继续"
     }
   ],
   "experiments": [
@@ -162,6 +172,20 @@
       "purpose": "基准失败时清理本次容器",
       "output": "PASS timeout cleanup: interrupted benchmark container and its temporary D-drive data removed",
       "note": "实际一秒超时注入；比较前后拥有容器集合与D盘临时目录集合；不删除其他容器。"
+    },
+    {
+      "id": "e19",
+      "source": "tool",
+      "purpose": "页面校验前后版本交替对照",
+      "output": "{\"scope\": \"Local warm SQL API;2000 rows128 dimensions40 queries;3 alternating samples per version;no official score\", \"medians\": {\"baseline\": {\"write_ms\": 6376.644168, \"query_total_ms\": 15785.471319, \"query_filtered_ms\": 7839.346844, \"query_unfiltered_ms\": 7946.124475, \"database_bytes\": 10223616, \"insert_file_growth_bytes\": 10076160}, \"table\": {\"write_ms\": 4973.974588, \"query_total_ms\": 12536.93325, \"query_filtered_ms\": 6260.438865, \"query_unfiltered_ms\": 6276.494385, \"database_bytes\": 10223616, \"insert_file_growth_bytes\": 10076160}}, \"validated_queries\": 240, \"reopen_checks\": 6, \"source\": {\"baseline\": \"4ad8b99326cbd24523912143bff58b2e286a3c78\", \"table\": \"6f1824f48673fea71da59d9a20719bd25e4fe12c\"}, \"binary_sha256\": {\"baseline\": \"523b0ae5a19c8fe50e8310a4d1cf4530ad7ef2daf6fa99ea2b60edda344c028f\", \"table\": \"79ffa56a86d090799a563c02ec3a8e25f3208fbf102e2bb02746c7bed5d75484\"}}",
+      "note": "三轮各两种版本，全部240查询和6次重启校验通过；真实原始数据在bench/results/checksum-*。不等同正式规模或得分。"
+    },
+    {
+      "id": "e20",
+      "source": "tool",
+      "purpose": "页面校验最终容器验证",
+      "output": "16/16 tests passed; Total Test time =65.19 sec; PASS runtime persistence and EOF rollback",
+      "note": "核心6f1824f48673fea71da59d9a20719bd25e4fe12c；独立规格core_checksum1/1通过0.55秒。Docker服务启动后构建成功；全局WSL配置未改。"
     }
   ],
   "agent_observations": [
@@ -214,6 +238,11 @@
       "id": "a10",
       "source": "agent",
       "content": "初版高命中解码退化后，保留负面数据，改为已校验float32整块复制并测试精确位，再完整复测。最终组合写入耗时减少64.0%，文件增长减少92.76%；SQL总查询仅减少2.34%，小幅且样本有限，不把解码专项约15%至26%当作端到端收益。两项默认开启但保留独立开关。"
+    },
+    {
+      "id": "a11",
+      "source": "agent",
+      "content": "页面CRC32原实现每字节迭代8位，换成固定256项查表。保留多项式、起止取反、字段置零、整页校验和格式02。由Agent提出和实现；独立逐位参考验证字节一致，前后版本使用相同SQL基准测量。"
     }
   ],
   "limitations": [
