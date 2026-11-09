@@ -91,4 +91,54 @@ namespace minivectordb {
     in.end();
     return r;
   }
+  LazyRowView::LazyRowView(const Schema& schema, std::string_view bytes, ExecutionInfo& info)
+      : schema_(schema), bytes_(bytes), cells_(schema.columns.size()), info_(info) {
+    binary::Reader in(bytes);
+    if(in.get(1)!=1 || in.get(4)!=schema.columns.size())
+      throw Error(ErrorCode::Corruption,"row version or column count mismatch");
+    offsets_.reserve(schema.columns.size());
+    for(const auto& column:schema.columns) {
+      offsets_.push_back(bytes.size()-in.remaining());
+      switch(column.type) {
+        case ColumnType::Bigint: (void)in.get(); break;
+        case ColumnType::Varchar:
+          try { validate_text(in.text_view(),column.extent); }
+          catch(const std::invalid_argument& error) { throw Error(ErrorCode::Corruption,error.what()); }
+          break;
+        case ColumnType::Vector: {
+          auto count=in.get(4);
+          if(count!=column.extent || count>in.remaining()/4)
+            throw Error(ErrorCode::Corruption,"invalid VECTOR length");
+          for(std::uint64_t i=0;i<count;++i)
+            if(!std::isfinite(std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)))))
+              throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
+          break;
+        }
+      }
+    }
+    in.end();
+  }
+  const Cell& LazyRowView::operator[](std::size_t index) const {
+    auto& cell=cells_.at(index);
+    if(!cell) {
+      binary::Reader in(bytes_.substr(offsets_[index]));
+      switch(schema_.columns[index].type) {
+        case ColumnType::Bigint: cell.emplace(std::bit_cast<std::int64_t>(in.get())); break;
+        case ColumnType::Varchar: cell.emplace(in.text()); break;
+        case ColumnType::Vector: {
+          auto count=in.get(4);
+          std::vector<float> values;
+          values.reserve(static_cast<std::size_t>(count));
+          for(std::uint64_t i=0;i<count;++i)
+            values.push_back(std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4))));
+          cell.emplace(std::move(values));
+          ++info_.vector_values_materialized;
+          break;
+        }
+      }
+      ++info_.cells_materialized;
+    }
+    return *cell;
+  }
+
 }

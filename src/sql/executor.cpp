@@ -8,12 +8,35 @@ namespace minivectordb {
   namespace {
     struct StopScan {
     };
+    void count_decoded(const Row& row,ExecutionInfo& info) {
+      info.cells_materialized+=row.size();
+      for(const auto& cell:row)if(std::holds_alternative<std::vector<float>>(cell))++info.vector_values_materialized;
+    }
+    class SelectRow {
+      Row eager_;
+      std::optional<LazyRowView> lazy_;
+    public:
+      SelectRow(const Schema& schema,std::int64_t key,std::string_view bytes,bool selective,ExecutionInfo& info) {
+        if(selective)lazy_.emplace(schema,bytes,info);
+        else { eager_=decode_row(schema,bytes); count_decoded(eager_,info); }
+        if(std::get<std::int64_t>((*this)[schema.primary])!=key)
+          throw Error(ErrorCode::Corruption,"row primary key disagrees with index");
+      }
+      const Cell& operator[](std::size_t index) const { return lazy_?(*lazy_)[index]:eager_[index]; }
+      bool matches(const std::vector<sql::BoundPredicate>& predicates) const {
+        for(const auto& p:predicates) {
+          int cmp=sql::compare_cells((*this)[p.column],p.value);
+          if((p.op=="="&&cmp!=0)||(p.op=="<"&&cmp>=0)||(p.op=="<="&&cmp>0)||(p.op==">"&&cmp<=0)||(p.op==">="&&cmp<0))return false;
+        }
+        return true;
+      }
+    };
     struct DistanceCache {
       std::vector<std::pair<const sql::BoundExpr*,double>> values;
       bool same(const sql::BoundExpr&a,const sql::BoundExpr&b)const {
         return a.column==b.column&&a.query==b.query;
       }
-      double square(const sql::BoundExpr&e,const Row&r,ExecutionInfo&info) {
+      double square(const sql::BoundExpr&e,const SelectRow&r,ExecutionInfo&info) {
         for(const auto&[expr,value]:values)if(same(*expr,e))return value;
         auto value=sql::squared_distance(std::get<std::vector<float>>(r[e.column]),*e.query);
         ++info.distances_computed;
@@ -21,7 +44,7 @@ namespace minivectordb {
         return value;
       }
     };
-    Row project(const sql::Bound&b,const Row&r,DistanceCache&cache,ExecutionInfo&info) {
+    Row project(const sql::Bound&b,const SelectRow&r,DistanceCache&cache,ExecutionInfo&info) {
       Row out;
       out.reserve(b.projection.size());
       for(const auto&e:b.projection) {
@@ -57,6 +80,7 @@ namespace minivectordb {
       auto callback=[&](auto key,auto bytes) {
         ++info.rows_examined;
         auto row=decode(s,key,bytes);
+        count_decoded(row,info);
         if(sql::matches(row,b.predicates))visit(key,row);
       };
       if(b.primary_lookup) {
@@ -64,10 +88,23 @@ namespace minivectordb {
       }
       else store.scan_in(s.id,callback);
     }
-    Row fetch(const Schema&s,std::int64_t key) {
+    void scan_select(const Schema& s,const sql::Bound& b,ExecutionInfo& info,
+                     const std::function<void(std::int64_t,const SelectRow&)>& visit) {
+      auto callback=[&](auto key,auto bytes) {
+        ++info.rows_examined;
+        SelectRow row(s,key,bytes,options.selective_decode,info);
+        if(row.matches(b.predicates))visit(key,row);
+      };
+      if(b.primary_lookup) {
+        if(auto raw=store.get_in(s.id,*b.primary_lookup))callback(*b.primary_lookup,*raw);
+      } else store.scan_in(s.id,callback);
+    }
+    void fetch_select(const Schema& s,std::int64_t key,ExecutionInfo& info,
+                      const std::function<void(const SelectRow&)>& visit) {
       auto raw=store.get_in(s.id,key);
       if(!raw)throw Error(ErrorCode::Corruption,"selected row disappeared");
-      return decode(s,key,*raw);
+      SelectRow row(s,key,*raw,options.selective_decode,info);
+      visit(row);
     }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
       ExecutionInfo info;
@@ -76,14 +113,14 @@ namespace minivectordb {
       if(sink.columns)sink.columns(labels);
       auto limit=statement.limit.value_or(UINT64_MAX);
       if(!limit)return info;
-      auto emit=[&](const Row&r,DistanceCache&cache) {
+      auto emit=[&](const SelectRow&r,DistanceCache&cache) {
         auto output=project(b,r,cache,info);
         if(sink.row)sink.row(output);
         ++info.affected_rows;
       };
       if(b.order.empty()) {
         try {
-          scan(s,b,info,[&](auto,const Row&r) {
+          scan_select(s,b,info,[&](auto,const SelectRow&r) {
             DistanceCache cache;
             emit(r,cache);
             if(--limit==0)throw StopScan {
@@ -97,28 +134,29 @@ namespace minivectordb {
       if(b.order.size()==1&&!b.order[0].descending&&b.order[0].expression.query&&statement.limit&&limit<=options.memory_budget_bytes/(4*sizeof(Neighbor))) {
         const auto&e=b.order[0].expression;
         auto winners=exact_top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
-          scan(s,b,info,[&](auto key,const Row&r) {
+          scan_select(s,b,info,[&](auto key,const SelectRow&r) {
             ++info.distances_computed;
             visit(key,std::get<std::vector<float>>(r[e.column]));
           });
         });
         for(const auto&winner:winners) {
-          auto row=fetch(s,winner.key);
-          DistanceCache cache;
-          Row output;
-          output.reserve(b.projection.size());
-          for(const auto&projection:b.projection) {
-            if(projection.query&&cache.same(projection,e))output.emplace_back(winner.distance);
-            else if(projection.query)output.emplace_back(std::sqrt(cache.square(projection,row,info)));
-            else output.push_back(row[projection.column]);
-          }
-          if(sink.row)sink.row(output);
-          ++info.affected_rows;
+          fetch_select(s,winner.key,info,[&](const SelectRow& row) {
+            DistanceCache cache;
+            Row output;
+            output.reserve(b.projection.size());
+            for(const auto&projection:b.projection) {
+              if(projection.query&&cache.same(projection,e))output.emplace_back(winner.distance);
+              else if(projection.query)output.emplace_back(std::sqrt(cache.square(projection,row,info)));
+              else output.push_back(row[projection.column]);
+            }
+            if(sink.row)sink.row(output);
+            ++info.affected_rows;
+          });
         }
         return info;
       }
       sql::Sorter sorter(options,b.order,info);
-      scan(s,b,info,[&](auto key,const Row&r) {
+      scan_select(s,b,info,[&](auto key,const SelectRow&r) {
         DistanceCache cache;
         sql::SortRecord record;
         record.key=key;
@@ -130,10 +168,11 @@ namespace minivectordb {
         sorter.add(std::move(record));
       });
       sorter.finish(limit,[&](const sql::SortRecord&record) {
-        auto row=fetch(s,record.key);
-        DistanceCache cache;
-        for(std::size_t i=0;i<b.order.size();++i)if(b.order[i].expression.query)cache.values.emplace_back(&b.order[i].expression,std::get<double>(record.values[i]));
-        emit(row,cache);
+        fetch_select(s,record.key,info,[&](const SelectRow& row) {
+          DistanceCache cache;
+          for(std::size_t i=0;i<b.order.size();++i)if(b.order[i].expression.query)cache.values.emplace_back(&b.order[i].expression,std::get<double>(record.values[i]));
+          emit(row,cache);
+        });
       });
       return info;
     }

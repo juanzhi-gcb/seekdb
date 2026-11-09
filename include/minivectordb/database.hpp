@@ -25,6 +25,8 @@ struct Options {
   std::filesystem::path sort_directory;
   // Working-set target, excluding the current row/key and allocation/stream overhead.
   std::size_t memory_budget_bytes = 8 * 1024 * 1024;
+  bool selective_decode = true;
+  bool batch_writes = true;
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -34,6 +36,8 @@ struct ExecutionInfo {
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;
   std::uint64_t rows_examined = 0, distances_computed = 0, spill_runs = 0;
+  // Decoded Cells only: includes winner refetch and DML scans, excludes output copies.
+  std::uint64_t vector_values_materialized = 0, cells_materialized = 0;
 };
 
 // Single-threaded, non-reentrant. Callback references last only during the callback.

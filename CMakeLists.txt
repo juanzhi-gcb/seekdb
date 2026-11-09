@@ -30,3 +30,8 @@ target_compile_options(minivectordb PRIVATE -Wall -Wextra -Wpedantic -Wconversio
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_tests.py $<TARGET_FILE:minivectordb>)
 set_tests_properties(cli PROPERTIES TIMEOUT 120)
+
+add_executable(selective_tests tests/selective_tests.cpp)
+target_link_libraries(selective_tests PRIVATE minivectordb_core)
+add_test(NAME core_selective COMMAND selective_tests)
+set_tests_properties(core_selective PROPERTIES TIMEOUT 180)

@@ -25,13 +25,14 @@ namespace minivectordb::binary {
       for(unsigned i=0;i<n;++i)v|=std::uint64_t(static_cast<unsigned char>(data[pos++]))<<(8*i);
       return v;
     }
-    std::string text() {
+    std::string_view text_view() {
       auto n=get(4);
       if(n>remaining())throw Error(ErrorCode::Corruption,"invalid binary string length");
-      auto s=std::string(data.substr(pos,static_cast<std::size_t>(n)));
+      auto s=data.substr(pos,static_cast<std::size_t>(n));
       pos+=static_cast<std::size_t>(n);
       return s;
     }
+    std::string text() { return std::string(text_view()); }
     void end() {
       if(remaining())throw Error(ErrorCode::Corruption,"trailing binary data");
     }
