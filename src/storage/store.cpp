@@ -16,7 +16,7 @@ namespace minivectordb {
 namespace {
 constexpr std::size_t page_size=4096, payload=32, chunk_size=page_size-payload;
 using Page=std::array<unsigned char,page_size>;
-constexpr char page_magic[]="MVDBPG01", root_magic[]="MVDBRT01";
+constexpr char page_magic[]="MVDBPG02", root_magic[]="MVDBRT02";
 enum : std::uint32_t { branch=1, overflow=2 };
 std::atomic<std::uint64_t> next_owner{1};
 [[noreturn]] void io_error(const char* action) {throw std::system_error(errno,std::generic_category(),action);}
@@ -73,7 +73,7 @@ bool valid_root(const Page& p,std::uint64_t complete_pages) {
 }
 std::uint64_t ordered_key(std::int64_t key) {return std::bit_cast<std::uint64_t>(key)^(1ULL<<63);}
 std::int64_t signed_key(std::uint64_t key) {return std::bit_cast<std::int64_t>(key^(1ULL<<63));}
-unsigned key_index(std::uint64_t key,unsigned depth) {return static_cast<unsigned>((key>>((7-depth)*8))&255);}
+unsigned key_index(std::uint64_t space,std::uint64_t key,unsigned depth) {return static_cast<unsigned>(((depth<8?space:key)>>((7-depth%8)*8))&255);}
 }
 
 struct Store::Impl {
@@ -122,15 +122,15 @@ struct Store::Impl {
     while(id) {auto p=read(id,overflow); result.append(reinterpret_cast<const char*>(p.data()+payload),static_cast<std::size_t>(decode(p,12,4))); id=decode(p,16);}
     return result;
   }
-  std::uint64_t find(std::uint64_t key) const {
+  std::uint64_t find(std::uint64_t space,std::uint64_t key) const {
     auto id=root;
-    for(unsigned depth=0;depth<8 && id;++depth) {auto p=read(id,branch,depth); id=decode(p,payload+key_index(key,depth)*8);}
+    for(unsigned depth=0;depth<16 && id;++depth) {auto p=read(id,branch,depth); id=decode(p,payload+key_index(space,key,depth)*8);}
     return id;
   }
-  std::uint64_t replace(std::uint64_t id,unsigned depth,std::uint64_t key,std::uint64_t new_value) {
+  std::uint64_t replace(std::uint64_t id,unsigned depth,std::uint64_t space,std::uint64_t key,std::uint64_t new_value) {
     auto p=id?read(id,branch,depth):empty_page(branch,depth);
-    auto offset=payload+key_index(key,depth)*8;
-    auto child=depth==7?new_value:replace(decode(p,offset),depth+1,key,new_value);
+    auto offset=payload+key_index(space,key,depth)*8;
+    auto child=depth==15?new_value:replace(decode(p,offset),depth+1,space,key,new_value);
     encode(p,offset,child);
     bool empty=true;
     for(unsigned i=0;i<256;++i) if(decode(p,payload+i*8)) {empty=false; break;}
@@ -141,8 +141,8 @@ struct Store::Impl {
     auto p=read(id,branch,depth);
     for(unsigned i=0;i<256;++i) {
       auto child=decode(p,payload+i*8); if(!child) continue;
-      auto key=prefix|(static_cast<std::uint64_t>(i)<<((7-depth)*8));
-      if(depth==7) {auto contents=value(child); visitor(signed_key(key),contents);}
+      auto key=prefix|(static_cast<std::uint64_t>(i)<<((15-depth)*8));
+      if(depth==15) {auto contents=value(child); visitor(signed_key(key),contents);}
       else walk(child,depth+1,key,visitor);
     }
   }
@@ -171,6 +171,7 @@ Store::Store(const std::filesystem::path& path):impl_(std::make_unique<Impl>()) 
   if(info.st_size<static_cast<off_t>(2*page_size)) corrupt();
   auto bytes=static_cast<std::uint64_t>(info.st_size), complete=bytes/page_size;
   auto a=read_raw(s.fd,0), b=read_raw(s.fd,1);
+  if(std::memcmp(a.data(),"MVDBRT01",8)==0 || std::memcmp(b.data(),"MVDBRT01",8)==0) throw std::runtime_error("unsupported MiniVectorDB format 01; format 02 required");
   bool av=valid_root(a,complete), bv=valid_root(b,complete);
   if(!av && !bv) corrupt();
   const auto& selected=(!av || (bv && decode(b,8)>decode(a,8)))?b:a;
@@ -186,21 +187,24 @@ void Store::begin() {
   if(s.epoch==UINT64_MAX) throw std::overflow_error("transaction epoch exhausted");
   ++s.epoch; s.root=s.durable_root; s.active=true;
 }
-std::optional<std::string> Store::get(std::int64_t key) const {
-  auto& s=*impl_; s.usable(); auto id=s.find(ordered_key(key));
+std::optional<std::string> Store::get(std::int64_t key) const {return get_in(0,key);}
+void Store::put(std::int64_t key,std::string_view value) {put_in(0,key,value);}
+bool Store::erase(std::int64_t key) {return erase_in(0,key);}
+std::optional<std::string> Store::get_in(std::uint64_t space,std::int64_t key) const {
+  auto& s=*impl_; s.usable(); auto id=s.find(space,ordered_key(key));
   if(!id) return std::nullopt;
   return s.value(id);
 }
-void Store::put(std::int64_t key,std::string_view value) {
+void Store::put_in(std::uint64_t space,std::int64_t key,std::string_view value) {
   auto& s=*impl_; s.transaction();
   const auto data=s.write_value(value);
-  const auto next=s.replace(s.root,0,ordered_key(key),data);
+  const auto next=s.replace(s.root,0,space,ordered_key(key),data);
   s.root=next;
 }
-bool Store::erase(std::int64_t key) {
+bool Store::erase_in(std::uint64_t space,std::int64_t key) {
   auto& s=*impl_; s.transaction(); auto ordered=ordered_key(key);
-  if(!s.find(ordered)) return false;
-  const auto next=s.replace(s.root,0,ordered,0); s.root=next; return true;
+  if(!s.find(space,ordered)) return false;
+  const auto next=s.replace(s.root,0,space,ordered,0); s.root=next; return true;
 }
 void Store::commit() {
   auto& s=*impl_; s.transaction();
@@ -224,6 +228,11 @@ void Store::restore(const Savepoint& point) {
   s.root=point.root_;
 }
 void Store::scan(const std::function<void(std::int64_t,std::string_view)>& visitor) const {
-  auto& s=*impl_; s.usable(); s.walk(s.root,0,0,visitor);
+  scan_in(0,visitor);
+}
+void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
+  auto& s=*impl_; s.usable(); auto id=s.root;
+  for(unsigned depth=0;depth<8 && id;++depth) {auto p=s.read(id,branch,depth); id=decode(p,payload+key_index(space,0,depth)*8);}
+  s.walk(id,8,0,visitor);
 }
 }

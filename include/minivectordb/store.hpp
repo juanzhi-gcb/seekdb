@@ -24,11 +24,15 @@ public:
   std::optional<std::string> get(std::int64_t key) const;
   void put(std::int64_t key, std::string_view value);
   bool erase(std::int64_t key);
+  std::optional<std::string> get_in(std::uint64_t space, std::int64_t key) const;
+  void put_in(std::uint64_t space, std::int64_t key, std::string_view value);
+  bool erase_in(std::uint64_t space, std::int64_t key);
+  void scan_in(std::uint64_t space, const std::function<void(std::int64_t, std::string_view)>& visitor) const;
   void commit();
   void rollback();
   Savepoint savepoint() const;
   void restore(const Savepoint&);
-  // Visits in signed key order. Callback must not mutate this Store.
+  // Visits in signed key order. Uses an immutable root snapshot; callback may mutate the active transaction.
   void scan(const std::function<void(std::int64_t, std::string_view)>& visitor) const;
 private:
   struct Impl;
