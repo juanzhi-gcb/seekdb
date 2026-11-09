@@ -67,10 +67,16 @@ void flip(const fs::path& path,std::uint64_t offset) {
   c^=0x55; f.seekp(static_cast<std::streamoff>(offset)); f.write(&c,1); f.flush(); CHECK(f.good());
 }
 void child_success(pid_t pid) { int status=0; CHECK(waitpid(pid,&status,0)==pid); CHECK(WIFEXITED(status) && WEXITSTATUS(status)==0); }
-void storage() {
+fs::path make_test_directory(std::string_view prefix) {
   const auto* configured=std::getenv("MVDB_TEST_DIR");
-  fs::path dir=(configured?fs::path(configured):fs::temp_directory_path()/"minivectordb-tests") / ("run-"+std::to_string(getpid()));
-  fs::create_directories(dir);
+  const auto base=configured?fs::path(configured):fs::temp_directory_path()/"minivectordb-tests";
+  fs::create_directories(base);
+  auto pattern=(base/(std::string(prefix)+"-XXXXXX")).string();
+  if(::mkdtemp(pattern.data())==nullptr) throw std::runtime_error("cannot create unique test directory");
+  return fs::path(pattern);
+}
+void storage() {
+  const auto dir=make_test_directory("run");
   auto path=dir/"main.db";
   Store::Savepoint stale;
   {
@@ -123,9 +129,13 @@ void storage() {
 }
 
 void storage_failure() {
-  const auto* configured=std::getenv("MVDB_TEST_DIR");
-  fs::path dir=(configured?fs::path(configured):fs::temp_directory_path()/"minivectordb-tests") / ("failure-"+std::to_string(getpid()));
-  fs::create_directories(dir); auto path=dir/"failure.db";
+  const auto dir=make_test_directory("failure");
+  const auto another=make_test_directory("failure");
+  CHECK(dir!=another);
+  CHECK(fs::is_directory(dir) && fs::is_directory(another));
+  CHECK(fs::is_empty(dir) && fs::is_empty(another));
+  fs::remove_all(another);
+  auto path=dir/"failure.db";
   auto pid=fork(); CHECK(pid>=0);
   if(pid==0) {
     try {
