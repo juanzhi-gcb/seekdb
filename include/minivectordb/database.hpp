@@ -28,7 +28,7 @@ struct Options {
   std::size_t memory_budget_bytes = 8 * 1024 * 1024;
   bool selective_decode = true;
   bool batch_writes = true;
-  std::size_t index_cache_bytes = 0; // Bounded validated INDEX pages; zero disables.
+  std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;

@@ -1,6 +1,8 @@
 # MiniVectorDB 验证记录
 
-最新阶段：[耗时拆分与路径对照](path-profile-results.md)，17/17容器测试65.68秒，12组实验全部通过。
+最新阶段：[缓存/CRC/原型结果](portfolio-results.md)，最终默认配置19/19容器测试59.30秒，runtime通过。详情[本轮验证](portfolio-validation.md)。
+
+上一阶段：[耗时拆分与路径对照](path-profile-results.md)，17/17容器测试65.68秒，12组实验全部通过。
 
 最新增量：[页面校验优化验证](checksum-validation.md)。以下保留上一轮按需解码/批量写入记录。
 
