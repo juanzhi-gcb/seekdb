@@ -1,5 +1,7 @@
 # MiniVectorDB 验证记录
 
+最新阶段：[耗时拆分与路径对照](path-profile-results.md)，17/17容器测试65.68秒，12组实验全部通过。
+
 最新增量：[页面校验优化验证](checksum-validation.md)。以下保留上一轮按需解码/批量写入记录。
 
 日期：2026-11-09。本轮最终核心提交 8f1a679ff0c4d59e13949e228cc5f9f198698578。测试之后只有基准、文档及学习材料归档，不改变核心代码。前一轮原始记录保留在 [SQL 里程碑验证](validation-sql-milestone.md)。
