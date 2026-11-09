@@ -31,7 +31,10 @@ public:
   };
   // Cache budget covers the allocated entry array, including page and entry metadata.
   // Fixed Store bookkeeping and allocator overhead are excluded; zero disables caching.
-  explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0);
+  // Packing selects format03 for new files; existing formats are never migrated.
+  // Each scan lazily allocates its own bounded validated packed-page cache.
+  explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0,
+                 bool packed_values=false, std::size_t packed_scan_cache_bytes=262144);
   CacheStats cache_stats() const noexcept;
   // Reset event counters, retaining the cache and its capacity/residency.
   void reset_cache_stats() noexcept;

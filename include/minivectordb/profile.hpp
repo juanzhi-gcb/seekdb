@@ -9,7 +9,7 @@ struct Metric {
 };
 struct Snapshot {
   Metric pread,pwrite,fsync,page_checksum,row_validation,row_materialization,row_decode,vector_distance;
-  Metric page_read_branch,page_read_overflow;
+  Metric page_read_branch,page_read_overflow,page_read_packed,packed_cache_hit;
   bool operator==(const Snapshot&) const = default;
 };
 // Per-thread diagnostics. Enable/reset only between synchronous operations.

@@ -29,6 +29,8 @@ struct Options {
   bool selective_decode = true;
   bool batch_writes = true;
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
+  bool packed_values = false; // Opt in to format03 for new files; existing format is preserved.
+  std::size_t packed_scan_cache_bytes = 262144; // Per-scan validated packed pages; zero disables.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;

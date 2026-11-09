@@ -85,7 +85,7 @@ namespace minivectordb {
     Store store;
     Options options;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }

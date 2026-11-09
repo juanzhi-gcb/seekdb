@@ -19,8 +19,11 @@ namespace minivectordb {
 namespace {
 constexpr std::size_t page_size=4096, payload=32, chunk_size=page_size-payload;
 using Page=std::array<unsigned char,page_size>;
-constexpr char page_magic[]="MVDBPG02", root_magic[]="MVDBRT02";
-enum : std::uint32_t { branch=1, overflow=2 };
+constexpr std::uint64_t packed_tag=1ULL<<63;
+constexpr std::size_t max_slots=508;
+const char* page_magic(bool v3) {return v3?"MVDBPG03":"MVDBPG02";}
+const char* root_magic(bool v3) {return v3?"MVDBRT03":"MVDBRT02";}
+enum : std::uint32_t { branch=1, overflow=2, packed=3 };
 std::atomic<std::uint64_t> next_owner{1};
 [[noreturn]] void io_error(const char* action) {throw std::system_error(errno,std::generic_category(),action);}
 [[noreturn]] void corrupt() {throw std::runtime_error("corrupt MiniVectorDB file");}
@@ -77,13 +80,13 @@ void sync_fd(int fd) {
     if(errno!=EINTR) io_error("fsync");
   }
 }
-Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent) {
-  Page p{}; std::memcpy(p.data(),root_magic,8);
+Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent,bool v3) {
+  Page p{}; std::memcpy(p.data(),root_magic(v3),8);
   encode(p,8,generation); encode(p,16,root); encode(p,24,extent);
   encode(p,32,page_checksum(p,32),4); return p;
 }
 bool valid_root(const Page& p,std::uint64_t complete_pages) {
-  if(std::memcmp(p.data(),root_magic,8)!=0 || decode(p,32,4)!=page_checksum(p,32)) return false;
+  if((std::memcmp(p.data(),root_magic(false),8)!=0 && std::memcmp(p.data(),root_magic(true),8)!=0) || decode(p,32,4)!=page_checksum(p,32)) return false;
   auto root=decode(p,16), extent=decode(p,24);
   return extent>=2 && extent<=complete_pages && (root==0 || (root>=2 && root<extent));
 }
@@ -110,13 +113,40 @@ struct Store::Impl {
   int fd=-1;
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
-  bool active=false, poisoned=false;
+  bool active=false, poisoned=false, format3=false, packing=false;
+  std::size_t scan_budget=0;
+  // Only the entry array is allocated, lazily on the first packed reference.
+  // Each scan owns its array, including recursive scans from a visitor.
+  struct ScanCache {
+    struct Entry {Page page{}; std::uint64_t id=0;};
+    std::unique_ptr<Entry[]> entries;
+    std::size_t count=0, budget=0;
+    explicit ScanCache(std::size_t bytes):budget(bytes) {}
+    Entry* slot(std::uint64_t id) {
+      if(!entries) {
+        count=budget/sizeof(Entry);
+        if(!count)return nullptr;
+        entries=std::make_unique<Entry[]>(count);
+      }
+      return &entries[id%count];
+    }
+  };
+  std::uint64_t physical(std::uint64_t ref,bool allow_packed=false) const {
+    auto id=ref;
+    if(ref&packed_tag) {
+      if(!format3 || !allow_packed || (ref&511)>=max_slots)corrupt();
+      id=(ref&~packed_tag)>>9;
+    }
+    if(id<2 || id>=next_page)corrupt();
+    return id;
+  }
   ~Impl() {if(fd>=0) ::close(fd);}
   void usable() const {if(poisoned) throw std::runtime_error("commit outcome uncertain; close and reopen Store");}
   void transaction() const {usable(); if(!active) throw std::logic_error("no active transaction");}
   Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0) const {
-    profile::detail::count(type==branch?&profile::Snapshot::page_read_branch:&profile::Snapshot::page_read_overflow);
-    if(id<2 || id>=next_page) corrupt();
+    profile::detail::count(type==branch?&profile::Snapshot::page_read_branch:
+        type==packed?&profile::Snapshot::page_read_packed:&profile::Snapshot::page_read_overflow);
+    (void)physical(id);
     CacheEntry* slot=nullptr;
     if(type==branch && cache_count) {
       slot=&cache[id%cache_count];
@@ -129,16 +159,28 @@ struct Store::Impl {
       ++stats.misses;
     }
     auto p=read_raw(fd,id);
-    if(std::memcmp(p.data(),page_magic,8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
+    if(std::memcmp(p.data(),page_magic(format3),8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
       if(decode(p,12,4)!=depth) corrupt();
       for(unsigned i=0;i<256;++i) {
         auto child=decode(p,payload+i*8);
-        if(child!=0 && (child<2 || child>=id)) corrupt();
+        if(child!=0 && physical(child,depth==15)>=id) corrupt();
       }
-    } else {
+    } else if(type==overflow) {
       auto next=decode(p,16);
-      if(decode(p,12,4)>chunk_size || (next!=0 && (next<2 || next>=id))) corrupt();
+      if(decode(p,12,4)>chunk_size || (next!=0 && physical(next)>=id)) corrupt();
+    } else {
+      if(!format3)corrupt();
+      const auto count=decode(p,12,4);
+      if(!count || count>max_slots || decode(p,16)!=0)corrupt();
+      auto end=page_size;
+      const auto directory_end=payload+count*8;
+      for(std::size_t i=0;i<count;++i) {
+        const auto offset=decode(p,payload+i*8,4), length=decode(p,payload+i*8+4,4);
+        // Canonical tightly packed reverse payload: validates every slot before admission.
+        if(offset<directory_end || offset>end || length!=end-offset)corrupt();
+        end=offset;
+      }
     }
     if(slot) {
       if(slot->id) ++stats.evictions;
@@ -149,10 +191,10 @@ struct Store::Impl {
   }
   std::uint64_t append(Page p) {
     // Publish an address only after its complete write. A failed page has no root references.
-    auto id=next_page; encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
+    auto id=next_page; if(id&packed_tag)throw std::length_error("database page address exhausted"); encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
   }
   Page empty_page(std::uint32_t type,unsigned used) const {
-    Page p{}; std::memcpy(p.data(),page_magic,8); encode(p,8,type,4); encode(p,12,used,4); return p;
+    Page p{}; std::memcpy(p.data(),page_magic(format3),8); encode(p,8,type,4); encode(p,12,used,4); return p;
   }
   std::uint64_t write_value(std::string_view value) {
     std::uint64_t next=0; std::size_t end=value.size();
@@ -164,7 +206,24 @@ struct Store::Impl {
     } while(end);
     return next;
   }
-  std::string value(std::uint64_t id) const {
+  std::string value(std::uint64_t id,ScanCache* memo=nullptr) const {
+    if(id&packed_tag) {
+      const auto page_id=physical(id,true);
+      auto* slot=memo?memo->slot(page_id):nullptr;
+      Page page;
+      if(slot && slot->id==page_id) {
+        profile::detail::count(&profile::Snapshot::page_read_packed);
+        profile::detail::count(&profile::Snapshot::packed_cache_hit);
+        page=slot->page;
+      } else {
+        page=read(page_id,packed);
+        if(slot) {slot->page=page; slot->id=page_id;}
+      }
+      const auto index=id&511;
+      if(index>=decode(page,12,4))corrupt();
+      return std::string(reinterpret_cast<const char*>(page.data()+decode(page,payload+index*8,4)),
+                         static_cast<std::size_t>(decode(page,payload+index*8+4,4)));
+    }
     std::string result;
     while(id) {auto p=read(id,overflow); result.append(reinterpret_cast<const char*>(p.data()+payload),static_cast<std::size_t>(decode(p,12,4))); id=decode(p,16);}
     return result;
@@ -203,19 +262,19 @@ struct Store::Impl {
     for(unsigned i=0;i<256;++i)if(decode(page,payload+i*8))return append(page);
     return 0;
   }
-  void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
+  void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,const std::function<void(std::int64_t,std::string_view)>& visitor,ScanCache& memo) const {
     if(!id) return;
     auto p=read(id,branch,depth);
     for(unsigned i=0;i<256;++i) {
       auto child=decode(p,payload+i*8); if(!child) continue;
       auto key=prefix|(static_cast<std::uint64_t>(i)<<((15-depth)*8));
-      if(depth==15) {auto contents=value(child); visitor(signed_key(key),contents);}
-      else walk(child,depth+1,key,visitor);
+      if(depth==15) {auto contents=value(child,&memo); visitor(signed_key(key),contents);}
+      else walk(child,depth+1,key,visitor,memo);
     }
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes):impl_(std::make_unique<Impl>()) {
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);
   if(impl_->fd>=0) created=true;
@@ -225,9 +284,10 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes):im
     if(impl_->fd<0) io_error("open database");
   }
   auto& s=*impl_;
+  s.packing=packed_values; s.format3=packed_values; s.scan_budget=packed_scan_cache_bytes;
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created) {
-    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2),0); sync_fd(s.fd);
+    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3),0); sync_fd(s.fd);
     auto parent=path.parent_path(); if(parent.empty()) parent=".";
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
     if(directory<0) io_error("open database directory");
@@ -241,7 +301,9 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes):im
   if(std::memcmp(a.data(),"MVDBRT01",8)==0 || std::memcmp(b.data(),"MVDBRT01",8)==0) throw std::runtime_error("unsupported MiniVectorDB format 01; format 02 required");
   bool av=valid_root(a,complete), bv=valid_root(b,complete);
   if(!av && !bv) corrupt();
+  if(av && bv && a[7]!=b[7])corrupt();
   const auto& selected=(!av || (bv && decode(b,8)>decode(a,8)))?b:a;
+  s.format3=selected[7]=='3';
   s.generation=decode(selected,8); s.root=s.durable_root=decode(selected,16);
   // Validate the published root against its durable extent. Trailing uncommitted pages are ignored.
   s.next_page=decode(selected,24);
@@ -298,8 +360,35 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   if(sorted.empty())return;
   std::vector<Impl::Replacement> replacements;
   replacements.reserve(sorted.size());
-  for(const auto* mutation:sorted)
-    replacements.push_back({ordered_key(mutation->key),mutation->value?state.write_value(*mutation->value):0});
+  Page packed_page=state.empty_page(packed,0);
+  std::size_t slot_count=0, payload_start=page_size;
+  std::vector<std::size_t> pending;
+  pending.reserve(sorted.size());
+  auto flush=[&] {
+    if(!slot_count)return;
+    if(state.next_page>((packed_tag-1)>>9))throw std::length_error("packed page address exhausted");
+    encode(packed_page,12,slot_count,4);
+    const auto id=state.append(packed_page);
+    for(std::size_t slot=0;slot<pending.size();++slot)
+      replacements[pending[slot]].value=packed_tag|(id<<9)|slot;
+    packed_page=state.empty_page(packed,0); slot_count=0; payload_start=page_size; pending.clear();
+  };
+  for(const auto* mutation:sorted) {
+    replacements.push_back({ordered_key(mutation->key),0});
+    if(!mutation->value)continue;
+    const auto& contents=*mutation->value;
+    if(!state.format3 || !state.packing || contents.size()>chunk_size-8) {
+      replacements.back().value=state.write_value(contents); continue;
+    }
+    const auto directory_end=payload+(slot_count+1)*8;
+    if(slot_count==max_slots || payload_start<directory_end || contents.size()>payload_start-directory_end)flush();
+    payload_start-=contents.size();
+    encode(packed_page,payload+slot_count*8,payload_start,4);
+    encode(packed_page,payload+slot_count*8+4,contents.size(),4);
+    if(!contents.empty())std::memcpy(packed_page.data()+payload_start,contents.data(),contents.size());
+    pending.push_back(replacements.size()-1); ++slot_count;
+  }
+  flush();
   // Values and every changed child precede their immutable parent. The working root
   // is assigned only when the whole merge succeeds; failed appends are unreachable.
   const auto next=state.merge_batch(state.root,0,space,replacements);
@@ -311,7 +400,7 @@ void Store::commit() {
   auto next=s.generation+1;
   try {
     sync_fd(s.fd); // All new immutable data reaches stable storage before root publication.
-    write_page(s.fd,make_root(next,s.root,s.next_page),next%2);
+    write_page(s.fd,make_root(next,s.root,s.next_page,s.format3),next%2);
     sync_fd(s.fd); // A successful return acknowledges the new durable root.
   } catch(...) {s.poisoned=true; throw;}
   s.generation=next; s.durable_root=s.root; s.active=false;
@@ -332,6 +421,7 @@ void Store::scan(const std::function<void(std::int64_t,std::string_view)>& visit
 void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
   auto& s=*impl_; s.usable(); auto id=s.root;
   for(unsigned depth=0;depth<8 && id;++depth) {auto p=s.read(id,branch,depth); id=decode(p,payload+key_index(space,0,depth)*8);}
-  s.walk(id,8,0,visitor);
+  Impl::ScanCache memo(s.scan_budget);
+  s.walk(id,8,0,visitor,memo);
 }
 }
