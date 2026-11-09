@@ -1,6 +1,8 @@
 #include "minivectordb/database.hpp"
 #include "minivectordb/row_codec.hpp"
 #include "minivectordb/store.hpp"
+#include <array>
+#include <bit>
 #include <filesystem>
 #include <iostream>
 #include <unistd.h>
@@ -9,6 +11,39 @@ using namespace minivectordb;
 struct Result { std::vector<Row> rows; ExecutionInfo info; };
 Result query(Database& db,const std::string& text) {
   Result r; r.info=db.execute(text,{{},[&](const Row& row){r.rows.push_back(row);}}); return r;
+}
+void vector_bits() {
+  const std::array<std::uint32_t,12> bits{
+    0x00000000u,0x80000000u,0x00000001u,0x80000001u,
+    0x007fffffu,0x807fffffu,0x00800000u,0x80800000u,
+    0x7f7fffffu,0xff7fffffu,0x3f800001u,0xbf800001u};
+  Schema schema{1,"bits",{{"id",ColumnType::Bigint,0},
+    {"v",ColumnType::Vector,static_cast<std::uint32_t>(bits.size())}},0};
+  std::vector<float> values;
+  for(auto bits32:bits)values.push_back(std::bit_cast<float>(bits32));
+  auto bytes=encode_row(schema,{std::int64_t(1),values});
+  auto eager=decode_row(schema,bytes);
+  ExecutionInfo info;
+  LazyRowView lazy(schema,bytes,info);
+  CHECK(info.cells_materialized==0&&info.vector_values_materialized==0);
+  const auto& decoded=std::get<std::vector<float>>(lazy[1]);
+  CHECK(decoded.size()==bits.size());
+  for(std::size_t i=0;i<bits.size();++i) {
+    CHECK(std::bit_cast<std::uint32_t>(decoded[i])==bits[i]);
+    CHECK(std::bit_cast<std::uint32_t>(std::get<std::vector<float>>(eager[1])[i])==bits[i]);
+  }
+  CHECK(&std::get<std::vector<float>>(lazy[1])==&decoded);
+  CHECK(info.cells_materialized==1&&info.vector_values_materialized==1);
+  for(auto invalid:{0x7f800000u,0xff800000u,0x7fc00001u}) {
+    auto corrupt=bytes;
+    for(unsigned i=0;i<4;++i)corrupt[17+i]=static_cast<char>(invalid>>(8*i));
+    ExecutionInfo rejected_info;
+    bool rejected=false;
+    try { LazyRowView unused(schema,corrupt,rejected_info); }
+    catch(const Error& error) { rejected=error.code()==ErrorCode::Corruption; }
+    CHECK(rejected);
+    CHECK(rejected_info.cells_materialized==0&&rejected_info.vector_values_materialized==0);
+  }
 }
 void comparisons(const std::filesystem::path& p) {
   {
@@ -76,6 +111,7 @@ int main() {
   try {
     const auto* root=std::getenv("MVDB_TEST_DIR"); CHECK(root);
     std::filesystem::create_directories(root); auto name=(std::filesystem::path(root)/"selective-XXXXXX").string(); CHECK(mkdtemp(name.data()));
+    vector_bits();
     std::filesystem::path dir(name); comparisons(dir/"db"); corrupt_rows(dir); std::filesystem::remove_all(dir);
     std::cout<<"PASS selective\n";
   } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }

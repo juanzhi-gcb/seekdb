@@ -3,6 +3,7 @@
 #include "binary.hpp"
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <set>
 namespace minivectordb {
   void validate_schema(const Schema&s) {
@@ -127,10 +128,18 @@ namespace minivectordb {
         case ColumnType::Varchar: cell.emplace(in.text()); break;
         case ColumnType::Vector: {
           auto count=in.get(4);
-          std::vector<float> values;
-          values.reserve(static_cast<std::size_t>(count));
-          for(std::uint64_t i=0;i<count;++i)
-            values.push_back(std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4))));
+          if(count!=schema_.columns[index].extent || count>in.remaining()/sizeof(float))
+            throw Error(ErrorCode::Corruption,"invalid VECTOR length");
+          std::vector<float> values(static_cast<std::size_t>(count));
+          if constexpr(std::endian::native==std::endian::little) {
+            // The constructor has already checked every component for finiteness.
+            // Copy validated float32 bits without repeating the per-component decode.
+            if(!values.empty())
+              std::memcpy(values.data(),bytes_.data()+bytes_.size()-in.remaining(),values.size()*sizeof(float));
+          } else {
+            for(auto& value:values)
+              value=std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)));
+          }
           cell.emplace(std::move(values));
           ++info_.vector_values_materialized;
           break;
