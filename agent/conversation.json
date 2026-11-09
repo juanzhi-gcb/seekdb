@@ -24,6 +24,11 @@
       "role": "user",
       "context": "对是否更改影响所有发行版的 WSL 全局交换文件路径的回答。",
       "content": "不修改全局设置，暂时保留现状"
+    },
+    {
+      "id": "u05",
+      "role": "user",
+      "content": "继续实现表目录、行编解码和 SQL 执行层，把基础增删改查、向量查询和事务串起来，补齐测试。还是全部放 D 盘，别动初赛分支，先不提测。注意提效可以找找论文看看有什么方法"
     }
   ],
   "experiments": [
@@ -75,6 +80,34 @@
       "purpose": "独立全排序与流式TopK的三轮局部对照，二者按平方距离排序",
       "output": "{\"rounds\":[{\"full_sort_ms\":803.319,\"streaming_heap_ms\":541.186,\"exact_matches\":1000},{\"full_sort_ms\":763.319,\"streaming_heap_ms\":514.018,\"exact_matches\":1000},{\"full_sort_ms\":765.482,\"streaming_heap_ms\":542.674,\"exact_matches\":1000}],\"median_full_sort_ms\":765.482,\"median_streaming_heap_ms\":541.186,\"median_ratio\":1.41445}",
       "note": "10,000条128维、1,000次Top10，一半10%通过率过滤；仅内存计算与选择，不含SQL、磁盘持久化或正式计分。最终测量未并行运行其他本项目测试。"
+    },
+    {
+      "id": "e08",
+      "source": "tool",
+      "purpose": "SQL 命令行验收的失败基线与首轮成功结果",
+      "output": "AssertionError: SQL CLI executable is missing: /mnt/d/Codex/MiniVectorDB/build/core/minivectordb\n随后接入真实程序：Ran 7 tests in 2.501s\nOK",
+      "note": "Agent 编写并运行。七项包含分号/引号/注释、增删改查和向量距离、语句错误及EOF回滚、90步独立Python参考模型、收到确认后SIGKILL及重启。不是官方用例；没有用户独立解释这些结果的证据。"
+    },
+    {
+      "id": "e09",
+      "source": "tool",
+      "purpose": "VARCHAR 比较回归修复后的完整容器与运行入口验收",
+      "output": "100% tests passed, 0 tests failed out of 12\nTotal Test time (real) = 61.27 sec\nPASS runtime: read-only root, network disabled, 2 CPU/512 MiB, /data persistence and EOF rollback",
+      "note": "最终test镜像5bc1eafd618a15a2db268341c33a5f29bb16939c6675968d01af293cd257b1b3；runtime镜像c525c4bed66a9ebc693df8c7e6d586a705ae2316db89771b6dd467f880a8fcc4。容器/data映射D盘。宿主不支持swap limit，本次没有正式物理IO、冷缓存、排名或分数验证。"
+    },
+    {
+      "id": "e10",
+      "source": "agent_review",
+      "purpose": "独立规格审查发现查询常量宽度错误并复查修复",
+      "output": "VARCHAR(1)列与'aa'比较，新增测试运行失败：text exceeds scalar length。修复后7组相关测试通过7.77秒。独立审查8组重点测试8/8通过8.71秒；120行16组结果的Python参考模型通过。",
+      "note": "审查Agent与实现Agent分别运行，摘要保留原始数值。修复提交7c140e88e167aaef6255f0e509ed980040f414f7。Agent提出反例和修复，不冒充用户独立质疑或理解。"
+    },
+    {
+      "id": "e11",
+      "source": "agent_review",
+      "purpose": "独立代码质量审查和额外真实写盘失败探针",
+      "output": "8/8 focused suites passed in 7.98s.\nPASS independent autocommit UPDATE/DELETE and explicit CREATE I/O failure rollback, continuation, commit and reopen\nREADY = YES",
+      "note": "审查Agent独立编译并执行D盘探针，覆盖自动提交语句原子性及表元数据写出后的CREATE失败；只审查当前里程碑，不是正式用例或性能合格证明。"
     }
   ],
   "agent_observations": [
@@ -97,11 +130,26 @@
       "id": "a04",
       "source": "agent",
       "content": "写盘失败回归发现提交extent可能引用没有完整写出的页，导致重启选择旧提交；修复为完整写成功后才推进页分配。另一回归发现先sqrt再排序会合并接近距离，改为平方距离排序、输出时sqrt。均由Agent发现和验证，不声称是学生独立发现。"
+    },
+    {
+      "id": "a05",
+      "source": "agent",
+      "content": "SQL阶段采用共享提交根的表命名空间，使跨表提交和回滚统一；行编解码显式验证长度、UTF-8及float32。失败修改语句恢复保存点。一般排序使用有限内存运行段和两路归并，TopK保留少量键与距离再投影。格式02不兼容旧开发数据，明确拒绝旧格式。"
+    },
+    {
+      "id": "a06",
+      "source": "agent",
+      "content": "阅读Abadi等ICDE2007延迟物化、X100 CIDR2005及Graefe排序综述后，提出按需解码A/B：先构造过滤字段，命中才解码向量。目前SQL扫描仍整行解码，尚未实现或测出这项收益。现有过滤先于距离计算，不能重复宣称为新算法。行存整条读取时也不能从少分配推断物理IO下降。"
+    },
+    {
+      "id": "a07",
+      "source": "agent",
+      "content": "VARCHAR(n)的n限制存储值长度，不应限制WHERE比较常量。修复后查询常量只验证字符串类型和完整UTF-8，INSERT/SET仍限制列宽；回归覆盖五种比较、Unicode、UPDATE/DELETE谓词和LIMIT0。这个反例由独立审查Agent提出并验证。"
     }
   ],
   "limitations": [
     "这些记录不能证明用户已理解COW、ANN或进行了独立技术解释；不将Agent实现和解释冒充学生贡献。",
-    "尚未运行正式评测；已完成核心库测试和局部微基准，没有完整SQL数据库、正式准入、排名或分数结论。",
+    "尚未运行正式评测；本地已接通SQL、表目录、行编解码及事务，仍缺正式协议适配、正式资源准入和必要的ANN。没有排名或分数结论。",
     "材料路径在官方占位根目录和题面agent/conversation.json之间存在差异；目前两处保存字节相同的同一份材料。",
     "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。"
   ]

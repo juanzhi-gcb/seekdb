@@ -31,11 +31,13 @@ Desktop 4.73.0 启动在 dockerInference 通信套接字失败。诊断时保留
 在 PowerShell 中调用 D:\Codex\MiniVectorDB\repo\scripts\dev.ps1，使用 -Action 参数：
 - Status：检查 Docker、编译器和 CMake。
 - Build：在 D 盘 build/core 中编译。
-- Test：运行核心测试，数据位于 D 盘 data/core-tests。
+- Test：运行核心、SQL 和命令行测试，数据位于 D 盘 data/core-tests。
 - Image：构建开发验证镜像。
+- RuntimeImage：构建带本地 SQL 开发入口的运行镜像。
+- RuntimeTest：在只读根目录、无网络的运行镜像中检查跨容器重启及 EOF 回滚。
 - ContainerTest：在无网络、2 CPU、512 MiB 内存容器内测试。
 - StartDocker：重启机器后启动专用 Docker；之后用 Status 验证就绪。仅在引擎未运行时使用。
 
-脚本不安装/重置系统，不改全局 WSL 配置。Dockerfile 当前提供核心测试镜像，不是已适配官方 SQL 协议的交付镜像。基础镜像和直接依赖已固定；传递依赖仍依赖 apk 仓库状态，最终交付须补可复现归档或冻结清单。
+脚本不安装/重置系统，不改全局 WSL 配置。Dockerfile 提供 test 和 runtime 两个目标；runtime 使用显式 dev-tsv 本地协议，尚未适配官方协议。基础镜像和直接依赖已固定；传递依赖仍依赖 apk 仓库状态，最终交付须补可复现归档或冻结清单。
 
 来源：[Alpine Docker 文档](https://wiki.alpinelinux.org/wiki/Docker)、[Microsoft WSL 配置](https://learn.microsoft.com/en-us/windows/wsl/wsl-config)。实测记录位于项目 work/environment/。

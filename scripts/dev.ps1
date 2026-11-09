@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Status','Build','Test','Image','ContainerTest','StartDocker')]
+    [ValidateSet('Status','Build','Test','Image','ContainerTest','RuntimeImage','RuntimeTest','StartDocker')]
     [string]$Action = 'Test'
 )
 $ErrorActionPreference = 'Stop'
@@ -43,6 +43,12 @@ switch ($Action) {
     }
     'Image' {
         Invoke-Docker build --network host --target test -t minivectordb-core:dev $linuxRepo
+    }
+    'RuntimeImage' {
+        Invoke-Docker build --network host --target runtime -t minivectordb:dev $linuxRepo
+    }
+    'RuntimeTest' {
+        Invoke-Linux python3 ($linuxRepo+'/tests/runtime_smoke.py') minivectordb:dev ($linuxProject+'/data/runtime-tests')
     }
     'ContainerTest' {
         Invoke-Docker run --rm --network none --cpus 2 --memory 512m --mount ("type=bind,src="+$linuxProject+"/data,dst=/data") minivectordb-core:dev
