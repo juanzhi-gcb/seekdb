@@ -29,6 +29,11 @@
       "id": "u05",
       "role": "user",
       "content": "继续实现表目录、行编解码和 SQL 执行层，把基础增删改查、向量查询和事务串起来，补齐测试。还是全部放 D 盘，别动初赛分支，先不提测。注意提效可以找找论文看看有什么方法"
+    },
+    {
+      "id": "u06",
+      "role": "user",
+      "content": "继续下一阶段，先看看正式题包和测试驱动有没有更新，再做按需解码和降低写入放大的优化，跑对照实验确认收益。还是全部放 D 盘，别动初赛分支，先不推送、不提测。"
     }
   ],
   "experiments": [
@@ -108,6 +113,55 @@
       "purpose": "独立代码质量审查和额外真实写盘失败探针",
       "output": "8/8 focused suites passed in 7.98s.\nPASS independent autocommit UPDATE/DELETE and explicit CREATE I/O failure rollback, continuation, commit and reopen\nREADY = YES",
       "note": "审查Agent独立编译并执行D盘探针，覆盖自动提交语句原子性及表元数据写出后的CREATE失败；只审查当前里程碑，不是正式用例或性能合格证明。"
+    },
+    {
+      "id": "e12",
+      "source": "tool",
+      "purpose": "再次检查上游题包",
+      "output": "上游round2=c842a368c3394748d0499386c18f6b465242e141；递归树50条目，仍无新正式stdin/stdout测试驱动或公开.test/.result包。报名仓库远端round2=Branch not found。",
+      "note": "GitHub接口只读结果摘要，时间2026-11-09；未推送，所以报名远端缺分支符合预期。"
+    },
+    {
+      "id": "e13",
+      "source": "tool",
+      "purpose": "最终优化版本容器和运行验证",
+      "output": "100% tests passed, 0 tests failed out of 15\nTotal Test time (real) = 77.02 sec\nPASS runtime: read-only root, network disabled, 2 CPU/512 MiB, /data persistence and EOF rollback",
+      "note": "核心8f1a679ff0c4d59e13949e228cc5f9f198698578；test镜像eea97e0a038e39cee02b688144bce1c352fe63ed1c629a4adad9ab1d3dab5c3a；runtime镜像ccbffecd48173eaadd19951ecb43fba7c5ae003c9dd5a5c82648fac2a1504cb6。WSL不支持swap limit，不等同正式准入。"
+    },
+    {
+      "id": "e14",
+      "source": "agent_review",
+      "purpose": "独立规格和质量审查",
+      "output": "规格：262行四模式差分PASS；4/4重点测试22.48秒；修正后codec/selective 2/2，4.40秒。\n质量：selective/batches 2/2，6.39秒；位复制和runner清理复查PASS。",
+      "note": "分别由审查Agent执行与报告，非用户独立推导；完整报告在docs/reviews/。"
+    },
+    {
+      "id": "e15",
+      "source": "tool",
+      "purpose": "发现并保留按需解码的负面结果",
+      "output": "fa419bb版解码专项：100%命中，eager中位830.881 ms、lazy中位1454.919 ms；50%命中825.573对1014.942 ms。",
+      "note": "全部原始数据保留v1。完整校验后再次逐分量转换造成成本；该结果由Agent分析，不是用户自己提出。"
+    },
+    {
+      "id": "e16",
+      "source": "tool",
+      "purpose": "修正后解码专项重新验证",
+      "output": "[{\"match_percent\": 0, \"eager_ms\": 829.048427, \"lazy_ms\": 640.90102, \"time_reduction_percent\": 22.69438079520051}, {\"match_percent\": 1, \"eager_ms\": 889.10549, \"lazy_ms\": 655.708944, \"time_reduction_percent\": 26.250714749270088}, {\"match_percent\": 10, \"eager_ms\": 845.739037, \"lazy_ms\": 658.195946, \"time_reduction_percent\": 22.17505433653052}, {\"match_percent\": 50, \"eager_ms\": 899.58046, \"lazy_ms\": 704.970679, \"time_reduction_percent\": 21.633393526577937}, {\"match_percent\": 100, \"eager_ms\": 888.919876, \"lazy_ms\": 754.267638, \"time_reduction_percent\": 15.147848713419931}]",
+      "note": "8f1a679版，10000行128维20遍，三轮五种命中率共30样本；配对校验和全部一致。只测校验/对象构造/距离累积，不含SQL/IO/TopK。"
+    },
+    {
+      "id": "e17",
+      "source": "tool",
+      "purpose": "修正后完整SQL四组合三轮对照",
+      "output": "{\"source\": \"8f1a679ff0c4d59e13949e228cc5f9f198698578\", \"rows\": 2000, \"dimensions\": 128, \"queries_per_sample\": 40, \"samples\": 12, \"all_validated_queries\": 480, \"reopen_checks\": 12, \"medians\": {\"decode0-batch0\": {\"write_ms\": 18739.469616, \"query_total_ms\": 17032.74096, \"query_filtered_ms\": 8465.897769, \"query_unfiltered_ms\": 8537.361416, \"database_bytes\": 139411456, \"insert_file_growth_bytes\": 139264000, \"vector_values_materialized\": 80400, \"vector_values_filtered\": 40200, \"vector_values_unfiltered\": 40200, \"cells_materialized\": 321600, \"process_maxrss_kib\": 11280, \"local_cgroup_peak_bytes\": 7114752}, \"decode0-batch1\": {\"write_ms\": 6681.015557, \"query_total_ms\": 16767.636114, \"query_filtered_ms\": 8352.162178, \"query_unfiltered_ms\": 8436.479182, \"database_bytes\": 10223616, \"insert_file_growth_bytes\": 10076160, \"vector_values_materialized\": 80400, \"vector_values_filtered\": 40200, \"vector_values_unfiltered\": 40200, \"cells_materialized\": 321600, \"process_maxrss_kib\": 10768, \"local_cgroup_peak_bytes\": 6647808}, \"decode1-batch0\": {\"write_ms\": 18930.590035, \"query_total_ms\": 17022.170041, \"query_filtered_ms\": 8435.251804, \"query_unfiltered_ms\": 8586.918237, \"database_bytes\": 139411456, \"insert_file_growth_bytes\": 139264000, \"vector_values_materialized\": 44000, \"vector_values_filtered\": 4000, \"vector_values_unfiltered\": 40000, \"cells_materialized\": 164800, \"process_maxrss_kib\": 11024, \"local_cgroup_peak_bytes\": 7077888}, \"decode1-batch1\": {\"write_ms\": 6748.838456, \"query_total_ms\": 16633.36059, \"query_filtered_ms\": 8235.138226, \"query_unfiltered_ms\": 8398.222364, \"database_bytes\": 10223616, \"insert_file_growth_bytes\": 10076160, \"vector_values_materialized\": 44000, \"vector_values_filtered\": 4000, \"vector_values_unfiltered\": 40000, \"cells_materialized\": 164800, \"process_maxrss_kib\": 11280, \"local_cgroup_peak_bytes\": 6909952}}}",
+      "note": "相同二进制，交替顺序，无并行项目测试。每条INSERT100行自动提交；半数查询10%过滤。全部精确结果及重启2000行校验通过。逻辑文件增长不是物理IO，SQL API不含stdin/stdout传输。少量热查询不能估算官方分数。"
+    },
+    {
+      "id": "e18",
+      "source": "tool",
+      "purpose": "基准失败时清理本次容器",
+      "output": "PASS timeout cleanup: interrupted benchmark container and its temporary D-drive data removed",
+      "note": "实际一秒超时注入；比较前后拥有容器集合与D盘临时目录集合；不删除其他容器。"
     }
   ],
   "agent_observations": [
@@ -145,6 +199,21 @@
       "id": "a07",
       "source": "agent",
       "content": "VARCHAR(n)的n限制存储值长度，不应限制WHERE比较常量。修复后查询常量只验证字符串类型和完整UTF-8，INSERT/SET仍限制列宽；回归覆盖五种比较、Unicode、UPDATE/DELETE谓词和LIMIT0。这个反例由独立审查Agent提出并验证。"
+    },
+    {
+      "id": "a08",
+      "source": "agent",
+      "content": "按需解码只推迟对象构造，仍完整验证整条记录，包括未投影/被过滤向量的有限性。过滤通过后才构造向量；获胜投影重读计入实际构造次数。行存仍读取整条记录，不能从少构造直接推出物理IO下降。"
+    },
+    {
+      "id": "a09",
+      "source": "agent",
+      "content": "批量写入在128条/512KiB界限内共享新建路径，单条超大记录独立。旧页不可变且整批成功才发布工作根，语句保存点恢复此前块。没有修改提交边界或减少fsync，格式02兼容旧读取器。"
+    },
+    {
+      "id": "a10",
+      "source": "agent",
+      "content": "初版高命中解码退化后，保留负面数据，改为已校验float32整块复制并测试精确位，再完整复测。最终组合写入耗时减少64.0%，文件增长减少92.76%；SQL总查询仅减少2.34%，小幅且样本有限，不把解码专项约15%至26%当作端到端收益。两项默认开启但保留独立开关。"
     }
   ],
   "limitations": [

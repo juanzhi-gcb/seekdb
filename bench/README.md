@@ -14,3 +14,21 @@ g++ -O3 -std=c++20 -I include bench/exact_scan.cpp src/vector/exact.cpp -o /mnt/
 该数值仅说明当前程序和当前机器上的局部差异，不能外推端到端SQL或正式排名。改动内核后应保留新结果文件，不覆盖原测量。距离细微差别的精确排名以平方距离为准，欧氏距离仅在输出时开方；旧基线在候选计算阶段即开方，因此新结果需要注明实现版本差异。
 
 最终口径一致的复测保存在 results/exact-scan-squared-reference.json：两种方案均按平方距离排名、结果输出时开方。全排序中位数765.482ms，流式堆541.186ms，时间比1.41445，三轮各1000条结果全部一致。此轮未与其他本项目测试并行运行。前面记录是开发过程探索，不用于混合计算最终成绩。
+## SQL 写入与按需解码对照
+
+新增四组合实验及独立解码专项，方法见 [optimization-method.md](optimization-method.md)，结果见 [优化报告](../docs/optimization-results.md)。v1 负面结果保留，v2 是最终修正后的同版本完整复测。
+
+在专用 MiniVectorDB WSL 内，从 /mnt/d/Codex/MiniVectorDB/repo 执行以下命令。先完成 scripts/dev.ps1 的 Build、RuntimeImage 以及回归测试，再单独运行基准，避免竞争负载。以下示例输出使用新文件名，runner 拒绝覆盖旧测量；source 为实际构建提交，镜像应固定为实际构建的镜像 ID。核心库或源码变化后必须重新构建两个程序。
+
+~~~sh
+export TMPDIR=/mnt/d/Codex/MiniVectorDB/tmp
+export PYTHONDONTWRITEBYTECODE=1
+g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -I include bench/optimization.cpp /mnt/d/Codex/MiniVectorDB/build/core/libminivectordb_core.a -o /mnt/d/Codex/MiniVectorDB/build/optimization-bench
+g++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -I include bench/decode.cpp /mnt/d/Codex/MiniVectorDB/build/core/libminivectordb_core.a -o /mnt/d/Codex/MiniVectorDB/build/decode-bench
+bench_source=$(git rev-parse HEAD)
+bench_image=$(docker --config /var/lib/minivectordb-docker-client image inspect minivectordb:dev --format '{{.Id}}')
+python3 bench/run_optimization.py --binary /mnt/d/Codex/MiniVectorDB/build/optimization-bench --output /mnt/d/Codex/MiniVectorDB/work/optimization-recheck.jsonl --source "$bench_source" --image "$bench_image" --rows 2000 --queries 40 --rounds 3
+python3 bench/run_decode.py /mnt/d/Codex/MiniVectorDB/build/decode-bench /mnt/d/Codex/MiniVectorDB/work/decode-recheck.json "$bench_source" "$bench_image"
+~~~
+
+示例须保持上述顺序，两类性能实验不要并行。默认 runner 的数据和全部产物被约束在 D 盘项目内。更换其他机器需明确调整路径和环境，不能把跨环境变化混入同一对照。
