@@ -9,6 +9,8 @@ using VectorVisitor = std::function<void(std::int64_t, std::span<const float>)>;
 using VectorSource = std::function<void(const VectorVisitor&)>;
 using KeyPredicate = std::function<bool(std::int64_t)>;
 double l2_distance(std::span<const float> a, std::span<const float> b);
+// Rank by double-accumulated squared L2, then signed primary key for equal sums.
+// Returned distances are Euclidean; sqrt rounding can make distinct ranks look equal.
 std::vector<Neighbor> exact_top_k(std::span<const float> query, std::size_t k,
                                 const VectorSource& source, const KeyPredicate& predicate = {});
 }

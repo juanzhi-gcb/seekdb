@@ -54,6 +54,14 @@ void vectors() {
   CHECK(exact_top_k(a,100,source).size()==5);
   CHECK(exact_top_k(a,0,source).empty());
   CHECK(exact_top_k(a,3,[](const auto&){}).empty());
+  // sqrt rounds these distinct double squared distances to the same output value.
+  const std::array<float,2> near{1,0}, farther{1,std::ldexp(1.0f,-26)};
+  VectorSource close_distances=[&](const VectorVisitor& visit) {visit(2,near); visit(1,farther);};
+  auto closest=exact_top_k(a,1,close_distances);
+  CHECK(closest.size()==1 && closest[0].key==2 && closest[0].distance==1);
+  auto close_order=exact_top_k(a,2,close_distances);
+  CHECK(close_order.size()==2 && close_order[0].key==2 && close_order[1].key==1);
+  CHECK(close_order[0].distance==1 && close_order[1].distance==1);
 }
 void equal(Store& store,const std::map<std::int64_t,std::string>& expected) {
   auto it=expected.begin();
@@ -145,6 +153,7 @@ void storage_failure() {
       struct rlimit limited=original; limited.rlim_cur=fs::file_size(path)+4096;
       CHECK(signal(SIGXFSZ,SIG_IGN)!=SIG_ERR); CHECK(setrlimit(RLIMIT_FSIZE,&limited)==0);
       rejects([&]{s.put(2,std::string(20000,'x'));});
+      CHECK(s.get(1)=="earlier successful statement" && !s.get(2));
       CHECK(setrlimit(RLIMIT_FSIZE,&original)==0);
       s.restore(point); CHECK(s.get(1)=="earlier successful statement" && !s.get(2));
       s.commit(); _exit(0);
