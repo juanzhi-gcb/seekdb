@@ -3,6 +3,7 @@
 #include <charconv>
 #include <cmath>
 #include <set>
+#include <limits>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -43,6 +44,17 @@ namespace minivectordb::sql {
       if(t.at(i).kind!=TokenKind::End)throw Error(ErrorCode::Type,"trailing quoted VECTOR data");
       return parts;
     }
+    Cell bind_predicate_literal(const Literal& value, const Column& column) {
+      if(column.type!=ColumnType::Varchar)return bind_literal(value,column);
+      if(value.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VARCHAR literal");
+      // Comparison constants are not stored in the column, so its width does not apply.
+      try {
+        validate_text(value.text,std::numeric_limits<std::size_t>::max());
+      } catch(const std::invalid_argument& error) {
+        throw Error(ErrorCode::Type,error.what());
+      }
+      return value.text;
+    }
     BoundExpr bind_expr(const Expr&e,const Schema&s) {
       BoundExpr b;
       b.column=column_index(s,e.column);
@@ -80,7 +92,7 @@ namespace minivectordb::sql {
     for(const auto&p:s.predicates) {
       auto index=column_index(schema,p.column);
       if(schema.columns[index].type==ColumnType::Vector)throw Error(ErrorCode::Type,"VECTOR predicates are unsupported");
-      auto value=bind_literal(p.value,schema.columns[index]);
+      auto value=bind_predicate_literal(p.value,schema.columns[index]);
       if(index==schema.primary&&p.op=="=")b.primary_lookup=std::get<std::int64_t>(value);
       b.predicates.push_back( {
         index,p.op,std::move(value)

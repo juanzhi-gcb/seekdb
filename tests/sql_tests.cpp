@@ -199,10 +199,43 @@ void crash(const std::filesystem::path&p) {
   Database d(p);
   CHECK(q(d,"SELECT * FROM a").rows.size()==1&&q(d,"SELECT * FROM b").rows.size()==1);
 }
+void varchar_predicates(Database& d) {
+  d.execute("CREATE TABLE narrow(id BIGINT PRIMARY KEY,s VARCHAR(1))");
+  d.execute("INSERT INTO narrow VALUES(1,'a'),(2,'b'),(3,'中'),(4,'😀')");
+  CHECK(id(q(d,"SELECT id FROM narrow WHERE s<'aa'"))==1);
+  CHECK(q(d,"SELECT id FROM narrow WHERE s='aa'").rows.empty());
+  CHECK(q(d,"SELECT id FROM narrow WHERE s<='aa'").rows.size()==1);
+  CHECK(q(d,"SELECT id FROM narrow WHERE s>'aa'").rows.size()==3);
+  CHECK(q(d,"SELECT id FROM narrow WHERE s>='aa'").rows.size()==3);
+  auto unicode=q(d,"SELECT id FROM narrow WHERE s<'中😀'");
+  CHECK(unicode.rows.size()==3 && id(unicode,2)==3);
+  auto zero=q(d,"SELECT id FROM narrow WHERE s<'中😀' LIMIT 0");
+  CHECK(zero.rows.empty() && zero.info.rows_examined==0);
+  CHECK(d.execute("UPDATE narrow SET s='z' WHERE s<'aa'").affected_rows==1);
+  CHECK(d.execute("DELETE FROM narrow WHERE s>'中中'").affected_rows==1);
+  CHECK(q(d,"SELECT id FROM narrow WHERE id=4").rows.empty());
+  for(auto invalid:{"INSERT INTO narrow VALUES(5,'aa')", "INSERT INTO narrow VALUES(5,'中😀')",
+                    "UPDATE narrow SET s='aa' WHERE id=1", "UPDATE narrow SET s='中😀' WHERE id=99",
+                    "SELECT id FROM narrow WHERE s=1 LIMIT 0"}) {
+    rejects([&] { d.execute(invalid); });
+  }
+  const auto bad=std::string("'")+char(0x80)+"'";
+  for(const auto& invalid: std::vector<std::string>{
+        "SELECT id FROM narrow WHERE s="+bad+" LIMIT 0",
+        "UPDATE narrow SET s='x' WHERE s="+bad,
+        "DELETE FROM narrow WHERE s="+bad,
+        "INSERT INTO narrow VALUES(5,"+bad+")",
+        "UPDATE narrow SET s="+bad+" WHERE id=1"}) {
+    rejects([&] { d.execute(invalid); });
+  }
+  CHECK(q(d,"SELECT id FROM narrow").rows.size()==3);
+  CHECK(std::get<std::string>(q(d,"SELECT s FROM narrow WHERE id=1").rows[0][0])=="z");
+}
 void edges(const std::filesystem::path&p) {
   Database d(p, {
     p.parent_path()/"sort",4096
   });
+  varchar_predicates(d);
   d.execute("CREATE TABLE `T` (`Id` BIGINT PRIMARY KEY,v VECTOR(2),s VARCHAR(4))");
   d.execute("INSERT INTO t VALUES(1,[1,1.490116119384765625e-8],'a'),(2,[1,0],'b'),(-9223372036854775808,[3,4],'中😀'),(9223372036854775807,[-3,-4],'')");
   auto near=q(d,"SELECT id,L2_DISTANCE(v,[0,0]) AS d FROM t ORDER BY d LIMIT 2");
