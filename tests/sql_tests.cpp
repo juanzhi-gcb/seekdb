@@ -280,41 +280,89 @@ void edges(const std::filesystem::path&p) {
   });
   CHECK(q(d,"SELECT * FROM t").rows.size()==4);
 }
-void failure(const std::filesystem::path&p) {
+void failure(const std::filesystem::path&p,bool batch,int initial=3) {
   auto pid=fork();
   CHECK(pid>=0);
   if(pid==0) {
     try {
-      Database d(p);
+      Database d(p,{p.parent_path()/"sort",4096,true,batch});
       d.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(4))");
-      d.execute("INSERT INTO t VALUES(1,'a'),(2,'b'),(3,'c')");
-      d.execute("BEGIN");
-      d.execute("INSERT INTO t VALUES(4,'d')");
-      struct rlimit original {
-      };
+      d.execute("CREATE TABLE u(id BIGINT PRIMARY KEY)");
+      std::string insert="INSERT INTO t VALUES";
+      for(int i=1;i<=initial;++i)insert+=(i>1?",":"")+std::string("(")+std::to_string(i)+",'a')";
+      d.execute(insert);
+      const auto earlier="INSERT INTO t VALUES("+std::to_string(initial+1)+",'d')";
+      // Measure this mode's exact statement extent before imposing a partial-page
+      // limit. This keeps failure coverage when batch sharing reduces page count.
+      d.execute("BEGIN"); d.execute(earlier); d.execute("INSERT INTO u VALUES(9)");
+      auto before=std::filesystem::file_size(p);
+      d.execute("UPDATE t SET s='oops'");
+      auto growth=std::filesystem::file_size(p)-before;
+      CHECK(growth>=4096);
+      d.execute("ROLLBACK");
+      d.execute("BEGIN"); d.execute(earlier); d.execute("INSERT INTO u VALUES(9)");
+      auto expected=q(d,"SELECT * FROM t").rows;
+      struct rlimit original{};
       CHECK(getrlimit(RLIMIT_FSIZE,&original)==0);
       auto limited=original;
-      limited.rlim_cur=std::filesystem::file_size(p)+18*4096;
+      limited.rlim_cur=std::filesystem::file_size(p)+growth-4096+1000;
       CHECK(signal(SIGXFSZ,SIG_IGN)!=SIG_ERR);
       CHECK(setrlimit(RLIMIT_FSIZE,&limited)==0);
-      rejects([&] {
-        d.execute("UPDATE t SET s='oops'");
-      });
+      rejects([&] { d.execute("UPDATE t SET s='oops'"); });
       CHECK(setrlimit(RLIMIT_FSIZE,&original)==0);
-      CHECK(std::get<std::string>(q(d,"SELECT s FROM t WHERE id=1").rows[0][0])=="a");
-      CHECK(q(d,"SELECT * FROM t WHERE id=4").rows.size()==1);
+      CHECK(q(d,"SELECT * FROM t").rows==expected);
+      CHECK(q(d,"SELECT * FROM u").rows.size()==1);
       d.execute("COMMIT");
       _exit(0);
     }
-    catch(...) {
-      _exit(1);
-    }
+    catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; _exit(1); }
   }
   int status=0;
   CHECK(waitpid(pid,&status,0)==pid&&WIFEXITED(status)&&WEXITSTATUS(status)==0);
   Database d(p);
-  CHECK(q(d,"SELECT * FROM t").rows.size()==4);
-  CHECK(std::get<std::string>(q(d,"SELECT s FROM t WHERE id=1").rows[0][0])=="a");
+  CHECK(q(d,"SELECT * FROM t").rows.size()==static_cast<std::size_t>(initial+1));
+  CHECK(q(d,"SELECT * FROM t WHERE s='a'").rows.size()==static_cast<std::size_t>(initial));
+  CHECK(q(d,"SELECT * FROM t WHERE s='d'").rows.size()==1);
+  CHECK(q(d,"SELECT * FROM u").rows.size()==1);
+}
+void batch_sql(const std::filesystem::path& dir) {
+  std::uintmax_t growth[2]{};
+  for(bool batch:{false,true}) {
+    auto path=dir/(batch?"batch.db":"single.db");
+    Database d(path,{dir/"sort",4096,true,batch});
+    d.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,n BIGINT)");
+    auto before=std::filesystem::file_size(path);
+    std::string insert="INSERT INTO t VALUES";
+    for(int i=0;i<300;++i)insert+=(i?",":"")+std::string("(")+std::to_string(i)+",0)";
+    CHECK(d.execute(insert).affected_rows==300);
+    growth[batch]=std::filesystem::file_size(path)-before;
+    d.execute("BEGIN");
+    CHECK(d.execute("UPDATE t SET n=1").affected_rows==300);
+    CHECK(d.execute("UPDATE t SET n=1").affected_rows==300);
+    CHECK(q(d,"SELECT id FROM t WHERE n=1").rows.size()==300);
+    CHECK(d.execute("DELETE FROM t WHERE id>=128").affected_rows==172);
+    CHECK(q(d,"SELECT id FROM t").rows.size()==128);
+    d.execute("ROLLBACK");
+    CHECK(q(d,"SELECT id FROM t WHERE n=0").rows.size()==300);
+    d.execute("BEGIN");
+    CHECK(d.execute("UPDATE t SET n=2").affected_rows==300);
+    CHECK(d.execute("DELETE FROM t WHERE id<150").affected_rows==150);
+    d.execute("COMMIT");
+  }
+  CHECK(growth[1]*4<growth[0]);
+  for(auto name:{"batch.db","single.db"}) {
+    Database d(dir/name);
+    CHECK(q(d,"SELECT id FROM t WHERE n=2").rows.size()==150);
+  }
+  {
+    Database d(dir/"wide.db",{dir/"sort",4096,true,true});
+    d.execute("CREATE TABLE wide(id BIGINT PRIMARY KEY,s VARCHAR(700000))");
+    const std::string medium(300000,'m'),large(600000,'x');
+    CHECK(d.execute("INSERT INTO wide VALUES(1,'"+medium+"'),(2,'"+medium+"'),(3,'"+large+"')").affected_rows==3);
+    CHECK(q(d,"SELECT id FROM wide").rows.size()==3);
+    CHECK(d.execute("UPDATE wide SET s='"+medium+"'").affected_rows==3);
+    CHECK(d.execute("DELETE FROM wide").affected_rows==3);
+  }
 }
 int main(int argc,char**argv) {
   try {
@@ -331,7 +379,12 @@ int main(int argc,char**argv) {
     else if(suite=="sort")sorting(dir/"db");
     else if(suite=="sql_crash")crash(dir/"db");
     else if(suite=="sql_edges")edges(dir/"db");
-    else if(suite=="sql_failure")failure(dir/"db");
+    else if(suite=="sql_failure") {
+      failure(dir/"single.db",false);
+      failure(dir/"batch.db",true);
+      failure(dir/"batch-chunks.db",true,130);
+    }
+    else if(suite=="sql_batch")batch_sql(dir);
     else throw std::runtime_error("unknown suite");
     std::filesystem::remove_all(dir);
     std::cout<<"PASS "<<suite<<'\n';

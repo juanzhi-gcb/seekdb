@@ -1,5 +1,7 @@
 #include "minivectordb/store.hpp"
 #include <array>
+#include <algorithm>
+#include <vector>
 #include <atomic>
 #include <bit>
 #include <cerrno>
@@ -136,6 +138,26 @@ struct Store::Impl {
     for(unsigned i=0;i<256;++i) if(decode(p,payload+i*8)) {empty=false; break;}
     return empty?0:append(p);
   }
+  struct Replacement { std::uint64_t key, value; };
+  std::uint64_t merge_batch(std::uint64_t id,unsigned depth,std::uint64_t space,
+                            std::span<const Replacement> replacements) {
+    auto page=id?read(id,branch,depth):empty_page(branch,depth);
+    bool changed=false;
+    for(std::size_t first=0;first<replacements.size();) {
+      const auto index=key_index(space,replacements[first].key,depth);
+      auto end=first+1;
+      while(end<replacements.size() && key_index(space,replacements[end].key,depth)==index)++end;
+      const auto offset=payload+index*8;
+      const auto old_child=decode(page,offset);
+      const auto child=depth==15?replacements[first].value:
+          merge_batch(old_child,depth+1,space,replacements.subspan(first,end-first));
+      if(child!=old_child) { encode(page,offset,child); changed=true; }
+      first=end;
+    }
+    if(!changed)return id;
+    for(unsigned i=0;i<256;++i)if(decode(page,payload+i*8))return append(page);
+    return 0;
+  }
   void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
     if(!id) return;
     auto p=read(id,branch,depth);
@@ -205,6 +227,32 @@ bool Store::erase_in(std::uint64_t space,std::int64_t key) {
   auto& s=*impl_; s.transaction(); auto ordered=ordered_key(key);
   if(!s.find(space,ordered)) return false;
   const auto next=s.replace(s.root,0,space,ordered,0); s.root=next; return true;
+}
+void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutations) {
+  auto& state=*impl_; state.transaction();
+  if(mutations.size()>max_batch_mutations)throw std::length_error("too many batch mutations");
+  std::vector<const Mutation*> sorted;
+  sorted.reserve(mutations.size());
+  std::size_t bytes=0;
+  for(const auto& mutation:mutations) {
+    if(mutation.value && mutations.size()>1) {
+      if(mutation.value->size()>max_batch_bytes-bytes)throw std::length_error("batch payload exceeds byte budget");
+      bytes+=mutation.value->size();
+    }
+    sorted.push_back(&mutation);
+  }
+  std::sort(sorted.begin(),sorted.end(),[](auto a,auto b){return ordered_key(a->key)<ordered_key(b->key);});
+  for(std::size_t i=1;i<sorted.size();++i)
+    if(sorted[i-1]->key==sorted[i]->key)throw std::invalid_argument("duplicate batch key");
+  if(sorted.empty())return;
+  std::vector<Impl::Replacement> replacements;
+  replacements.reserve(sorted.size());
+  for(const auto* mutation:sorted)
+    replacements.push_back({ordered_key(mutation->key),mutation->value?state.write_value(*mutation->value):0});
+  // Values and every changed child precede their immutable parent. The working root
+  // is assigned only when the whole merge succeeds; failed appends are unreachable.
+  const auto next=state.merge_batch(state.root,0,space,replacements);
+  state.root=next;
 }
 void Store::commit() {
   auto& s=*impl_; s.transaction();

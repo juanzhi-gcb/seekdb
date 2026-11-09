@@ -12,6 +12,33 @@ namespace minivectordb {
       info.cells_materialized+=row.size();
       for(const auto& cell:row)if(std::holds_alternative<std::vector<float>>(cell))++info.vector_values_materialized;
     }
+    class MutationBatch {
+      Store& store_;
+      std::uint64_t space_;
+      bool enabled_;
+      std::size_t bytes_=0;
+      std::vector<Store::Mutation> mutations_;
+    public:
+      MutationBatch(Store& store,std::uint64_t space,bool enabled):store_(store),space_(space),enabled_(enabled) {}
+      void flush() {
+        if(mutations_.empty())return;
+        store_.apply_batch_in(space_,mutations_);
+        mutations_.clear(); bytes_=0;
+      }
+      void add(std::int64_t key,std::optional<std::string> value) {
+        if(!enabled_) {
+          if(value)store_.put_in(space_,key,*value);
+          else store_.erase_in(space_,key);
+          return;
+        }
+        const auto size=value?value->size():0;
+        if(!mutations_.empty() && (mutations_.size()==Store::max_batch_mutations ||
+            size>Store::max_batch_bytes-bytes_))flush();
+        mutations_.push_back({key,std::move(value)});
+        bytes_+=size;
+        if(bytes_>=Store::max_batch_bytes)flush();
+      }
+    };
     class SelectRow {
       Row eager_;
       std::optional<LazyRowView> lazy_;
@@ -231,10 +258,11 @@ namespace minivectordb {
       }
       const auto savepoint=store.savepoint();
       try {
+        MutationBatch batch(store,schema.id,options.batch_writes);
         if(statement.kind==sql::Statement::Create)create_table(store,statement.schema);
         else if(statement.kind==sql::Statement::Insert) {
           for(const auto&r:bound.insert_rows) {
-            store.put_in(schema.id,std::get<std::int64_t>(r[schema.primary]),encode_row(schema,r));
+            batch.add(std::get<std::int64_t>(r[schema.primary]),encode_row(schema,r));
             ++info.affected_rows;
           }
         }
@@ -242,16 +270,17 @@ namespace minivectordb {
           scan(schema,bound,info,[&](auto key,const Row&old) {
             auto r=old;
             for(const auto&[column,value]:bound.assignments)r[column]=value;
-            store.put_in(schema.id,key,encode_row(schema,r));
+            batch.add(key,encode_row(schema,r));
             ++info.affected_rows;
           });
         }
         else if(statement.kind==sql::Statement::Delete) {
           scan(schema,bound,info,[&](auto key,const Row&) {
-            store.erase_in(schema.id,key);
+            batch.add(key,std::nullopt);
             ++info.affected_rows;
           });
         }
+        batch.flush();
       }
       catch(...) {
         store.restore(savepoint);
