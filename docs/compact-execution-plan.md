@@ -7,14 +7,14 @@ Baseline: 5ba33d2ed7d36dde6ec2e257bcb42dbff4d6b020; isolated 2026-competition-ro
 Agentic workers: use subagent-driven-development, independent spec then quality reviews; parent alone owns CMake, runner, integration files and commits.
 
 - [x] Read existing codec/store/transaction code and profiling evidence; verify clean isolated checkout and D-backed WSL.
-- [ ] Independent feasibility check before production implementation.
-- [ ] Production compact storage implementation and red/green targeted tests.
-- [ ] SQL integration with explicit opt-in; full regression and independent reviews.
-- [ ] Same-binary factorial and scale/distribution experiments, bounded scan cache and unchanged truth/reopen verification.
-- [ ] Choose defaults only after evidence; rebuild and run final container/runtime tests.
-- [ ] If new profile justifies distance optimization, implement safe early-abandon exact TopK as separately toggled stage. Page skipping requires integrity-contract reconciliation, so preserve full row validation.
-- [ ] Independent one-sync append-log experiment with truncation/failure/restart tests, not production WAL.
-- [ ] Archive raw positive/negative results, sources, Dockerfile and authentic learning material in one local tree.
+- [x] Independent feasibility check before production implementation.
+- [x] Production compact storage implementation and red/green targeted tests.
+- [x] SQL integration with explicit opt-in; full regression and independent reviews.
+- [x] Same-binary factorial and scale/distribution experiments, bounded scan cache and unchanged truth/reopen verification.
+- [x] Choose defaults only after evidence; rebuild and run final container/runtime tests.
+- [x] Evaluated conditional distance/pruning stage: distance is about4% after optimization; defer early-abandon. Page skipping conflicts with full-row validation, so keep it isolated until the integrity contract is reconciled.
+- [x] Independent one-sync append-log experiment with truncation/failure/restart tests, not production WAL.
+- [x] Archive raw positive/negative results, sources, Dockerfile and authentic learning material in one local tree.
 
 ## Feasibility contract
 Packing changes disk addresses, so use explicit format03 magic; do not repurpose format02 bits. Constructor Store(path, index_cache_bytes=0, packed_values=false, packed_scan_cache_bytes=262144); SQL Options receives trailing fields packed_values=false and packed_scan_cache_bytes=262144 for initial experiments.
@@ -43,3 +43,5 @@ Keep production packing disabled if correctness fails or representative end-to-e
 Distance early-abandon uses positive squared partial sums in original dimension order; prune only on strict partial sum > current worst squared distance with full heap. Keep validation of every row, exact survivor summation/ties, and independent toggle. Enable only if representative performance improves.
 Page-level VA skipping cannot silently weaken current validation of filtered rows. If no contract-preserving integration is available, document this gate and extend independent page-aware prototypes, not production silent skipping.
 Append-log prototype self-contained bounded transaction records with sequence/length/footer checksum, one successful sync before acknowledgment, ignore only incomplete trailing record, reject corrupt committed prefix; replay exact state. Compare same payload and transaction boundaries against a two-sync reference. Add failed write/sync, truncation and restart tests. No unsafe deletion of production sync, no concurrency/group-commit benefit assumed, no production migration/checkpoint claim.
+
+Final default decision: SQL new files use format03 and1MiB packed scan cache. Small-query256KiB wins locally, but1MiB is substantially faster at10000 rows; all exact results pass. Preserve768-dimensional ~2% negative result. Raw Store defaults remain unchanged. Final container21/21 passed96.76s and runtime PASS; raw evidence and learning record archived in the final local tree.
