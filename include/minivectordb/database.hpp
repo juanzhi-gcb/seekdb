@@ -1,4 +1,5 @@
 #pragma once
+#include "minivectordb/store.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -27,6 +28,7 @@ struct Options {
   std::size_t memory_budget_bytes = 8 * 1024 * 1024;
   bool selective_decode = true;
   bool batch_writes = true;
+  std::size_t index_cache_bytes = 0; // Bounded validated INDEX pages; zero disables.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -52,6 +54,8 @@ public:
   Database& operator=(const Database&) = delete;
   ExecutionInfo execute(std::string_view sql, const QuerySink& sink = {});
   bool in_transaction() const noexcept;
+  CacheStats cache_stats() const noexcept;
+  void reset_cache_stats() noexcept;
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

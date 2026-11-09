@@ -93,6 +93,20 @@ unsigned key_index(std::uint64_t space,std::uint64_t key,unsigned depth) {return
 }
 
 struct Store::Impl {
+  struct CacheEntry {
+    Page page{};
+    std::uint64_t id=0;
+    unsigned depth=0;
+  };
+  // Direct mapped: a fixed allocation, with no per-read allocation or eviction list.
+  std::unique_ptr<CacheEntry[]> cache;
+  std::size_t cache_count=0;
+  mutable CacheStats stats;
+  void initialize_cache(std::size_t budget) {
+    cache_count=budget/sizeof(CacheEntry);
+    if(cache_count) cache=std::make_unique<CacheEntry[]>(cache_count);
+    stats.capacity_bytes=cache_count*sizeof(CacheEntry);
+  }
   int fd=-1;
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
@@ -103,6 +117,17 @@ struct Store::Impl {
   Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0) const {
     profile::detail::count(type==branch?&profile::Snapshot::page_read_branch:&profile::Snapshot::page_read_overflow);
     if(id<2 || id>=next_page) corrupt();
+    CacheEntry* slot=nullptr;
+    if(type==branch && cache_count) {
+      slot=&cache[id%cache_count];
+      if(slot->id==id) {
+        // Range was checked above; a validated page is only reusable at its depth/type.
+        if(slot->depth!=depth || decode(slot->page,8,4)!=type) corrupt();
+        ++stats.hits;
+        return slot->page;
+      }
+      ++stats.misses;
+    }
     auto p=read_raw(fd,id);
     if(std::memcmp(p.data(),page_magic,8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
@@ -114,6 +139,11 @@ struct Store::Impl {
     } else {
       auto next=decode(p,16);
       if(decode(p,12,4)>chunk_size || (next!=0 && (next<2 || next>=id))) corrupt();
+    }
+    if(slot) {
+      if(slot->id) ++stats.evictions;
+      else ++stats.resident_pages;
+      slot->page=p; slot->depth=depth; slot->id=id;
     }
     return p;
   }
@@ -185,7 +215,7 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes):impl_(std::make_unique<Impl>()) {
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);
   if(impl_->fd>=0) created=true;
@@ -202,7 +232,7 @@ Store::Store(const std::filesystem::path& path):impl_(std::make_unique<Impl>()) 
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
     if(directory<0) io_error("open database directory");
     try {sync_fd(directory);} catch(...) {::close(directory); throw;}
-    ::close(directory); return;
+    ::close(directory); s.initialize_cache(index_cache_bytes); return;
   }
   struct stat info{}; if(::fstat(s.fd,&info)!=0) io_error("stat database");
   if(info.st_size<static_cast<off_t>(2*page_size)) corrupt();
@@ -217,8 +247,14 @@ Store::Store(const std::filesystem::path& path):impl_(std::make_unique<Impl>()) 
   s.next_page=decode(selected,24);
   if(s.root) (void)s.read(s.root,branch,0);
   s.next_page=complete+(bytes%page_size!=0);
+  // Allocate after durable-root validation: opening never populates the page cache.
+  s.initialize_cache(index_cache_bytes);
 }
 Store::~Store()=default;
+CacheStats Store::cache_stats() const noexcept {return impl_->stats;}
+void Store::reset_cache_stats() noexcept {
+  impl_->stats.hits=impl_->stats.misses=impl_->stats.evictions=0;
+}
 void Store::begin() {
   auto& s=*impl_; s.usable(); if(s.active) throw std::logic_error("transaction already active");
   if(s.epoch==UINT64_MAX) throw std::overflow_error("transaction epoch exhausted");

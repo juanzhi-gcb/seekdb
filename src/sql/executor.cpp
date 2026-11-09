@@ -85,7 +85,7 @@ namespace minivectordb {
     Store store;
     Options options;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -307,6 +307,8 @@ namespace minivectordb {
   Database::Database(const std::filesystem::path&path,Options options):impl_(std::make_unique<Impl>(path,std::move(options))) {
   }
   Database::~Database()=default;
+  CacheStats Database::cache_stats() const noexcept {return impl_->store.cache_stats();}
+  void Database::reset_cache_stats() noexcept {impl_->store.reset_cache_stats();}
   ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink) {
     return impl_->execute(sql,sink);
   }

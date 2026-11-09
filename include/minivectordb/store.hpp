@@ -8,8 +8,14 @@
 #include <string_view>
 #include <span>
 namespace minivectordb {
+struct CacheStats {
+  std::uint64_t hits=0, misses=0, evictions=0;
+  std::size_t capacity_bytes=0, resident_pages=0;
+};
 // Single-writer, single-thread API. Immutable pages are append-only; no compaction yet.
 // All mutations require begin(). Each failed put/erase leaves the prior working root intact.
+// Cached pages assume exclusive cooperative ownership: external writes to an open file
+// are unsupported. Close and reopen to validate externally modified pages.
 // Savepoints belong to one Store and one active transaction.
 class Store {
 public:
@@ -23,7 +29,12 @@ public:
     friend class Store;
     std::uint64_t root_ = 0, epoch_ = 0, owner_ = 0;
   };
-  explicit Store(const std::filesystem::path& path);
+  // Cache budget covers the allocated entry array, including page and entry metadata.
+  // Fixed Store bookkeeping and allocator overhead are excluded; zero disables caching.
+  explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0);
+  CacheStats cache_stats() const noexcept;
+  // Reset event counters, retaining the cache and its capacity/residency.
+  void reset_cache_stats() noexcept;
   ~Store();
   Store(const Store&) = delete;
   Store& operator=(const Store&) = delete;
