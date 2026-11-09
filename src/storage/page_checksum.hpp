@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include "minivectordb/profile.hpp"
 #include <cstddef>
 #include <cstdint>
 
@@ -19,6 +20,7 @@ inline constexpr auto page_crc32_table=[] {
 // The four checksum bytes are treated as zero, without modifying the page.
 inline std::uint32_t page_checksum(const std::array<unsigned char,4096>& page,
                                    std::size_t checksum_offset) {
+  profile::detail::Scope timer(&profile::Snapshot::page_checksum);
   std::uint32_t crc=0xffffffffu;
   for(std::size_t i=0;i<page.size();++i) {
     const auto byte=(i>=checksum_offset && i<checksum_offset+4)?0u:page[i];

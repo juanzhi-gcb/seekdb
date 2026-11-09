@@ -40,7 +40,12 @@ off_t byte_offset(std::uint64_t id) {
 void write_page(int fd,const Page& p,std::uint64_t id) {
   std::size_t done=0; auto start=byte_offset(id);
   while(done<p.size()) {
-    auto n=::pwrite(fd,p.data()+done,p.size()-done,start+static_cast<off_t>(done));
+    ssize_t n;
+    {
+      profile::detail::Scope timer(&profile::Snapshot::pwrite);
+      n=::pwrite(fd,p.data()+done,p.size()-done,start+static_cast<off_t>(done));
+      if(n>0) timer.bytes(static_cast<std::uint64_t>(n));
+    }
     if(n<0) {if(errno==EINTR) continue; io_error("pwrite");}
     if(n==0) throw std::runtime_error("zero-length pwrite");
     done+=static_cast<std::size_t>(n);
@@ -49,14 +54,29 @@ void write_page(int fd,const Page& p,std::uint64_t id) {
 Page read_raw(int fd,std::uint64_t id) {
   Page p{}; std::size_t done=0; auto start=byte_offset(id);
   while(done<p.size()) {
-    auto n=::pread(fd,p.data()+done,p.size()-done,start+static_cast<off_t>(done));
+    ssize_t n;
+    {
+      profile::detail::Scope timer(&profile::Snapshot::pread);
+      n=::pread(fd,p.data()+done,p.size()-done,start+static_cast<off_t>(done));
+      if(n>0) timer.bytes(static_cast<std::uint64_t>(n));
+    }
     if(n<0) {if(errno==EINTR) continue; io_error("pread");}
     if(n==0) corrupt();
     done+=static_cast<std::size_t>(n);
   }
   return p;
 }
-void sync_fd(int fd) {while(::fsync(fd)!=0) {if(errno!=EINTR) io_error("fsync");}}
+void sync_fd(int fd) {
+  for(;;) {
+    int result;
+    {
+      profile::detail::Scope timer(&profile::Snapshot::fsync);
+      result=::fsync(fd);
+    }
+    if(result==0) return;
+    if(errno!=EINTR) io_error("fsync");
+  }
+}
 Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent) {
   Page p{}; std::memcpy(p.data(),root_magic,8);
   encode(p,8,generation); encode(p,16,root); encode(p,24,extent);
@@ -81,6 +101,7 @@ struct Store::Impl {
   void usable() const {if(poisoned) throw std::runtime_error("commit outcome uncertain; close and reopen Store");}
   void transaction() const {usable(); if(!active) throw std::logic_error("no active transaction");}
   Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0) const {
+    profile::detail::count(type==branch?&profile::Snapshot::page_read_branch:&profile::Snapshot::page_read_overflow);
     if(id<2 || id>=next_page) corrupt();
     auto p=read_raw(fd,id);
     if(std::memcmp(p.data(),page_magic,8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();

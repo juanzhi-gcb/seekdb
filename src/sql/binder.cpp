@@ -1,3 +1,4 @@
+#include "minivectordb/profile.hpp"
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
 #include <charconv>
@@ -175,6 +176,7 @@ namespace minivectordb::sql {
     return true;
   }
   double squared_distance(const std::vector<float>&a,const std::vector<float>&b) {
+    profile::detail::Scope timer(&profile::Snapshot::vector_distance);
     double sum=0;
     for(std::size_t i=0;i<a.size();++i) {
       double d=static_cast<double>(a[i])-b[i];

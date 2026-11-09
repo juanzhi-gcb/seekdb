@@ -1,11 +1,13 @@
 #include "minivectordb/exact.hpp"
 #include <algorithm>
+#include "minivectordb/profile.hpp"
 #include <cmath>
 #include <queue>
 #include <stdexcept>
 namespace minivectordb {
 namespace {
 double squared_l2(std::span<const float> a,std::span<const float> b) {
+  profile::detail::Scope timer(&profile::Snapshot::vector_distance);
   if(a.size()!=b.size()) throw std::invalid_argument("VECTOR dimension mismatch");
   double squared=0;
   for(std::size_t i=0;i<a.size();++i) {

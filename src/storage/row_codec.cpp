@@ -2,6 +2,7 @@
 #include "minivectordb/value.hpp"
 #include "binary.hpp"
 #include <bit>
+#include "minivectordb/profile.hpp"
 #include <cmath>
 #include <cstring>
 #include <set>
@@ -55,6 +56,7 @@ namespace minivectordb {
     return out;
   }
   Row decode_row(const Schema&s,std::string_view bytes) {
+    profile::detail::Scope timer(&profile::Snapshot::row_decode);
     binary::Reader in(bytes);
     if(in.get(1)!=1||in.get(4)!=s.columns.size())throw Error(ErrorCode::Corruption,"row version or column count mismatch");
     Row r;
@@ -94,6 +96,7 @@ namespace minivectordb {
   }
   LazyRowView::LazyRowView(const Schema& schema, std::string_view bytes, ExecutionInfo& info)
       : schema_(schema), bytes_(bytes), cells_(schema.columns.size()), info_(info) {
+    profile::detail::Scope timer(&profile::Snapshot::row_validation);
     binary::Reader in(bytes);
     if(in.get(1)!=1 || in.get(4)!=schema.columns.size())
       throw Error(ErrorCode::Corruption,"row version or column count mismatch");
@@ -122,6 +125,7 @@ namespace minivectordb {
   const Cell& LazyRowView::operator[](std::size_t index) const {
     auto& cell=cells_.at(index);
     if(!cell) {
+      profile::detail::Scope timer(&profile::Snapshot::row_materialization);
       binary::Reader in(bytes_.substr(offsets_[index]));
       switch(schema_.columns[index].type) {
         case ColumnType::Bigint: cell.emplace(std::bit_cast<std::int64_t>(in.get())); break;
