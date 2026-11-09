@@ -1,0 +1,108 @@
+{
+  "schema_version": "minivectordb-learning-record-v1",
+  "synthetic": false,
+  "scope": "真实开发记录节选，2026-11-09。用户发言与工具结果分开保留；不是完整聊天导出。原始含令牌的仓库URL未纳入材料。未记录隐藏思维链。",
+  "baseline_commit": "c842a368c3394748d0499386c18f6b465242e141",
+  "conversations": [
+    {
+      "id": "u01",
+      "role": "user",
+      "content": "那先检查一下 seekdb 仓库，找找正式题包、测试驱动和公开用例，看看现有代码是什么情况，再制定实现计划。"
+    },
+    {
+      "id": "u02",
+      "role": "user",
+      "content": "记住我们这个全程放到D盘，我的C盘要炸了"
+    },
+    {
+      "id": "u03",
+      "role": "user",
+      "content": "就按这个计划开始，先在D盘建好第二轮工作区，把Docker环境和存储位置确认好，再开始实现核心功能，别动初赛分支。同时你可以上网查找相关论文文献，看看有不有什么方法可以提升本道题的分数"
+    },
+    {
+      "id": "u04",
+      "role": "user",
+      "context": "对是否更改影响所有发行版的 WSL 全局交换文件路径的回答。",
+      "content": "不修改全局设置，暂时保留现状"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "e01",
+      "source": "tool",
+      "purpose": "确认第二轮工作区与提交基线",
+      "output": "## 2026-competition-round2...upstream/2026-competition-round2\nc842a368c3394748d0499386c18f6b465242e141\norigin https://github.com/juanzhi-gcb/seekdb.git\nupstream https://github.com/oceanbase/seekdb.git",
+      "note": "末两行整理了remote输出的制表符与fetch/push重复项，其余信息未改变。"
+    },
+    {
+      "id": "e02",
+      "source": "tool",
+      "purpose": "确认专用 Linux Docker 和存储根目录",
+      "output": "28.3.3 linux x86_64 /var/lib/minivectordb-docker 2",
+      "note": "该目录位于注册为 D:\\Codex\\MiniVectorDB\\wsl 的独立发行版内。"
+    },
+    {
+      "id": "e03",
+      "source": "tool",
+      "purpose": "验证容器 /data 实际映射到 D 盘",
+      "output": "minivectordb-d-drive-ok\nx86_64\nminivectordb-d-drive-ok",
+      "note": "容器首先写并读 /data/environment-probe.txt，随后 Windows 从 D:\\Codex\\MiniVectorDB\\data\\environment-probe.txt 读到同样内容。"
+    },
+    {
+      "id": "e04",
+      "source": "tool",
+      "purpose": "类型/向量/存储核心首次失败测试，证明尚未实现时测试不能通过",
+      "output": "core_types: FAIL: not implemented\ncore_vector: FAIL: not implemented\ncore_storage: FAIL: not implemented\n0% tests passed, 3 tests failed out of 3",
+      "note": "原始CTest输出摘要。后续成功结果必须实际执行后追加。"
+    },
+    {
+      "id": "e05",
+      "source": "tool",
+      "purpose": "核心四组测试及真实写失败回归",
+      "output": "100% tests passed, 0 tests failed out of 4\nTotal Test time (real) = 29.00 sec",
+      "note": "核心实现者在Linux本地完整执行。写失败回归先实际失败，再修复并通过。"
+    },
+    {
+      "id": "e06",
+      "source": "tool",
+      "purpose": "从最新源码构建容器并在资源限制下验证",
+      "output": "core_types Passed\ncore_vector Passed\ncore_storage Passed 28.72 sec\ncore_storage_failure Passed 0.06 sec\n100% tests passed, 0 tests failed out of 4\nTotal Test time (real) = 28.79 sec",
+      "note": "在无网络容器运行。实际memory.max为536870912，cpu.max为200000 100000。宿主不支持swap limit，不能等同官方资源准入。"
+    },
+    {
+      "id": "e07",
+      "source": "tool",
+      "purpose": "独立全排序与流式TopK的三轮局部对照，二者按平方距离排序",
+      "output": "{\"rounds\":[{\"full_sort_ms\":803.319,\"streaming_heap_ms\":541.186,\"exact_matches\":1000},{\"full_sort_ms\":763.319,\"streaming_heap_ms\":514.018,\"exact_matches\":1000},{\"full_sort_ms\":765.482,\"streaming_heap_ms\":542.674,\"exact_matches\":1000}],\"median_full_sort_ms\":765.482,\"median_streaming_heap_ms\":541.186,\"median_ratio\":1.41445}",
+      "note": "10,000条128维、1,000次Top10，一半10%通过率过滤；仅内存计算与选择，不含SQL、磁盘持久化或正式计分。最终测量未并行运行其他本项目测试。"
+    }
+  ],
+  "agent_observations": [
+    {
+      "id": "a01",
+      "source": "agent",
+      "content": "官方第二轮分支仅有空Dockerfile、conversation.json和残留配置。遗留驱动使用网络端口，并非本题规定的stdin/stdout接口；尚未获取正式协议/公开用例。"
+    },
+    {
+      "id": "a02",
+      "source": "agent",
+      "content": "Docker Desktop在Windows dockerInference套接字启动失败，改为D盘独立WSL发行版运行Docker。用户选择保留全局WSL设置，因此不能宣称所有系统交换文件也在D盘。"
+    },
+    {
+      "id": "a03",
+      "source": "agent",
+      "content": "论文调研提示优先验证精确扫描、过滤前推和COW写放大。论文的百万级ANN实验不能直接预测本题10k规模的分数；目前仅为待测假设。"
+    },
+    {
+      "id": "a04",
+      "source": "agent",
+      "content": "写盘失败回归发现提交extent可能引用没有完整写出的页，导致重启选择旧提交；修复为完整写成功后才推进页分配。另一回归发现先sqrt再排序会合并接近距离，改为平方距离排序、输出时sqrt。均由Agent发现和验证，不声称是学生独立发现。"
+    }
+  ],
+  "limitations": [
+    "这些记录不能证明用户已理解COW、ANN或进行了独立技术解释；不将Agent实现和解释冒充学生贡献。",
+    "尚未运行正式评测；已完成核心库测试和局部微基准，没有完整SQL数据库、正式准入、排名或分数结论。",
+    "材料路径在官方占位根目录和题面agent/conversation.json之间存在差异；目前两处保存字节相同的同一份材料。",
+    "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。"
+  ]
+}
