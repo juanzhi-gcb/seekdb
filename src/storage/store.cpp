@@ -210,19 +210,21 @@ struct Store::Impl {
     if(id&packed_tag) {
       const auto page_id=physical(id,true);
       auto* slot=memo?memo->slot(page_id):nullptr;
-      Page page;
+      const auto index=id&511;
+      auto contents=[&](const Page& page) {
+        if(index>=decode(page,12,4))corrupt();
+        // Return an owned string before the visitor can mutate or recursively scan.
+        return std::string(reinterpret_cast<const char*>(page.data()+decode(page,payload+index*8,4)),
+                           static_cast<std::size_t>(decode(page,payload+index*8+4,4)));
+      };
       if(slot && slot->id==page_id) {
         profile::detail::count(&profile::Snapshot::page_read_packed);
         profile::detail::count(&profile::Snapshot::packed_cache_hit);
-        page=slot->page;
-      } else {
-        page=read(page_id,packed);
-        if(slot) {slot->page=page; slot->id=page_id;}
+        return contents(slot->page);
       }
-      const auto index=id&511;
-      if(index>=decode(page,12,4))corrupt();
-      return std::string(reinterpret_cast<const char*>(page.data()+decode(page,payload+index*8,4)),
-                         static_cast<std::size_t>(decode(page,payload+index*8+4,4)));
+      const auto page=read(page_id,packed);
+      if(slot) {slot->page=page; slot->id=page_id;}
+      return contents(page);
     }
     std::string result;
     while(id) {auto p=read(id,overflow); result.append(reinterpret_cast<const char*>(p.data()+payload),static_cast<std::size_t>(decode(p,12,4))); id=decode(p,16);}
@@ -366,11 +368,18 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   pending.reserve(sorted.size());
   auto flush=[&] {
     if(!slot_count)return;
-    if(state.next_page>((packed_tag-1)>>9))throw std::length_error("packed page address exhausted");
-    encode(packed_page,12,slot_count,4);
-    const auto id=state.append(packed_page);
-    for(std::size_t slot=0;slot<pending.size();++slot)
-      replacements[pending[slot]].value=packed_tag|(id<<9)|slot;
+    if(slot_count==1) {
+      // Packing one record saves no pages; retain the simpler ordinary read path.
+      const std::string_view contents(reinterpret_cast<const char*>(packed_page.data()+payload_start),
+                                      page_size-payload_start);
+      replacements[pending.front()].value=state.write_value(contents);
+    } else {
+      if(state.next_page>((packed_tag-1)>>9))throw std::length_error("packed page address exhausted");
+      encode(packed_page,12,slot_count,4);
+      const auto id=state.append(packed_page);
+      for(std::size_t slot=0;slot<pending.size();++slot)
+        replacements[pending[slot]].value=packed_tag|(id<<9)|slot;
+    }
     packed_page=state.empty_page(packed,0); slot_count=0; payload_start=page_size; pending.clear();
   };
   for(const auto* mutation:sorted) {

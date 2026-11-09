@@ -89,6 +89,44 @@ void failure(const std::filesystem::path& dir,unsigned pages) {
  int status=0;CHECK(waitpid(pid,&status,0)==pid && WIFEXITED(status) && WEXITSTATUS(status)==0);Store s(path);CHECK(s.get(0)=="retry" && s.get(1)=="new");
 }
 
+
+void singleton_fallback(const std::filesystem::path& dir) {
+ // A singleton has no density benefit, regardless of its value length.
+ for(auto length:{0U,16U,3000U,4056U,4057U}) {
+  auto path=dir/("singleton-"+std::to_string(length));
+  {Store s(path,0,true);s.begin();
+   for(int key=0;key<3;++key)s.apply_batch_in(0,std::vector<Store::Mutation>{{key,std::string(length,'x')}});
+   s.commit();}
+  Store s(path,0,false);profile::set_enabled(true);profile::reset();unsigned count=0;
+  s.scan([&](auto,auto value){CHECK(value==std::string(length,'x'));++count;});
+  const auto metrics=profile::snapshot();profile::set_enabled(false);
+  CHECK(count==3);CHECK(metrics.page_read_packed.calls==0);CHECK(metrics.packed_cache_hit.calls==0);
+  CHECK(metrics.page_read_overflow.calls==3);
+ }
+ // Different large rows that cannot coexist must also fall back within one batch.
+ auto wide=dir/"singleton-wide-batch";
+ {Store s(wide,0,true);s.begin();s.apply_batch_in(0,std::vector<Store::Mutation>{{0,std::string(3000,'a')},{1,std::string(3000,'b')}});s.commit();
+  profile::set_enabled(true);profile::reset();s.scan([&](auto k,auto v){CHECK(v==std::string(3000,k?'b':'a'));});
+  auto m=profile::snapshot();profile::set_enabled(false);CHECK(m.page_read_packed.calls==0 && m.packed_cache_hit.calls==0);}
+ // Large + small coexist in exactly one packed page; one small tail is ordinary.
+ auto mixed=dir/"singleton-tail";
+ {Store s(mixed,0,true);s.begin();s.apply_batch_in(0,std::vector<Store::Mutation>{{0,std::string(4000,'a')},{1,std::string(48,'b')},{2,"tail"}});s.commit();
+  profile::set_enabled(true);profile::reset();unsigned count=0;
+  s.scan([&](auto k,auto v){CHECK(v==(k==0?std::string(4000,'a'):k==1?std::string(48,'b'):"tail"));++count;});
+  auto m=profile::snapshot();profile::set_enabled(false);CHECK(count==3);CHECK(m.page_read_packed.calls==2 && m.packed_cache_hit.calls==1);CHECK(m.page_read_overflow.calls==1);
+ }
+ // A CRC-valid historical format03 singleton remains readable after the write-policy change.
+ auto historical=dir/"historical-singleton";
+ {Store s(historical,0,true);s.begin();s.put(0,"old");s.commit();}
+ {std::fstream f(historical,std::ios::in|std::ios::out|std::ios::binary);auto page=read(f,2);page.fill(0);
+  const char magic[]="MVDBPG03";std::copy(magic,magic+8,page.begin());set(page,8,3,4);set(page,12,1,4);set(page,32,4093,4);set(page,36,3,4);
+  page[4093]='o';page[4094]='l';page[4095]='d';write(f,2,page);
+  auto leaf=read(f,3);set(leaf,32,(1ULL<<63)|(2ULL<<9));write(f,3,leaf);
+ }
+ {Store s(historical,0,false);CHECK(s.get(0)=="old");unsigned count=0;s.scan([&](auto,auto v){CHECK(v=="old");++count;});CHECK(count==1);}
+ {Store s(historical,0,true);s.begin();s.apply_batch_in(0,std::vector<Store::Mutation>{{1,"new"}});s.commit();CHECK(s.get(0)=="old");}
+ {Store s(historical);CHECK(s.get(0)=="old" && s.get(1)=="new");}
+}
 void eviction(const std::filesystem::path& path) {
  std::map<std::int64_t,std::string> expected;
  {Store s(path,0,true);s.begin();
@@ -126,6 +164,6 @@ int main() {try {
  for(bool packed:{false,true}) {Store s(dir/(packed?"packed":"legacy"),0,packed); s.begin(); s.apply_batch_in(0,rows); s.commit(); for(auto& r:rows)CHECK(s.get(r.key)==r.value);}
  CHECK(std::filesystem::file_size(dir/"packed")<std::filesystem::file_size(dir/"legacy")/2);
  for(auto budget:{0UL,1UL,4104UL,262144UL}) {Store s(dir/"packed",0,false,budget); unsigned count=0; profile::set_enabled(true); profile::reset(); s.scan([&](auto k,auto v){CHECK(v==*rows[k].value); ++count;}); auto m=profile::snapshot(); profile::set_enabled(false); CHECK(count==128); if(budget==262144)CHECK(m.pread.calls<25); if(budget==0)CHECK(m.pread.calls>=128);}
- boundaries(dir/"boundaries");corruption(dir);compatibility(dir);failure(dir,0);failure(dir,1);failure(dir,8);crash(dir/"crash");eviction(dir/"eviction");overflow_tag(dir/"overflow-tag");
+ singleton_fallback(dir);boundaries(dir/"boundaries");corruption(dir);compatibility(dir);failure(dir,0);failure(dir,1);failure(dir,8);crash(dir/"crash");eviction(dir/"eviction");overflow_tag(dir/"overflow-tag");
  std::filesystem::remove_all(dir); std::cout<<"packed storage tests passed\n";
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
