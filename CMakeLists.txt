@@ -40,3 +40,8 @@ add_executable(batch_tests tests/batch_tests.cpp)
 target_link_libraries(batch_tests PRIVATE minivectordb_core)
 add_test(NAME core_batches COMMAND batch_tests)
 set_tests_properties(core_batches PROPERTIES TIMEOUT 180)
+
+add_executable(checksum_tests tests/checksum_tests.cpp)
+target_link_libraries(checksum_tests PRIVATE minivectordb_core)
+add_test(NAME core_checksum COMMAND checksum_tests)
+set_tests_properties(core_checksum PROPERTIES TIMEOUT 30)

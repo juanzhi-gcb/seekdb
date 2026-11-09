@@ -1,4 +1,5 @@
 #include "minivectordb/store.hpp"
+#include "page_checksum.hpp"
 #include <array>
 #include <algorithm>
 #include <vector>
@@ -31,14 +32,7 @@ std::uint64_t decode(const Page& p,std::size_t offset,unsigned bytes=8) {
   for(unsigned i=0;i<bytes;++i) value|=static_cast<std::uint64_t>(p[offset+i])<<(i*8);
   return value;
 }
-std::uint32_t checksum(const Page& p,std::size_t checksum_offset) {
-  std::uint32_t crc=0xffffffffu;
-  for(std::size_t i=0;i<p.size();++i) {
-    crc^=(i>=checksum_offset && i<checksum_offset+4)?0:p[i];
-    for(int bit=0;bit<8;++bit) crc=(crc>>1)^(0xedb88320u & (0u-(crc&1u)));
-  }
-  return ~crc;
-}
+using detail::page_checksum;
 off_t byte_offset(std::uint64_t id) {
   if(id>static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())/page_size) throw std::length_error("database exceeds file offset range");
   return static_cast<off_t>(id*page_size);
@@ -66,10 +60,10 @@ void sync_fd(int fd) {while(::fsync(fd)!=0) {if(errno!=EINTR) io_error("fsync");
 Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent) {
   Page p{}; std::memcpy(p.data(),root_magic,8);
   encode(p,8,generation); encode(p,16,root); encode(p,24,extent);
-  encode(p,32,checksum(p,32),4); return p;
+  encode(p,32,page_checksum(p,32),4); return p;
 }
 bool valid_root(const Page& p,std::uint64_t complete_pages) {
-  if(std::memcmp(p.data(),root_magic,8)!=0 || decode(p,32,4)!=checksum(p,32)) return false;
+  if(std::memcmp(p.data(),root_magic,8)!=0 || decode(p,32,4)!=page_checksum(p,32)) return false;
   auto root=decode(p,16), extent=decode(p,24);
   return extent>=2 && extent<=complete_pages && (root==0 || (root>=2 && root<extent));
 }
@@ -89,7 +83,7 @@ struct Store::Impl {
   Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0) const {
     if(id<2 || id>=next_page) corrupt();
     auto p=read_raw(fd,id);
-    if(std::memcmp(p.data(),page_magic,8)!=0 || decode(p,24,4)!=checksum(p,24) || decode(p,8,4)!=type) corrupt();
+    if(std::memcmp(p.data(),page_magic,8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
       if(decode(p,12,4)!=depth) corrupt();
       for(unsigned i=0;i<256;++i) {
@@ -104,7 +98,7 @@ struct Store::Impl {
   }
   std::uint64_t append(Page p) {
     // Publish an address only after its complete write. A failed page has no root references.
-    auto id=next_page; encode(p,24,checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
+    auto id=next_page; encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
   }
   Page empty_page(std::uint32_t type,unsigned used) const {
     Page p{}; std::memcpy(p.data(),page_magic,8); encode(p,8,type,4); encode(p,12,used,4); return p;
