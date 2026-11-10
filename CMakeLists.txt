@@ -85,3 +85,8 @@ add_executable(vector_index_tests tests/vector_index_tests.cpp)
 target_link_libraries(vector_index_tests PRIVATE minivectordb_core)
 add_test(NAME core_vector_index COMMAND vector_index_tests)
 set_tests_properties(core_vector_index PROPERTIES TIMEOUT 180)
+
+add_executable(paired_scan_tests tests/paired_scan_tests.cpp)
+target_link_libraries(paired_scan_tests PRIVATE minivectordb_core)
+add_test(NAME core_paired_scan COMMAND paired_scan_tests)
+set_tests_properties(core_paired_scan PROPERTIES TIMEOUT 180)

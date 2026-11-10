@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <span>
+#include <stdexcept>
 namespace minivectordb {
 struct CacheStats {
   std::uint64_t hits=0, misses=0, evictions=0;
@@ -19,6 +20,10 @@ struct CacheStats {
 // Savepoints belong to one Store and one active transaction.
 class Store {
 public:
+  class KeySetMismatch : public std::runtime_error {
+  public:
+    KeySetMismatch() : std::runtime_error("corrupt MiniVectorDB file: paired key sets differ") {}
+  };
   struct Mutation {
     std::int64_t key;
     std::optional<std::string> value; // nullopt erases the key; missing keys are a no-op.
@@ -58,6 +63,13 @@ public:
   // Payload is bounded by max_batch_bytes, except one individually oversized value.
   void apply_batch_in(std::uint64_t space, std::span<const Mutation> mutations);
   void scan_in(std::uint64_t space, const std::function<void(std::int64_t, std::string_view)>& visitor) const;
+  // Co-visits equal key sets in signed order from one immutable root snapshot.
+  // Both namespaces are resolved before callbacks; callbacks may mutate/rollback.
+  // Views last only during the callback. One shared bounded scan cache plus
+  // O(tree height) pages and the two current owned values are retained.
+  // Throws KeySetMismatch on unequal key sets; earlier visits are not undone.
+  void scan_equal_in(std::uint64_t left_space, std::uint64_t right_space,
+                     const std::function<void(std::int64_t, std::string_view, std::string_view)>& visitor) const;
   void commit();
   void rollback();
   Savepoint savepoint() const;

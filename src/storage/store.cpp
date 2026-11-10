@@ -312,6 +312,25 @@ struct Store::Impl {
     for(unsigned i=0;i<256;++i)if(decode(page,payload+i*8))return append(page);
     return 0;
   }
+  void walk_equal(std::uint64_t left,std::uint64_t right,unsigned depth,std::uint64_t prefix,
+                  const std::function<void(std::int64_t,std::string_view,std::string_view)>& visitor,
+                  ScanCache& memo) const {
+    if(!left && !right)return;
+    if(!left || !right)throw KeySetMismatch();
+    // Copies remain valid if visitor mutations evict cache entries or change root.
+    const auto a=read(left,branch,depth);
+    const auto b=read(right,branch,depth);
+    for(unsigned i=0;i<256;++i) {
+      const auto ac=decode(a,payload+i*8),bc=decode(b,payload+i*8);
+      if(!ac && !bc)continue;
+      if(!ac || !bc)throw KeySetMismatch();
+      const auto key=prefix|(static_cast<std::uint64_t>(i)<<((15-depth)*8));
+      if(depth==15) {
+        const auto av=value(ac,&memo),bv=value(bc,&memo);
+        visitor(signed_key(key),av,bv);
+      } else walk_equal(ac,bc,depth+1,key,visitor,memo);
+    }
+  }
   void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,const std::function<void(std::int64_t,std::string_view)>& visitor,ScanCache& memo) const {
     if(!id) return;
     auto p=read(id,branch,depth);
@@ -485,5 +504,20 @@ void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,st
   for(unsigned depth=0;depth<8 && id;++depth) {auto p=s.read(id,branch,depth); id=decode(p,payload+key_index(space,0,depth)*8);}
   Impl::ScanCache memo(s.scan_budget);
   s.walk(id,8,0,visitor,memo);
+}
+void Store::scan_equal_in(std::uint64_t left_space,std::uint64_t right_space,
+                          const std::function<void(std::int64_t,std::string_view,std::string_view)>& visitor) const {
+  auto& s=*impl_; s.usable(); const auto root=s.root;
+  const auto locate=[&](std::uint64_t space) {
+    auto id=root;
+    for(unsigned depth=0;depth<8 && id;++depth) {
+      const auto page=s.read(id,branch,depth);
+      id=decode(page,payload+key_index(space,0,depth)*8);
+    }
+    return id;
+  };
+  const auto left=locate(left_space),right=locate(right_space);
+  Impl::ScanCache memo(s.scan_budget);
+  s.walk_equal(left,right,8,0,visitor,memo);
 }
 }

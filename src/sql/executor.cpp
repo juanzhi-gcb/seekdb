@@ -185,15 +185,28 @@ namespace minivectordb {
           if(index) {
             // Exhaustive flat index: exact and ANN mode share recall 1. Read and
             // validate every base row, retaining the established corruption contract.
-            store.scan_in(index->id,[&](auto key,auto bytes) {
+            auto consume=[&](auto key,const std::vector<float>& vector,const SelectRow& row) {
+              if(vector!=std::get<std::vector<float>>(row[e.column]))
+                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+              if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
+            };
+            if(options.paired_index_scan) {
+              try {
+                store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
+                  ++info.vector_index_entries_examined;
+                  auto vector=read_index_vector(bytes,s.columns[e.column].extent);
+                  ++info.rows_examined;
+                  SelectRow row(s,key,base,options.selective_decode,info);
+                  consume(key,vector,row);
+                });
+              } catch(const Store::KeySetMismatch& error) {
+                throw Error(ErrorCode::Corruption,error.what());
+              }
+            } else store.scan_in(index->id,[&](auto key,auto bytes) {
               ++info.vector_index_entries_examined;
               auto vector=read_index_vector(bytes,s.columns[e.column].extent);
               ++info.rows_examined;
-              fetch_select(s,key,info,[&](const SelectRow& row) {
-                if(vector!=std::get<std::vector<float>>(row[e.column]))
-                  throw Error(ErrorCode::Corruption,"vector index disagrees with row");
-                if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
-              });
+              fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
             });
           } else scan_select(s,b,info,[&](auto key,const SelectRow&r) {
             ++info.distances_computed;
