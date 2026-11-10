@@ -55,6 +55,39 @@ namespace minivectordb {
       return found;
     }
   }
+  // Positive catalog keys remain table records. Negative keys describe vector
+  // namespaces, allocated from the same counter, so legacy format02/03 tables
+  // and future tables cannot collide with index entries.
+  std::vector<VectorIndex> vector_indexes(const Store& store,std::uint64_t table) {
+    std::vector<VectorIndex> out;
+    store.scan([&](auto key,auto bytes) {
+      if(key>=0)return;
+      if(key==INT64_MIN)throw Error(ErrorCode::Corruption,"invalid vector index identifier");
+      binary::Reader in(bytes);
+      if(in.get(1)!=1)throw Error(ErrorCode::Corruption,"unsupported vector index version");
+      VectorIndex index{static_cast<std::uint64_t>(-key),in.get(),static_cast<std::size_t>(in.get(4)),in.text()};
+      in.end();
+      if(index.table==table)out.push_back(std::move(index));
+    });
+    return out;
+  }
+  VectorIndex create_vector_index(Store& store,const Schema& schema,std::size_t column,std::string_view name) {
+    if(column>=schema.columns.size()||schema.columns[column].type!=ColumnType::Vector)
+      throw Error(ErrorCode::Schema,"vector index requires VECTOR column");
+    for(const auto& index:vector_indexes(store,schema.id))
+      if(index.name==name)throw Error(ErrorCode::Schema,"index already exists: "+std::string(name));
+    auto raw=store.get(0);
+    if(!raw)throw Error(ErrorCode::Corruption,"missing catalog counter");
+    binary::Reader in(*raw);
+    if(in.get(1)!=1)throw Error(ErrorCode::Corruption,"invalid catalog counter version");
+    auto next=in.get(); in.end();
+    if(next==0||next>INT64_MAX)throw Error(ErrorCode::Constraint,"namespace identifier exhausted");
+    std::string bytes; binary::put(bytes,1,1); binary::put(bytes,schema.id);
+    binary::put(bytes,column,4); binary::text(bytes,name);
+    store.put(-static_cast<std::int64_t>(next),bytes);
+    std::string counter; binary::put(counter,1,1); binary::put(counter,next+1); store.put(0,counter);
+    return {next,schema.id,column,std::string(name)};
+  }
   Schema lookup_table(const Store&store,std::string_view name) {
     auto s=find(store,name);
     if(!s)throw Error(ErrorCode::Schema,"unknown table: "+std::string(name));

@@ -89,6 +89,12 @@ namespace minivectordb::sql {
         }
       }
       void create(Statement&s) {
+        if(take("vector")) {
+          s.kind=Statement::CreateIndex;
+          need("index"); s.index_name=name(); need("on"); s.table=name();
+          need("("); s.index_column=name(); need(")");
+          return;
+        }
         need("table");
         s.table=name();
         s.schema.name=s.table;

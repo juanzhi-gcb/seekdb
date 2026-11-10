@@ -69,6 +69,23 @@
       "id": "u13",
       "role": "user",
       "content": "我们继续优化，先找到能最大优化的部分，然后给出优化方案，然后按计划执行"
+    },
+    {
+      "id": "u14",
+      "role": "user",
+      "content": "这是上一版的提测结果",
+      "context": "用户随后提供失败提交 bdae610c073a215d1fe85727ef85a2a8062ea238 及 MySQL 正式用例未通过汇总；没有具体 SQL 日志。"
+    },
+    {
+      "id": "u15",
+      "role": "user",
+      "content": "按照你的检测结果修复错误"
+    },
+    {
+      "id": "u16",
+      "role": "user",
+      "content": "Done， 已经补充了一下stdin/stdout的规则，其实就是给docker的主业务程序发送stdin，前提是按照docker正常的规则来设计，docker run跑的是业务主程序\n也补充了一个具体的py用来double check，但这是AI写的，并没有细致的运行，大家可以参考",
+      "context": "用户转发组织者的规则更新，并提示公开 Python 程序未经细致验证；不视为用户独立编写或审查驱动的证据。"
     }
   ],
   "experiments": [
@@ -293,6 +310,41 @@
       "purpose": "Retain negative cases and memory tradeoff",
       "output": "dim768 first-after-DML query10.013->12.356ms (+23.4%); wide first19.319->20.245ms (+4.8%); dim16 write192.616->205.306ms (+6.6%).Large RSS15932->32424KiB includes driver/truth. First-query timer excludes some allocation/setup and is not startup or cold-disk latency.",
       "evidence": "bench/results/buffer-varied.jsonl;bench/results/buffer-large.jsonl;docs/buffer-method.md"
+    },
+    {
+      "id": "e32",
+      "source": "tool",
+      "purpose": "Reproduce admission gaps before fixing",
+      "output": "Both bdae610 and873e139: old dev-tsv diagnostic19/20 cases94/95SQL; CREATE VECTOR INDEX fails. New official JSONL handshake on actual873 image: TIMEOUT JSON response timeout. Platform summary alone does not identify the unique failing SQL.",
+      "evidence": "bench/results/admission-20261110/baseline-handshake.json;docs/admission-protocol-review.md"
+    },
+    {
+      "id": "e33",
+      "source": "tool",
+      "purpose": "Verify protocol evidence rather than guess JSON framing",
+      "output": "Official upstream f4d4e26653af823a7601668802f80e374ad6643c defines JSONL input/output, exact ready, execute/search_mode, shutdown. 50 downloaded source/case files verified against Git blob SHA1. Native adapter tests first failed on old binary; overflow-ID regression also failed before the numeric guard.",
+      "evidence": "docs/admission-protocol-review.md;tests/jsonl_tests.py"
+    },
+    {
+      "id": "e34",
+      "source": "tool",
+      "purpose": "Actual Docker official public regression",
+      "output": "20/20 public cases,95SQL assertions pass through official JSONL driver, with D-only storage launcher and negative assertion canary. Handshake passes. Modes exact/ann and index maintenance included; no hidden29-case claim.",
+      "evidence": "bench/results/admission-20261110/public.json;bench/results/admission-20261110/handshake.json"
+    },
+    {
+      "id": "e35",
+      "source": "tool",
+      "purpose": "Independent state model and crash checks",
+      "output": "150 mutations,273 independent model checks across exact/ann and filters;2 crash/restarts. Committed rows and indexes persist; uncommitted DML/DDL discarded.",
+      "evidence": "bench/results/admission-20261110/independent.json"
+    },
+    {
+      "id": "e36",
+      "source": "tool",
+      "purpose": "Integrated regression and resource qualification",
+      "output": "25/25 container suites pass in 138.87s; runtime defaultJSONL/persistence/EOF+shutdown rollback pass. WSL Docker reports No swap limit support; requested swap=memory becomes inspect swap=-1. No globals changed; this is not formal resource admission.",
+      "evidence": "bench/results/admission-20261110/internal.log;bench/results/admission-20261110/runtime.log;bench/results/admission-20261110/container.json"
     }
   ],
   "agent_observations": [
@@ -380,12 +432,22 @@
       "id": "a17",
       "source": "agent",
       "content": "实测双层缓存比仅数据缓存更慢；选择SQL16MiB数据缓存并关闭扫描缓存，底层Store默认保持关闭。保留首次查询、写入及内存退化。下一瓶颈转向整行校验和逐行执行，批量校验/少复制需另做对照。上述设计与解释来自Agent，不冒充用户理解。"
+    },
+    {
+      "id": "a18",
+      "source": "agent",
+      "content": "此前把自研 dev-tsv 测试通过等同于交付可用的方向存在缺口。诊断时没有凭.result JSON猜协议；新官方协议发布后，完整修复双向JSONL、ready与shutdown，再以实际Docker入口验证。用户提示AI驱动未经细致验证，促使独立审查比较器：Python优化会删除assert，因此补负向检查并记录环境差异。这些审查和解释由Agent完成，不冒充用户理解。"
+    },
+    {
+      "id": "a19",
+      "source": "agent",
+      "content": "向量索引采用磁盘平坦结构，共用表和目录提交根，优先修复一致性和准入。ann通过完整精确检索执行，不把接收ann参数等同于实现近似剪枝。代价是重复向量写入和逐行核验；本轮没有性能对照，不能沿用前版61%缓存提效声称新索引更快。公开20通过不能替代隐藏29正式准入。"
     }
   ],
   "limitations": [
     "这些记录不能证明用户已理解COW、ANN或进行了独立技术解释；不将Agent实现和解释冒充学生贡献。",
-    "尚未运行正式评测；本地已接通SQL、表目录、行编解码及事务，仍缺正式协议适配、正式资源准入和必要的ANN。没有排名或分数结论。",
     "材料路径在官方占位根目录和题面agent/conversation.json之间存在差异；目前两处保存字节相同的同一份材料。",
-    "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。"
+    "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。",
+    "用户已反馈bdae610正式准入失败。本轮JSONL及持久化平坦索引修复通过公开20和内部25组测试，但未推送/正式提测，未验证隐藏29与禁用swap资源准入。ann仍精确穷举；不宣称性能收益、分数或用户已掌握实现细节。"
   ]
 }

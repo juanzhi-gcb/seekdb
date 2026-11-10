@@ -33,10 +33,11 @@ namespace minivectordb::sql {
   };
   struct Statement {
     enum Kind {
-      Create,Insert,Select,Update,Delete,Begin,Commit,Rollback
+      Create,CreateIndex,Insert,Select,Update,Delete,Begin,Commit,Rollback
     }
     kind;
     std::string table;
+    std::string index_name,index_column;
     Schema schema;
     std::vector<std::string> insert_columns;
     std::vector<std::vector<Literal>> values;

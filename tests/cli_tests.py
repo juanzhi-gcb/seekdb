@@ -31,11 +31,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, status, result.stdout + result.stderr)
         return result.stdout.splitlines()
 
-    def test_explicit_protocol_required(self):
+    def test_default_protocol_is_jsonl(self):
         result = subprocess.run([str(BINARY), "--data-dir", str(self.data)],
-                                capture_output=True, timeout=10)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn(b"dev-tsv", result.stderr)
+                                input=b'', capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, b'{"type":"ready"}\n')
 
     def test_crud_vector_and_reopen(self):
         lines = self.run_sql("""

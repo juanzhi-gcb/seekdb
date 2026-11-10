@@ -1,6 +1,6 @@
 # Local development SQL protocol
 
-This adapter is explicitly selected with --protocol dev-tsv. It is **not** a claimed competition protocol: the official driver and framing have not been provided.
+This compatibility adapter is explicitly selected with --protocol dev-tsv. The native CLI and Docker default to the official JSONL protocol published in upstream f4d4e26653af823a7601668802f80e374ad6643c. See the JSONL notes below.
 
 ## Launch
 
@@ -42,4 +42,15 @@ Expected output (tabs shown as spaces):
     ROW  i:1  d:0
     END  1
 
-Do not use this local contract to claim official compatibility. The adapter remains replaceable while catalog, execution and persistence stay behind the streaming Database API.
+The dev-tsv contract is for local development only. Official clients must use JSONL.
+## Default official JSONL adapter
+
+Launch `minivectordb --data-dir /data` (or explicitly `--protocol jsonl`). Recovery and file opening finish before the exact `{"type":"ready"}` handshake is flushed. Each UTF-8 physical line is one JSON request, with a 16 MiB request limit and nesting limit 64. Duplicate object keys, malformed numbers, invalid UTF-8 and unpaired Unicode surrogates are rejected. Invalid framing returns an error with null ID when no unambiguous validated ID can be recovered.
+
+Execute requests contain `id`, `op:"execute"`, `sql`, and optional `search_mode:"exact"|"ann"` (default exact). The mode reaches the database API. IDs retain their original JSON type and number lexeme; BIGINT results use exact decimal integers. Query output has columns and two-dimensional rows; vectors are arrays with finite numbers. The current SQL engine does not implement NULL values, so no NULL cell is produced.
+
+Successful nonqueries include integer affected_rows; DDL and transaction controls use zero. SQL failures return boolean ok:false and a nonempty internal error category; no unpublished official error-code mapping is assumed. A failed statement does not terminate the JSONL session or change its normal exit status.
+
+Responses are completed before any stdout output. A 64 KiB buffer handles small responses; larger ones spill to a uniquely created anonymous file under the data directory, streamed back in 64 KiB chunks. Unlinking immediately after opening lets the OS reclaim the spool on both normal close and process death. SELECT execution/spool failures therefore produce one error instead of partial success. An output transport failure after emission begins is fatal, without emitting a second response. Result size is not held in memory as a single string.
+
+Shutdown explicitly rolls back an active transaction and releases the database before returning exactly id and ok:true, then exits zero. EOF also rolls back. Every protocol message ends with a newline and is flushed. Logs and fatal diagnostics use stderr. CLI/startup/transport failures exit 2.

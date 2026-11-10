@@ -1,4 +1,5 @@
 #include "minivectordb/database.hpp"
+#include "protocol/jsonl.hpp"
 #include <charconv>
 #include <cctype>
 #include <filesystem>
@@ -63,7 +64,7 @@ const char* error_name(minivectordb::ErrorCode code) {
 struct Arguments {
     std::filesystem::path directory = "/data";
     std::size_t sort_memory = 8 * 1024 * 1024;
-    bool protocol = false;
+    bool protocol = false; // true selects explicit dev-tsv
 };
 Arguments arguments(int argc, char** argv) {
     Arguments args;
@@ -72,6 +73,7 @@ Arguments arguments(int argc, char** argv) {
         if (i + 1 >= argc) throw std::invalid_argument("missing option value");
         const std::string_view value(argv[++i]);
         if (flag == "--protocol" && value == "dev-tsv") args.protocol = true;
+        else if (flag == "--protocol" && value == "jsonl") args.protocol = false;
         else if (flag == "--data-dir") args.directory = std::string(value);
         else if (flag == "--sort-memory") {
             auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), args.sort_memory);
@@ -79,7 +81,6 @@ Arguments arguments(int argc, char** argv) {
                 throw std::invalid_argument("--sort-memory must be an integer >=4096");
         } else throw std::invalid_argument("unknown option or protocol");
     }
-    if (!args.protocol) throw std::invalid_argument("explicit --protocol dev-tsv is required");
     if (args.directory.empty()) throw std::invalid_argument("--data-dir cannot be empty");
     return args;
 }
@@ -169,12 +170,12 @@ int main(int argc, char** argv) {
         const auto args = arguments(argc, argv);
         std::filesystem::create_directories(args.directory);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
-        minivectordb::Database db(args.directory / "database.mvdb",
-                                {args.directory / "tmp", args.sort_memory});
-        return serve(db);
+        auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
+                                minivectordb::Options{args.directory / "tmp", args.sort_memory});
+        return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);
     } catch (const std::exception& error) {
         std::cerr << "MiniVectorDB: " << error.what()
-                  << "\nUsage: minivectordb --protocol dev-tsv [--data-dir /data] [--sort-memory bytes]\n";
+                  << "\nUsage: minivectordb [--protocol jsonl|dev-tsv] [--data-dir /data] [--sort-memory bytes]\n";
         return 2;
     }
 }

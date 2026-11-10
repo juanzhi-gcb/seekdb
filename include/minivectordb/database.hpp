@@ -37,7 +37,9 @@ struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
   std::function<void(const Row&)> row;
 };
+enum class SearchMode { Exact, Ann };
 struct ExecutionInfo {
+  std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;
   std::uint64_t rows_examined = 0, distances_computed = 0, spill_runs = 0;
@@ -55,7 +57,7 @@ public:
   ~Database();
   Database(const Database&) = delete;
   Database& operator=(const Database&) = delete;
-  ExecutionInfo execute(std::string_view sql, const QuerySink& sink = {});
+  ExecutionInfo execute(std::string_view sql, const QuerySink& sink = {}, SearchMode mode = SearchMode::Exact);
   bool in_transaction() const noexcept;
   CacheStats data_cache_stats() const noexcept;
   void reset_data_cache_stats() noexcept;

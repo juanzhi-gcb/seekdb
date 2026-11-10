@@ -3,9 +3,27 @@
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include <cmath>
+#include <bit>
+#include "../storage/binary.hpp"
 #include <limits>
 namespace minivectordb {
   namespace {
+    std::string index_vector(const Cell& cell) {
+      std::string bytes;
+      for(float value:std::get<std::vector<float>>(cell))binary::put(bytes,std::bit_cast<std::uint32_t>(value),4);
+      return bytes;
+    }
+    std::vector<float> read_index_vector(std::string_view bytes,std::size_t dimension) {
+      if(bytes.size()!=dimension*4)throw Error(ErrorCode::Corruption,"invalid vector index entry length");
+      binary::Reader in(bytes);
+      std::vector<float> result; result.reserve(dimension);
+      for(std::size_t i=0;i<dimension;++i) {
+        float value=std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)));
+        if(!std::isfinite(value))throw Error(ErrorCode::Corruption,"invalid vector index component");
+        result.push_back(value);
+      }
+      return result;
+    }
     struct StopScan {
     };
     void count_decoded(const Row& row,ExecutionInfo& info) {
@@ -161,7 +179,23 @@ namespace minivectordb {
       if(b.order.size()==1&&!b.order[0].descending&&b.order[0].expression.query&&statement.limit&&limit<=options.memory_budget_bytes/(4*sizeof(Neighbor))) {
         const auto&e=b.order[0].expression;
         auto winners=exact_top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
-          scan_select(s,b,info,[&](auto key,const SelectRow&r) {
+          std::optional<VectorIndex> index;
+          if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
+            if(candidate.column==e.column) { index=candidate; break; }
+          if(index) {
+            // Exhaustive flat index: exact and ANN mode share recall 1. Read and
+            // validate every base row, retaining the established corruption contract.
+            store.scan_in(index->id,[&](auto key,auto bytes) {
+              ++info.vector_index_entries_examined;
+              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
+              ++info.rows_examined;
+              fetch_select(s,key,info,[&](const SelectRow& row) {
+                if(vector!=std::get<std::vector<float>>(row[e.column]))
+                  throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+                if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
+              });
+            });
+          } else scan_select(s,b,info,[&](auto key,const SelectRow&r) {
             ++info.distances_computed;
             visit(key,std::get<std::vector<float>>(r[e.column]));
           });
@@ -246,7 +280,7 @@ namespace minivectordb {
       sql::Bound bound;
       if(statement.kind!=sql::Statement::Create) {
         schema=lookup_table(store,statement.table);
-        bound=sql::bind(statement,schema);
+        if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
       }
       if(statement.kind==sql::Statement::Select)return select(statement,schema,bound,sink);
       // Binding and existing-key checks finish before any statement mutation.
@@ -259,10 +293,32 @@ namespace minivectordb {
       const auto savepoint=store.savepoint();
       try {
         MutationBatch batch(store,schema.id,options.batch_writes);
+        const auto indexes=vector_indexes(store,schema.id);
+        std::vector<std::unique_ptr<MutationBatch>> index_batches;
+        for(const auto& index:indexes) {
+          if(index.column>=schema.columns.size()||schema.columns[index.column].type!=ColumnType::Vector)
+            throw Error(ErrorCode::Corruption,"invalid indexed column");
+          index_batches.push_back(std::make_unique<MutationBatch>(store,index.id,options.batch_writes));
+        }
+        auto maintain=[&](std::int64_t key,const Row* row) {
+          for(std::size_t i=0;i<indexes.size();++i)
+            index_batches[i]->add(key,row?std::optional<std::string>(index_vector((*row)[indexes[i].column])):std::nullopt);
+        };
         if(statement.kind==sql::Statement::Create)create_table(store,statement.schema);
+        else if(statement.kind==sql::Statement::CreateIndex) {
+          auto column=sql::column_index(schema,statement.index_column);
+          auto index=create_vector_index(store,schema,column,statement.index_name);
+          MutationBatch entries(store,index.id,options.batch_writes);
+          store.scan_in(schema.id,[&](auto key,auto bytes) {
+            auto row=decode(schema,key,bytes);
+            entries.add(key,index_vector(row[column]));
+          });
+          entries.flush();
+        }
         else if(statement.kind==sql::Statement::Insert) {
           for(const auto&r:bound.insert_rows) {
             batch.add(std::get<std::int64_t>(r[schema.primary]),encode_row(schema,r));
+            maintain(std::get<std::int64_t>(r[schema.primary]),&r);
             ++info.affected_rows;
           }
         }
@@ -271,16 +327,19 @@ namespace minivectordb {
             auto r=old;
             for(const auto&[column,value]:bound.assignments)r[column]=value;
             batch.add(key,encode_row(schema,r));
+            maintain(key,&r);
             ++info.affected_rows;
           });
         }
         else if(statement.kind==sql::Statement::Delete) {
           scan(schema,bound,info,[&](auto key,const Row&) {
             batch.add(key,std::nullopt);
+            maintain(key,nullptr);
             ++info.affected_rows;
           });
         }
         batch.flush();
+        for(auto& entries:index_batches)entries->flush();
       }
       catch(...) {
         store.restore(savepoint);
@@ -311,7 +370,9 @@ namespace minivectordb {
   void Database::reset_data_cache_stats() noexcept {impl_->store.reset_data_cache_stats();}
   CacheStats Database::cache_stats() const noexcept {return impl_->store.cache_stats();}
   void Database::reset_cache_stats() noexcept {impl_->store.reset_cache_stats();}
-  ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink) {
+  ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink,SearchMode mode) {
+    if(mode!=SearchMode::Exact&&mode!=SearchMode::Ann)throw Error(ErrorCode::Type,"invalid search mode");
+    // Flat index enumerates all vectors in either mode; no approximate pruning.
     return impl_->execute(sql,sink);
   }
   bool Database::in_transaction()const noexcept {
