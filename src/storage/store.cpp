@@ -110,6 +110,31 @@ struct Store::Impl {
     if(cache_count) cache=std::make_unique<CacheEntry[]>(cache_count);
     stats.capacity_bytes=cache_count*sizeof(CacheEntry);
   }
+  struct DataEntry {
+    Page page{};
+    std::uint64_t id=0;
+    unsigned char rank=0;
+  };
+  struct DataSet {std::array<DataEntry,4> ways{};};
+  mutable std::unique_ptr<DataSet[]> data_cache;
+  std::size_t data_set_count=0;
+  mutable CacheStats data_stats;
+  DataSet* data_set(std::uint64_t id) const {
+    if(!data_set_count)return nullptr;
+    if(!data_cache) {
+      data_cache=std::make_unique<DataSet[]>(data_set_count);
+      data_stats.capacity_bytes=data_set_count*sizeof(DataSet);
+    }
+    return &data_cache[id%data_set_count];
+  }
+  // Ranks are a permutation of 0..resident-1, with 0 most recently used.
+  // Updating only ranks younger than the selected entry avoids timestamp overflow.
+  static void touch(DataSet& set,DataEntry& entry) {
+    const auto previous=entry.id?entry.rank:4;
+    for(auto& other:set.ways)
+      if(&other!=&entry && other.id && other.rank<previous)++other.rank;
+    entry.rank=0;
+  }
   int fd=-1;
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
@@ -158,6 +183,23 @@ struct Store::Impl {
       }
       ++stats.misses;
     }
+    DataSet* set=nullptr;
+    DataEntry* data_slot=nullptr;
+    if(type==packed || type==overflow) {
+      set=data_set(id);
+      if(set) {
+        for(auto& entry:set->ways)if(entry.id==id) {
+          if(decode(entry.page,8,4)!=type)corrupt();
+          touch(*set,entry); ++data_stats.hits;
+          return entry.page;
+        }
+        ++data_stats.misses;
+        for(auto& entry:set->ways) {
+          if(!entry.id) {data_slot=&entry; break;}
+          if(!data_slot || entry.rank>data_slot->rank)data_slot=&entry;
+        }
+      }
+    }
     auto p=read_raw(fd,id);
     if(std::memcmp(p.data(),page_magic(format3),8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
@@ -186,6 +228,12 @@ struct Store::Impl {
       if(slot->id) ++stats.evictions;
       else ++stats.resident_pages;
       slot->page=p; slot->depth=depth; slot->id=id;
+    }
+    if(data_slot) {
+      if(data_slot->id)++data_stats.evictions;
+      else ++data_stats.resident_pages;
+      touch(*set,*data_slot);
+      data_slot->page=p; data_slot->id=id;
     }
     return p;
   }
@@ -276,7 +324,7 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes):impl_(std::make_unique<Impl>()) {
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);
   if(impl_->fd>=0) created=true;
@@ -287,6 +335,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   }
   auto& s=*impl_;
   s.packing=packed_values; s.format3=packed_values; s.scan_budget=packed_scan_cache_bytes;
+  s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created) {
     write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3),0); sync_fd(s.fd);
@@ -315,6 +364,10 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.initialize_cache(index_cache_bytes);
 }
 Store::~Store()=default;
+CacheStats Store::data_cache_stats() const noexcept {return impl_->data_stats;}
+void Store::reset_data_cache_stats() noexcept {
+  impl_->data_stats.hits=impl_->data_stats.misses=impl_->data_stats.evictions=0;
+}
 CacheStats Store::cache_stats() const noexcept {return impl_->stats;}
 void Store::reset_cache_stats() noexcept {
   impl_->stats.hits=impl_->stats.misses=impl_->stats.evictions=0;

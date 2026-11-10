@@ -34,7 +34,13 @@ public:
   // Packing selects format03 for new files; existing formats are never migrated.
   // Each scan lazily allocates its own bounded validated packed-page cache.
   explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0,
-                 bool packed_values=false, std::size_t packed_scan_cache_bytes=262144);
+                 bool packed_values=false, std::size_t packed_scan_cache_bytes=262144,
+                 std::size_t data_cache_bytes=0);
+  // Separate lazy four-way cache for validated packed and overflow pages. The budget
+  // includes the entire set array (pages, IDs, ranks, padding); fixed object and
+  // allocator overhead are excluded. A budget smaller than one set disables it.
+  CacheStats data_cache_stats() const noexcept;
+  void reset_data_cache_stats() noexcept;
   CacheStats cache_stats() const noexcept;
   // Reset event counters, retaining the cache and its capacity/residency.
   void reset_cache_stats() noexcept;

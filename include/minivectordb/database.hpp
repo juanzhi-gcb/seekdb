@@ -31,6 +31,7 @@ struct Options {
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 1024 * 1024; // Per-scan validated packed pages; zero disables.
+  std::size_t data_cache_bytes = 0; // Cross-query validated packed/overflow pages; zero disables.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -56,6 +57,8 @@ public:
   Database& operator=(const Database&) = delete;
   ExecutionInfo execute(std::string_view sql, const QuerySink& sink = {});
   bool in_transaction() const noexcept;
+  CacheStats data_cache_stats() const noexcept;
+  void reset_data_cache_stats() noexcept;
   CacheStats cache_stats() const noexcept;
   void reset_cache_stats() noexcept;
 private:
