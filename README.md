@@ -56,6 +56,8 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 - [有界扫描快照、数值修复与交错读写实验](docs/scan-snapshot-results.md)
 - [旧版正式失败复核与版本区别](docs/reported-admission-failure.md)
 - [文本校验优化、负面实验与学习证据](docs/text-validation-results.md)
+- [按收益排序的行 CPU 优化、真实旧新对照与回归](docs/row-cpu-results.md)
+- [刁钻测试、提交确认漏洞修复与故障注入](docs/adversarial-results.md)
 - [跨查询缓存优化与超容量对照](docs/buffer-results.md)
 - [紧凑页生产集成与独立日志实验](docs/compact-results.md)
 - [缓存、CRC 与紧凑页/VA 实验](docs/portfolio-results.md)
@@ -70,3 +72,5 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 - [真实学习记录](agent/conversation.json)
 
 agent/conversation.json 为源，根目录 conversation.json 为同内容兼容副本，待平台明确路径后固定入口。材料区分用户、Agent 和工具来源，不把 Agent 的实现或解释冒充用户理解，不包含令牌。
+
+本轮已对照平台显示成功的 `8b7054`：两版各公开20/20、95SQL，58条协议响应仅一条排序修复差异；详见[成功版本兼容性复核](docs/successful-version-compatibility.md)。该报告记录上传前验证；最终版本以提交SHA为准，平台两项分数仍未提供。

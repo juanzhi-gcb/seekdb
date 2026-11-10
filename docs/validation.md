@@ -1,6 +1,6 @@
 # MiniVectorDB 验证记录
 
-最新阶段：[缓存/CRC/原型结果](portfolio-results.md)，最终默认配置19/19容器测试59.30秒，runtime通过。详情[本轮验证](portfolio-validation.md)。
+最新阶段：[刁钻测试与提交确认修复](adversarial-results.md)，36/36 全量容器测试、加强断言后的3/3专项、公开20/20、1,344次SQL模型检查和475组存储故障案例通过，真实 JSONL 旧新对照12,000次查询通过。保留前轮行CPU优化；尚未推送或正式提测。下文保留历史阶段记录。
 
 上一阶段：[耗时拆分与路径对照](path-profile-results.md)，17/17容器测试65.68秒，12组实验全部通过。
 
@@ -44,3 +44,5 @@
 学习材料区分用户、Agent 和工具，不将 Agent 的实现或解释当作用户已经掌握的证据。本轮无推送、无正式提测、无初赛分支修改。
 
 原始日志均在 D:/Codex/MiniVectorDB/work/：optimization-v2-image-build.log、optimization-v2-container-tests.log、optimization-v2-runtime-build.log、optimization-v2-runtime-test.log、optimization-main-run-v2.log、decode-experiment-v2.log。完整审查报告及独立探针也保留在该目录。
+
+本轮已对照平台显示成功的 `8b7054`：两版各公开20/20、95SQL，58条协议响应仅一条排序修复差异；详见[成功版本兼容性复核](successful-version-compatibility.md)。该报告记录上传前验证；最终版本以提交SHA为准，平台两项分数仍未提供。

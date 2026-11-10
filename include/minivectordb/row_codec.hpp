@@ -1,5 +1,6 @@
 #pragma once
 #include "minivectordb/database.hpp"
+#include <array>
 #include <optional>
 namespace minivectordb {
   enum class ColumnType:std::uint8_t {
@@ -21,9 +22,14 @@ namespace minivectordb {
   Row decode_row(const Schema&,std::string_view);
   // Validates every field immediately, but owns only fields requested through operator[].
   // Schema and bytes must outlive the view; it must not escape a Store scan callback.
+  // Cell references belong to this view and must not be kept across moving it.
   class LazyRowView {
     const Schema& schema_;
     std::string_view bytes_;
+    static constexpr std::size_t inline_capacity=8;
+    bool inline_metadata_;
+    std::array<std::size_t,inline_capacity> inline_offsets_{};
+    mutable std::array<std::optional<Cell>,inline_capacity> inline_cells_;
     std::vector<std::size_t> offsets_;
     mutable std::vector<std::optional<Cell>> cells_;
     ExecutionInfo& info_;

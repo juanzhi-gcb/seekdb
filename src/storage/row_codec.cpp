@@ -1,12 +1,29 @@
 #include "minivectordb/row_codec.hpp"
 #include "minivectordb/value.hpp"
 #include "binary.hpp"
+#include "row_cpu.hpp"
 #include <bit>
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <cstring>
 #include <set>
 namespace minivectordb {
+  namespace {
+    void validate_vector_bytes(std::string_view bytes) {
+      // The caller checked the dimension and took exactly count*4 bytes. Each
+      // word is loaded with memcpy: row payloads need not be naturally aligned.
+      // Test each exponent separately before reducing; OR-ing exponents first
+      // would incorrectly reject some combinations of finite values.
+      constexpr std::uint32_t exponent=std::endian::native==std::endian::little?0x7f800000u:0x0000807fu;
+      std::uint32_t invalid=0;
+      for(std::size_t i=0;i<bytes.size();i+=4) {
+        std::uint32_t bits;
+        std::memcpy(&bits,bytes.data()+i,sizeof(bits));
+        invalid|=static_cast<std::uint32_t>((bits&exponent)==exponent);
+      }
+      if(invalid)throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
+    }
+  }
   void validate_schema(const Schema&s) {
     if(s.name.empty()||s.columns.empty()||s.columns.size()>UINT32_MAX||s.primary>=s.columns.size()||s.columns[s.primary].type!=ColumnType::Bigint)throw Error(ErrorCode::Schema,"table requires exactly one BIGINT primary key");
     std::set<std::string> names;
@@ -95,14 +112,20 @@ namespace minivectordb {
     return r;
   }
   LazyRowView::LazyRowView(const Schema& schema, std::string_view bytes, ExecutionInfo& info)
-      : schema_(schema), bytes_(bytes), cells_(schema.columns.size()), info_(info) {
+      : schema_(schema), bytes_(bytes),
+        inline_metadata_(schema.columns.size()<=inline_capacity && !detail::row_metadata_heap),
+        cells_(inline_metadata_?0:schema.columns.size()), info_(info) {
     profile::detail::Scope timer(&profile::Snapshot::row_validation);
     binary::Reader in(bytes);
     if(in.get(1)!=1 || in.get(4)!=schema.columns.size())
       throw Error(ErrorCode::Corruption,"row version or column count mismatch");
-    offsets_.reserve(schema.columns.size());
+    if(!inline_metadata_)offsets_.reserve(schema.columns.size());
+    std::size_t column_index=0;
     for(const auto& column:schema.columns) {
-      offsets_.push_back(bytes.size()-in.remaining());
+      const auto offset=bytes.size()-in.remaining();
+      if(inline_metadata_)inline_offsets_[column_index]=offset;
+      else offsets_.push_back(offset);
+      ++column_index;
       switch(column.type) {
         case ColumnType::Bigint: (void)in.get(); break;
         case ColumnType::Varchar:
@@ -113,9 +136,15 @@ namespace minivectordb {
           auto count=in.get(4);
           if(count!=column.extent || count>in.remaining()/4)
             throw Error(ErrorCode::Corruption,"invalid VECTOR length");
-          for(std::uint64_t i=0;i<count;++i)
-            if(!std::isfinite(std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)))))
-              throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
+          bool batched=detail::vector_validation_mode==detail::VectorValidationMode::batched;
+          if constexpr(std::endian::native!=std::endian::little && std::endian::native!=std::endian::big)
+            batched=false;
+          if(batched)validate_vector_bytes(in.take(static_cast<std::size_t>(count)*4));
+          else {
+            for(std::uint64_t i=0;i<count;++i)
+              if(!std::isfinite(std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)))))
+                throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
+          }
           break;
         }
       }
@@ -123,10 +152,11 @@ namespace minivectordb {
     in.end();
   }
   const Cell& LazyRowView::operator[](std::size_t index) const {
-    auto& cell=cells_.at(index);
+    if(index>=schema_.columns.size())throw std::out_of_range("row column index");
+    auto& cell=inline_metadata_?inline_cells_[index]:cells_.at(index);
     if(!cell) {
       profile::detail::Scope timer(&profile::Snapshot::row_materialization);
-      binary::Reader in(bytes_.substr(offsets_[index]));
+      binary::Reader in(bytes_.substr(inline_metadata_?inline_offsets_[index]:offsets_[index]));
       switch(schema_.columns[index].type) {
         case ColumnType::Bigint: cell.emplace(std::bit_cast<std::int64_t>(in.get())); break;
         case ColumnType::Varchar: cell.emplace(in.text()); break;

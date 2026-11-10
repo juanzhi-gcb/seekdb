@@ -25,6 +25,12 @@ namespace minivectordb::binary {
       for(unsigned i=0;i<n;++i)v|=std::uint64_t(static_cast<unsigned char>(data[pos++]))<<(8*i);
       return v;
     }
+    std::string_view take(std::size_t n) {
+      if(n>remaining())throw Error(ErrorCode::Corruption,"truncated binary value");
+      auto bytes=data.substr(pos,n);
+      pos+=n;
+      return bytes;
+    }
     std::string_view text_view() {
       auto n=get(4);
       if(n>remaining())throw Error(ErrorCode::Corruption,"invalid binary string length");

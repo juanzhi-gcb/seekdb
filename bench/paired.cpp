@@ -3,6 +3,7 @@
 #include "minivectordb/profile.hpp"
 #include "../src/storage/page_checksum.hpp"
 #include "../src/types/text_validation.hpp"
+#include "../src/storage/row_cpu.hpp"
 #include <ctime>
 #include <bit>
 #include <charconv>
@@ -89,13 +90,19 @@ int main(int argc,char** argv) {
         dimensions=std::getenv("MVDB_DIMENSIONS")?number(std::getenv("MVDB_DIMENSIONS")):128;
         groups=std::getenv("MVDB_GROUPS")?number(std::getenv("MVDB_GROUPS")):10;
         const auto payload_bytes=std::getenv("MVDB_PAYLOAD")?number(std::getenv("MVDB_PAYLOAD")):256;
+        const auto extra_columns=std::getenv("MVDB_EXTRA_COLUMNS")?number(std::getenv("MVDB_EXTRA_COLUMNS")):0;
         const bool unicode_body=std::getenv("MVDB_UNICODE_BODY")!=nullptr;
         const bool text_scalar=std::getenv("MVDB_TEXT_SCALAR")!=nullptr;
         detail::text_validation_mode=text_scalar?detail::TextValidationMode::scalar:detail::TextValidationMode::ascii_blocks;
+        const bool vector_scalar=std::getenv("MVDB_VECTOR_SCALAR")!=nullptr;
+        const bool row_heap=std::getenv("MVDB_ROW_HEAP")!=nullptr;
+        detail::vector_validation_mode=vector_scalar?detail::VectorValidationMode::scalar:detail::VectorValidationMode::batched;
+        detail::row_metadata_heap=row_heap;
         const bool ordered=std::getenv("MVDB_ORDERED")!=nullptr;
         churn=std::getenv("MVDB_CHURN")!=nullptr;
         require(dimensions>=1&&dimensions<=8192&&groups>=1&&groups<=100&&payload_bytes<=600000,"invalid dataset");
-        require(count*(dimensions*4+payload_bytes+128)<=128*1024*1024,"harness dataset exceeds 128MiB bound");
+        require(extra_columns<=64,"too many extra columns");
+        require(count*(dimensions*4+payload_bytes+128+extra_columns*8)<=128*1024*1024,"harness dataset exceeds 128MiB bound");
         std::mt19937 rng(seed);
         std::vector<Record> records;
         records.reserve(count);
@@ -153,7 +160,9 @@ int main(int argc,char** argv) {
         std::uintmax_t empty_bytes=0,database_bytes=0,after_insert_bytes=0;
         {
             Database db(path,options);
-            db.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR("+std::to_string(dimensions)+"),g BIGINT,body VARCHAR(700000))");
+            std::string schema_sql="CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR("+std::to_string(dimensions)+"),g BIGINT,body VARCHAR(700000)";
+            for(std::size_t n=0;n<extra_columns;++n)schema_sql+=",extra"+std::to_string(n)+" BIGINT";
+            db.execute(schema_sql+")");
             empty_bytes=std::filesystem::file_size(path);
             profile::reset();
             db.reset_cache_stats(); db.reset_data_cache_stats();
@@ -164,7 +173,9 @@ int main(int argc,char** argv) {
                     if(j!=begin)sql+=',';
                     const auto id=insertion_order[j];
                     const auto& row=records[id];
-                    sql+="("+std::to_string(keys[id])+","+literal(row.vector)+","+std::to_string(row.group)+",'"+row.text+"')";
+                    sql+="("+std::to_string(keys[id])+","+literal(row.vector)+","+std::to_string(row.group)+",'"+row.text+"'";
+                    for(std::size_t n=0;n<extra_columns;++n)sql+=","+std::to_string(n+id);
+                    sql+=")";
                 }
                 const auto cpu_start=std::clock();
                 const auto start=Clock::now();
@@ -253,10 +264,14 @@ int main(int argc,char** argv) {
         {
             Database reopened(path,options);
             reopened.execute("SELECT * FROM t",{{},[&](const Row& row) {
+                require(recovered<recovery_order.size(),"too many recovered rows");
                 const auto id=std::get<std::int64_t>(row[0]);
                 require(key_positions.contains(id),"invalid recovered primary key");
                 require(id==keys[recovery_order[recovered]],"recovered key set/order differs");
                 const auto& original=records[key_positions.at(id)];
+                require(row.size()==4+extra_columns,"recovered column count differs");
+                for(std::size_t n=0;n<extra_columns;++n)
+                    require(std::get<std::int64_t>(row[4+n])==static_cast<std::int64_t>(n+key_positions.at(id)),"recovered extra column differs");
                 require(std::get<std::vector<float>>(row[1])==original.vector&&
                         std::get<std::int64_t>(row[2])==original.group&&
                         std::get<std::string>(row[3])==original.text,"recovered row differs");
@@ -291,6 +306,8 @@ int main(int argc,char** argv) {
                      <<",\"capacity_bytes\":"<<c.capacity_bytes<<",\"resident_pages\":"<<c.resident_pages<<"}";
         };
         std::cout<<"{\"packed_values\":"<<(options.packed_values?"true":"false")
+                 <<",\"vector_scalar\":"<<(vector_scalar?"true":"false")<<",\"row_heap\":"<<(row_heap?"true":"false")
+                 <<",\"extra_columns\":"<<extra_columns
                  <<",\"text_scalar\":"<<(text_scalar?"true":"false")<<",\"unicode_body\":"<<(unicode_body?"true":"false")
                  <<",\"paired_index_scan\":"<<(options.paired_index_scan?"true":"false")<<",\"sparse_keys\":"<<(sparse?"true":"false")<<",\"index_build_ms\":"<<index_build_ms
                  <<",\"invalidate_every\":"<<invalidate_every

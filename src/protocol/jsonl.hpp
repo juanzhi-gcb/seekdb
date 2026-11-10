@@ -153,7 +153,11 @@ public:
         if(std::fwrite(s.data(),1,s.size(),file)!=s.size()) throw std::runtime_error("response spool write failed");
     }
     void prepare() {if(file && (std::fflush(file)!=0 || std::fseek(file,0,SEEK_SET)!=0)) throw std::runtime_error("response spool finalize failed");}
-    void emit() {
+    void emit(std::string_view id) {
+        // Echo the validated identifier only after the complete payload is ready.
+        // An arbitrarily long ID must not make a small mutation acknowledgement
+        // spill after the mutation/COMMIT has already succeeded.
+        std::cout<<"{\"id\":"<<id;
         if(file) {
             std::array<char,65536> chunk{};
             while(auto n=std::fread(chunk.data(),1,chunk.size(),file)) std::cout.write(chunk.data(),static_cast<std::streamsize>(n));
@@ -210,7 +214,7 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
                 return it->second.text;
             };
             auto op=field("op");
-            response.append("{\"id\":");response.append(id);response.append(",\"ok\":true");
+            response.append(",\"ok\":true");
             if(op=="shutdown") {
                 if(db->in_transaction()) db->execute("ROLLBACK;");
                 shutdown=true;
@@ -241,7 +245,7 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
             continue;
         }
         // A transport failure after emission begins is fatal, never a second response.
-        response.emit();
+        response.emit(id);
         if(shutdown) return 0;
     }
     if(db->in_transaction()) db->execute("ROLLBACK;");
