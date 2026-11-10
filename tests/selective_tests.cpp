@@ -90,6 +90,12 @@ void corrupt_rows(const std::filesystem::path& dir) {
   std::vector<std::string> bad;
   auto nonfinite=good; nonfinite[19]=char(0x80); nonfinite[20]=char(0x7f); bad.push_back(nonfinite);
   auto unicode=good; unicode[29]=char(0x80); bad.push_back(unicode);
+  // Invalid text beyond a complete ASCII block must still be checked even when
+  // predicates discard the row or the projection never requests the text.
+  for(std::size_t position:{7U,8U,15U}) {
+    auto long_unicode=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string(16,'a'),std::int64_t(0)});
+    long_unicode[29+position]=char(0x80);bad.push_back(std::move(long_unicode));
+  }
   auto wrongkey=good; wrongkey[5]=2; bad.push_back(wrongkey);
   bad.push_back(good+"x");
   for(std::size_t n=0;n<good.size();++n)bad.push_back(good.substr(0,n));

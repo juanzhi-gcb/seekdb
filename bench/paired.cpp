@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "minivectordb/profile.hpp"
 #include "../src/storage/page_checksum.hpp"
+#include "../src/types/text_validation.hpp"
 #include <ctime>
 #include <bit>
 #include <charconv>
@@ -88,6 +89,9 @@ int main(int argc,char** argv) {
         dimensions=std::getenv("MVDB_DIMENSIONS")?number(std::getenv("MVDB_DIMENSIONS")):128;
         groups=std::getenv("MVDB_GROUPS")?number(std::getenv("MVDB_GROUPS")):10;
         const auto payload_bytes=std::getenv("MVDB_PAYLOAD")?number(std::getenv("MVDB_PAYLOAD")):256;
+        const bool unicode_body=std::getenv("MVDB_UNICODE_BODY")!=nullptr;
+        const bool text_scalar=std::getenv("MVDB_TEXT_SCALAR")!=nullptr;
+        detail::text_validation_mode=text_scalar?detail::TextValidationMode::scalar:detail::TextValidationMode::ascii_blocks;
         const bool ordered=std::getenv("MVDB_ORDERED")!=nullptr;
         churn=std::getenv("MVDB_CHURN")!=nullptr;
         require(dimensions>=1&&dimensions<=8192&&groups>=1&&groups<=100&&payload_bytes<=600000,"invalid dataset");
@@ -104,6 +108,12 @@ int main(int argc,char** argv) {
             std::uint64_t key=i;
             if(sparse) { key+=0x9e3779b97f4a7c15ULL;key=(key^(key>>30))*0xbf58476d1ce4e5b9ULL;key=(key^(key>>27))*0x94d049bb133111ebULL;key^=key>>31; }
             keys.push_back(std::bit_cast<std::int64_t>(key));key_positions.emplace(keys.back(),i);
+        }
+        if(unicode_body)for(auto& record:records) {
+            record.text.clear();
+            // Mixed two/three/four-byte code points, with ASCII at block boundaries.
+            while(record.text.size()+10<=payload_bytes)record.text+="a\xc3\xa9\xe4\xb8\xad\xf0\x9f\x98\x80";
+            record.text.append(payload_bytes-record.text.size(),'x');
         }
         std::vector<std::size_t> recovery_order(count);std::iota(recovery_order.begin(),recovery_order.end(),0);
         std::sort(recovery_order.begin(),recovery_order.end(),[&](auto a,auto b){return keys[a]<keys[b];});
@@ -281,6 +291,7 @@ int main(int argc,char** argv) {
                      <<",\"capacity_bytes\":"<<c.capacity_bytes<<",\"resident_pages\":"<<c.resident_pages<<"}";
         };
         std::cout<<"{\"packed_values\":"<<(options.packed_values?"true":"false")
+                 <<",\"text_scalar\":"<<(text_scalar?"true":"false")<<",\"unicode_body\":"<<(unicode_body?"true":"false")
                  <<",\"paired_index_scan\":"<<(options.paired_index_scan?"true":"false")<<",\"sparse_keys\":"<<(sparse?"true":"false")<<",\"index_build_ms\":"<<index_build_ms
                  <<",\"invalidate_every\":"<<invalidate_every
                  <<",\"snapshot_budget\":"<<options.scan_snapshot_bytes<<",\"snapshot_rows\":"<<snapshot_rows<<",\"snapshot_capacity\":"<<snapshot_capacity

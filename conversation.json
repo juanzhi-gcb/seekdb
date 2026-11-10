@@ -112,6 +112,28 @@
       "id": "u21",
       "role": "user",
       "content": "推送并且给我branch和commit"
+    },
+    {
+      "id": "u22",
+      "role": "user",
+      "content_excerpt": "检查为什么会出现",
+      "context": "用户附MySQL正式用例未通过、两项不计分的汇总；这是请求开头原文节选。"
+    },
+    {
+      "id": "u23",
+      "role": "user",
+      "content_excerpt": "0e954ffd90c6802ecd9fae4c0ca00eb8553201dd",
+      "context": "用户在追问失败提交SHA时提供此完整值、第二轮分支及执行成功状态。仓库地址中的凭据已删除；没有具体失败类别或日志。"
+    },
+    {
+      "id": "u24",
+      "role": "user",
+      "content": "检查完错误原因再进行一波性能与prompt优化"
+    },
+    {
+      "id": "u25",
+      "role": "user",
+      "content": "推送本地最新版到GitHub"
     }
   ],
   "experiments": [
@@ -455,6 +477,25 @@
       "purpose": "Preserve concurrent remote fixes during authorized upload",
       "output": "Remote head8b7054 was two commits ahead of d55b183. Imported exact hash-checked objects and merged remote float32 checks,underflow parser,literal tests and docs. Initial targeted run: remote literal PASS,old numeric maximum FAIL due underflow expectation. Replaced rejection expectation with signed-zero assertions; fresh internal30/30,public20/20,model273/2kills,runtimePASS. Fresh6000JSONLqueries pass; indexed median 4956.946ms,unindexed7302.234ms.",
       "evidence": "bench/results/snapshot-20261110/upload-merge/"
+    },
+    {
+      "id": "e49",
+      "source": "tool",
+      "purpose": "复核用户再次确认的旧版正式失败与最新版本的差异",
+      "output": "失败SHA为0e954ffd90c6802ecd9fae4c0ca00eb8553201dd，不是最新1349fd33b1be6e225ab64601b73e390a839241ca。官方分支仍f4d4e266。旧版重跑公开20/20通过。相同实际Docker反例：旧版拒绝±3.4028235e38和1e-400，拒绝自己的SELECT向量输出重新插入，返回距离同为1时主键顺序2,1；最新版全部修复为接受有限值、回写成功、主键1,2，真溢出仍拒绝。两版均已有JSONL和CREATE VECTOR INDEX。仅有平台汇总，未查明隐藏失败的具体断言；上述是已复现缺陷，不是已证明的平台根因。"
+    },
+    {
+      "id": "e50",
+      "source": "tool",
+      "purpose": "保持完整UTF8检查的ASCII分块校验对照",
+      "output": "{\"dense\": {\"medians\": {\"dense\": {\"scalar\": {\"write_ms\": 1343.450764, \"index_build_ms\": 62.5081, \"query_total_ms\": 647.429286, \"query_unfiltered_ms\": 384.729146, \"query_filtered_ms\": 262.70014, \"first_query_ms\": 14.223941, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 2000000, \"database_bytes\": 42831872, \"churn_ms\": 0, \"process_maxrss_kib\": 39844, \"local_cgroup_peak_bytes\": 84377600}, \"ascii_blocks\": {\"write_ms\": 1357.835176, \"index_build_ms\": 60.7112, \"query_total_ms\": 581.471441, \"query_unfiltered_ms\": 354.850237, \"query_filtered_ms\": 226.621204, \"first_query_ms\": 13.604275, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 2000000, \"database_bytes\": 42831872, \"churn_ms\": 0, \"process_maxrss_kib\": 39556, \"local_cgroup_peak_bytes\": 84832256}}}, \"samples\": 6, \"validated_queries\": 1200, \"reopen_checks\": 6, \"diagnostic\": false, \"no_official_score\": true}, \"varied\": {\"medians\": {\"unicode\": {\"scalar\": {\"write_ms\": 274.4008, \"index_build_ms\": 19.7131, \"query_total_ms\": 38.960992, \"query_unfiltered_ms\": 22.546347, \"query_filtered_ms\": 16.414645, \"first_query_ms\": 3.383439, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 6074368, \"churn_ms\": 0, \"process_maxrss_kib\": 24476, \"local_cgroup_peak_bytes\": 30707712}, \"ascii_blocks\": {\"write_ms\": 275.315362, \"index_build_ms\": 19.3046, \"query_total_ms\": 37.740149, \"query_unfiltered_ms\": 21.338715, \"query_filtered_ms\": 16.401434, \"first_query_ms\": 2.887426, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 6074368, \"churn_ms\": 0, \"process_maxrss_kib\": 24340, \"local_cgroup_peak_bytes\": 30556160}}, \"wide\": {\"scalar\": {\"write_ms\": 535.483421, \"index_build_ms\": 41.3758, \"query_total_ms\": 100.755402, \"query_unfiltered_ms\": 60.860012, \"query_filtered_ms\": 39.89539, \"first_query_ms\": 13.952428, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39700, \"local_cgroup_peak_bytes\": 56410112}, \"ascii_blocks\": {\"write_ms\": 535.220171, \"index_build_ms\": 42.615, \"query_total_ms\": 110.743396, \"query_unfiltered_ms\": 68.118844, \"query_filtered_ms\": 42.275211, \"first_query_ms\": 14.682678, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39796, \"local_cgroup_peak_bytes\": 55934976}}, \"overflow\": {\"scalar\": {\"write_ms\": 327.304299, \"index_build_ms\": 34.3424, \"query_total_ms\": 435.241498, \"query_unfiltered_ms\": 218.698275, \"query_filtered_ms\": 216.543223, \"first_query_ms\": 11.241438, \"snapshot_capacity\": 0, \"snapshot_rows\": 0, \"database_bytes\": 22433792, \"churn_ms\": 0, \"process_maxrss_kib\": 40892, \"local_cgroup_peak_bytes\": 64614400}, \"ascii_blocks\": {\"write_ms\": 322.132992, \"index_build_ms\": 31.3156, \"query_total_ms\": 353.260161, \"query_unfiltered_ms\": 177.850728, \"query_filtered_ms\": 175.409433, \"first_query_ms\": 9.288115, \"snapshot_capacity\": 0, \"snapshot_rows\": 0, \"database_bytes\": 22433792, \"churn_ms\": 0, \"process_maxrss_kib\": 41288, \"local_cgroup_peak_bytes\": 64249856}}, \"interleaved\": {\"scalar\": {\"write_ms\": 273.515862, \"index_build_ms\": 19.7088, \"query_total_ms\": 83.095258, \"query_unfiltered_ms\": 44.604724, \"query_filtered_ms\": 38.452081, \"first_query_ms\": 3.187067, \"snapshot_capacity\": 0, \"snapshot_rows\": 0, \"database_bytes\": 12054528, \"churn_ms\": 362.771, \"process_maxrss_kib\": 24484, \"local_cgroup_peak_bytes\": 34672640}, \"ascii_blocks\": {\"write_ms\": 270.947257, \"index_build_ms\": 18.7645, \"query_total_ms\": 74.401542, \"query_unfiltered_ms\": 38.542547, \"query_filtered_ms\": 35.858995, \"first_query_ms\": 2.969641, \"snapshot_capacity\": 0, \"snapshot_rows\": 0, \"database_bytes\": 12054528, \"churn_ms\": 355.805, \"process_maxrss_kib\": 24488, \"local_cgroup_peak_bytes\": 35078144}}}, \"samples\": 24, \"validated_queries\": 960, \"reopen_checks\": 24, \"diagnostic\": false, \"no_official_score\": true}}",
+      "scope": "同一二进制、标量/8字节ASCII开关、三轮交替；内核基准包含驱动内存，不能当官方M或E。方案和实验执行来自Agent，不能推断学生已独立理解。"
+    },
+    {
+      "id": "e51",
+      "source": "tool",
+      "purpose": "最终Docker端到端与功能回归",
+      "output": "最终内部测试、官方公开20/20、独立273检查/150修改/2强杀恢复、runtime均通过；6000计时查询及重启核对通过。三轮有索引查询中位4061.655ms，无索引5924.890ms。详细内部数量与耗时见同JSON字段final_validation。"
     }
   ],
   "agent_observations": [
@@ -587,12 +628,122 @@
       "id": "a26",
       "source": "agent",
       "content": "Upload detected newer remote commits rather than the assumed old head. Preserved those repairs and repeated integration validation instead of overwriting the branch. The previously documented underflow limitation is superseded by the remote private-locale parser fix; historical measurements and the initial conflicting test failure remain labeled as such."
+    },
+    {
+      "id": "a27",
+      "source": "agent",
+      "content": "本轮先锁定实际失败SHA，再用同一输入对照旧/新真实镜像。没有隐藏日志时保留不确定结论，未为了通过测试擅改JSONL协议或错误码。性能只改文本校验，保持坏UTF8检测与Unicode字符计数，并对混合文本测退化。Prompt优化是增加自包含证据和版本边界，而非编造学生理解或暗示评审加分。"
     }
   ],
   "limitations": [
     "这些记录不能证明用户已理解COW、ANN或进行了独立技术解释；不将Agent实现和解释冒充学生贡献。",
     "材料路径在官方占位根目录和题面agent/conversation.json之间存在差异；目前两处保存字节相同的同一份材料。",
     "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。",
-    "Snapshot and numeric fixes are based on latest d55b183. This record is packaged before the user-authorized GitHub push; no formal submission by the agent. Local/public checks do not establish hidden29 admission or an official score; the platform failure cause is unconfirmed without logs. WSL cannot enforce no-swap; The integrated version preserves the remote signed-underflow-to-zero repair. User prompts are authentic; agent analysis is not attributed to the user."
-  ]
+    "Snapshot and numeric fixes are based on latest d55b183. This record is packaged before the user-authorized GitHub push; no formal submission by the agent. Local/public checks do not establish hidden29 admission or an official score; the platform failure cause is unconfirmed without logs. WSL cannot enforce no-swap; The integrated version preserves the remote signed-underflow-to-zero repair. User prompts are authentic; agent analysis is not attributed to the user.",
+    "本轮正式失败记录仍为0e954旧版，不能据此宣称1349已正式失败或通过。材料导航由Agent生成，只索引已有真实字符串；不保证分数提高，学生自身理解仅限已记录发言。"
+  ],
+  "final_validation": {
+    "source": "tool",
+    "internal_log_tail": "      Start 31: core_text_validation\n31/31 Test #31: core_text_validation .............   Passed    0.72 sec\n\n100% tests passed, 0 tests failed out of 31\n\nTotal Test time (real) = 155.27 sec",
+    "runtime_output": "PASS runtime: default JSONL, read-only root, network disabled, 2 CPU/512 MiB, persistence and EOF/shutdown rollback",
+    "image_ids": "sha256:ec216e8814f82dc0dbce52f34639ceedbc123c909db4f992ac1c803ec6ce7e55\nsha256:463556d0233119a7bec1956179ddba76ce61825c135308e5bebd1d4dbb5ec563",
+    "state": "Verified snapshot packaged before the user-authorized GitHub upload; no formal submission by the agent."
+  },
+  "performance_caveats": {
+    "source": "agent",
+    "content": "首轮768维中位100.755->110.743ms，退化9.91%；保留原始负面样本后追加七轮，得到107.637->101.796ms，减少5.43%。同一代码未修改，方向反转说明此项对运行波动敏感，不能保证768维稳定收益。profile诊断会增加观测开销，不混入计分或三轮结果。",
+    "wide_repeat": "{\"medians\": {\"wide\": {\"scalar\": {\"write_ms\": 529.657912, \"index_build_ms\": 38.8422, \"query_total_ms\": 107.637214, \"query_unfiltered_ms\": 65.55252, \"query_filtered_ms\": 42.084694, \"first_query_ms\": 14.817935, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39724, \"local_cgroup_peak_bytes\": 55902208}, \"ascii_blocks\": {\"write_ms\": 532.787699, \"index_build_ms\": 40.2297, \"query_total_ms\": 101.795921, \"query_unfiltered_ms\": 62.224419, \"query_filtered_ms\": 40.002865, \"first_query_ms\": 13.419974, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39928, \"local_cgroup_peak_bytes\": 55934976}}}, \"samples\": 14, \"validated_queries\": 560, \"reopen_checks\": 14, \"diagnostic\": false, \"no_official_score\": true}"
+  },
+  "version_context": {
+    "source": "agent",
+    "failed_formal_commit": "0e954ffd90c6802ecd9fae4c0ca00eb8553201dd",
+    "latest_uploaded_base": "1349fd33b1be6e225ab64601b73e390a839241ca",
+    "current_changes": "ASCII text validation and authentic evidence navigation; verified source snapshot packaged for user-authorized upload.",
+    "historical_notes": "旧记录中的latest、未上传、1e-400拒绝和平方距离排序须按当时版本理解。e48已合并远端下溢修复，e49在最新版复验。历史结果不是当前版本正式成绩。"
+  },
+  "review_navigation": {
+    "source": "agent",
+    "purpose": "仅帮助定位真实原文，不自评档位，不新增或重复计算学习实例。Agent分析不归为学生解释。",
+    "items": [
+      {
+        "chain": "按需解码与批量写入的对照请求",
+        "student_evidence": {
+          "pointer": "/conversations/5/content",
+          "quote": "继续下一阶段，先看看正式题包和测试驱动有没有更新，再做按需解码和降低写入放大的优化，跑对照实验确认收益。还是全部放 D 盘，别动初赛分支，先不推送、不提测。"
+        },
+        "result_evidence": [
+          {
+            "pointer": "/experiments/14/output",
+            "quote": "fa419bb版解码专项：100%命中，eager中位830.881 ms、lazy中位1454.919 ms；50%命中825.573对1014.942 ms。"
+          },
+          {
+            "pointer": "/experiments/15/output",
+            "quote": "[{\"match_percent\": 0, \"eager_ms\": 829.048427, \"lazy_ms\": 640.90102, \"time_reduction_percent\": 22.69438079520051}, {\"match_percent\": 1, \"eager_ms\": 889.10549, \"lazy_ms\": 655.708944, \"time_reduction_percent\": 26.250714749270088}, {\""
+          }
+        ],
+        "attribution_limit": "用户明确要求对照验证；负面结果分析与实现修正来自Agent，未记录用户独立解释。"
+      },
+      {
+        "chain": "先拆分耗时并比较两种存储路径",
+        "student_evidence": {
+          "pointer": "/conversations/8/content",
+          "quote": "就按这个方案继续，先做耗时拆分和两种 D 盘存储路径的对照，再根据结果决定缓存还是批量读取。还是全部放 D 盘，别动初赛分支，不改全局设置，先不推送、不提测。"
+        },
+        "result_evidence": [
+          {
+            "pointer": "/experiments/20/note",
+            "quote": "12样本480查询和12次重启全部通过。环境差异不是代码提速；bytes不是物理IO；没有缓存命中证据。"
+          }
+        ],
+        "attribution_limit": "用户要求先测再决定方案；不能把环境路径差异称为数据库代码提效，后续Agent决策不冒充学生决策。"
+      },
+      {
+        "chain": "追问指定旧版实际性能",
+        "student_evidence": {
+          "pointer": "/conversations/17/content_excerpt",
+          "quote": "先告诉我；这一版的性能指标是多少"
+        },
+        "result_evidence": [
+          {
+            "pointer": "/experiments/36/output",
+            "quote": "Actual0e954 runtime unchanged:10000x128,batch100,1000TopK10 half10%-filter,3rounds. Unindexed6521.674ms,indexed35521.056ms,5.45xslower. Insert beforeindex1743.210/1733.534ms,indexbuild63.774ms. Hostoracle verified6000timed queries"
+          }
+        ],
+        "attribution_limit": "学生提问是节选，结果来自独立实际镜像测试；未记录学生对指标的解释。"
+      },
+      {
+        "chain": "修复必须同步最新优化版",
+        "student_evidence": {
+          "pointer": "/conversations/18/content",
+          "quote": "记住修正最后要同步到最新版，优化最好的那一版"
+        },
+        "result_evidence": [
+          {
+            "pointer": "/experiments/47/output",
+            "quote": "Remote head8b7054 was two commits ahead of d55b183. Imported exact hash-checked objects and merged remote float32 checks,underflow parser,literal tests and docs. Initial targeted run: remote literal PASS,old numeric maximum FAIL d"
+          }
+        ],
+        "attribution_limit": "用户提供明确版本约束；合并与验证由Agent执行。"
+      },
+      {
+        "chain": "准入失败SHA确认与旧新对照",
+        "student_evidence": {
+          "pointer": "/conversations/22/content_excerpt",
+          "quote": "0e954ffd90c6802ecd9fae4c0ca00eb8553201dd"
+        },
+        "result_evidence": [
+          {
+            "pointer": "/experiments/48/output",
+            "quote": "失败SHA为0e954ffd90c6802ecd9fae4c0ca00eb8553201dd，不是最新1349fd33b1be6e225ab64601b73e390a839241ca。官方分支仍f4d4e266。旧版重跑公开20/20通过。相同实际Docker反例：旧版拒绝±3.4028235e38和1e-400，拒绝自己的SELECT向量输出重新插入，返回距离同为1时主键顺序2,1；最新版全部修复为接受有限值、回写成功、主键1,2，真溢出仍拒绝。两版均已"
+          }
+        ],
+        "attribution_limit": "用户提供失败SHA支持定位；未获得隐藏失败日志，不将候选缺陷升级为正式根因。"
+      }
+    ],
+    "excluded_as_independent_learning": [
+      "泛泛的继续或帮我优化不自动作为实例。",
+      "u16为转发组织者说明，不认作学生独立技术分析。",
+      "同一修正链的规划、修复、复测不拆分成多个得分实例。"
+    ]
+  }
 }

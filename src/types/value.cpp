@@ -1,6 +1,8 @@
 #include "minivectordb/value.hpp"
+#include "text_validation.hpp"
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 namespace minivectordb {
@@ -15,9 +17,25 @@ std::int64_t parse_bigint(std::string_view text) {
   if (error!=std::errc{} || end!=text.data()+text.size()) throw std::invalid_argument("BIGINT outside signed 64-bit range or invalid syntax");
   return result;
 }
-std::size_t validate_text(std::string_view text,std::size_t limit) {
+namespace {
+template<bool AsciiBlocks>
+std::size_t validate_text_impl(std::string_view text,std::size_t limit) {
   std::size_t count=0;
   for(std::size_t i=0;i<text.size();) {
+    if constexpr(AsciiBlocks) {
+      if(text.size()-i>=sizeof(std::uint64_t)) {
+        std::uint64_t block;
+        std::memcpy(&block,text.data()+i,sizeof(block));
+        // This mask identifies non-ASCII bytes on either endian order. A mixed
+        // block leaves i unchanged so the scalar parser validates it normally.
+        if((block&UINT64_C(0x8080808080808080))==0) {
+          // Every preceding increment checked the limit, so count<=limit.
+          if(limit-count<sizeof(block))throw std::invalid_argument("text exceeds scalar length");
+          count+=sizeof(block);i+=sizeof(block);
+          continue;
+        }
+      }
+    }
     auto lead=static_cast<unsigned char>(text[i++]);
     std::uint32_t cp=lead, minimum=0; unsigned remaining=0;
     if(lead<0x80) {}
@@ -36,6 +54,12 @@ std::size_t validate_text(std::string_view text,std::size_t limit) {
     ++count;
   }
   return count;
+}
+}
+std::size_t validate_text(std::string_view text,std::size_t limit) {
+  if(detail::text_validation_mode==detail::TextValidationMode::scalar)
+    return validate_text_impl<false>(text,limit);
+  return validate_text_impl<true>(text,limit);
 }
 int compare_text(std::string_view a,std::string_view b) {
   validate_text(a,std::numeric_limits<std::size_t>::max());

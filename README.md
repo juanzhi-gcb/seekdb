@@ -8,7 +8,7 @@
 - INSERT（列清单及多行 VALUES）、SELECT（普通投影、*、L2_DISTANCE）、UPDATE 常量赋值、DELETE。
 - 普通列 =、<、<=、>、>= 及 AND；多列 ORDER BY、ASC/DESC、LIMIT；并列按主键升序。
 - VARCHAR 按 Unicode 字符计数和码点比较；向量校验有限 float32 和维度，距离使用存储后的值。
-- 精确和带过滤的 TopK；按平方距离排序，输出欧氏距离；事务中读取自己的向量更新。
+- 精确和带过滤的 TopK；按返回的欧氏距离排序，并列按主键升序；事务中读取自己的向量更新。
 - CREATE VECTOR INDEX；磁盘平坦向量索引与表数据一起提交、回滚，新增、更新和删除同步维护。exact 和 ann 均使用完整精确检索，不宣称近似剪枝或索引提速。
 - 单个磁盘提交根覆盖表目录和所有表；自动提交、显式 BEGIN/COMMIT/ROLLBACK、语句失败保存点。
 - 双版本提交记录、同步后确认、正常关闭回滚及异常进程退出后恢复。
@@ -54,6 +54,8 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 - [上传版0e954的真实JSONL性能基线](docs/jsonl-baseline-0e954.md)
 - [同步扫描优化、负面结果和验证](docs/paired-scan-results.md)
 - [有界扫描快照、数值修复与交错读写实验](docs/scan-snapshot-results.md)
+- [旧版正式失败复核与版本区别](docs/reported-admission-failure.md)
+- [文本校验优化、负面实验与学习证据](docs/text-validation-results.md)
 - [跨查询缓存优化与超容量对照](docs/buffer-results.md)
 - [紧凑页生产集成与独立日志实验](docs/compact-results.md)
 - [缓存、CRC 与紧凑页/VA 实验](docs/portfolio-results.md)

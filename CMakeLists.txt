@@ -104,3 +104,8 @@ target_link_libraries(numeric_sql_tests PRIVATE minivectordb_core)
 add_test(NAME core_numeric_maximum COMMAND numeric_sql_tests maximum)
 add_test(NAME core_numeric_ties COMMAND numeric_sql_tests ties)
 set_tests_properties(core_numeric_maximum core_numeric_ties PROPERTIES TIMEOUT 120)
+
+add_executable(text_validation_tests tests/text_validation_tests.cpp)
+target_link_libraries(text_validation_tests PRIVATE minivectordb_core Threads::Threads)
+add_test(NAME core_text_validation COMMAND text_validation_tests)
+set_tests_properties(core_text_validation PROPERTIES TIMEOUT 60)
