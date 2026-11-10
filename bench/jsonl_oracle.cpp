@@ -19,10 +19,10 @@ int main(int argc,char**argv) {
    if(j%2&&i%10!=(j/2)%10)continue;
    double sum=0;
    for(uint32_t k=0;k<d;++k) {double delta=double(rows[size_t(i)*d+k])-double(queries[size_t(j)*d+k]);sum+=delta*delta;}
-   rank.emplace_back(sum,i);
+   rank.emplace_back(std::sqrt(sum),i);
   }
   std::sort(rank.begin(),rank.end());
-  for(size_t k=0;k<std::min(size_t(10),rank.size());++k)std::cout<<rank[k].second<<":"<<std::sqrt(rank[k].first)<<" ";
+  for(size_t k=0;k<std::min(size_t(10),rank.size());++k)std::cout<<rank[k].second<<":"<<rank[k].first<<" ";
   std::cout<<"\n";
  }
 }

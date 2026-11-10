@@ -1,5 +1,6 @@
 #include "sql.hpp"
 #include "sorter.hpp"
+#include "scan_cache.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include <cmath>
@@ -81,9 +82,9 @@ namespace minivectordb {
       bool same(const sql::BoundExpr&a,const sql::BoundExpr&b)const {
         return a.column==b.column&&a.query==b.query;
       }
-      double square(const sql::BoundExpr&e,const SelectRow&r,ExecutionInfo&info) {
+      double distance(const sql::BoundExpr&e,const SelectRow&r,ExecutionInfo&info) {
         for(const auto&[expr,value]:values)if(same(*expr,e))return value;
-        auto value=sql::squared_distance(std::get<std::vector<float>>(r[e.column]),*e.query);
+        auto value=std::sqrt(sql::squared_distance(std::get<std::vector<float>>(r[e.column]),*e.query));
         ++info.distances_computed;
         values.emplace_back(&e,value);
         return value;
@@ -93,7 +94,7 @@ namespace minivectordb {
       Row out;
       out.reserve(b.projection.size());
       for(const auto&e:b.projection) {
-        if(e.query)out.emplace_back(std::sqrt(cache.square(e,r,info)));
+        if(e.query)out.emplace_back(cache.distance(e,r,info));
         else out.push_back(r[e.column]);
       }
       return out;
@@ -102,6 +103,7 @@ namespace minivectordb {
   struct Database::Impl {
     Store store;
     Options options;
+    sql::ScanSnapshot snapshot;
     bool active=false,poisoned=false,busy=false;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -190,7 +192,16 @@ namespace minivectordb {
                 throw Error(ErrorCode::Corruption,"vector index disagrees with row");
               if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
             };
-            if(options.paired_index_scan) {
+            if(options.paired_index_scan && snapshot.ready(s.id,index->id)) {
+              snapshot.scan([&](auto key,auto bytes) {
+                ++info.rows_examined;++info.snapshot_rows_examined;
+                SelectRow row(s,key,bytes,options.selective_decode,info);
+                if(row.matches(b.predicates)) {
+                  ++info.distances_computed;visit(key,std::get<std::vector<float>>(row[e.column]));
+                }
+              });
+            } else if(options.paired_index_scan) {
+              snapshot.start(s.id,index->id,options.scan_snapshot_bytes);
               try {
                 store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
                   ++info.vector_index_entries_examined;
@@ -198,9 +209,14 @@ namespace minivectordb {
                   ++info.rows_examined;
                   SelectRow row(s,key,base,options.selective_decode,info);
                   consume(key,vector,row);
+                  snapshot.append(key,base);
                 });
+                snapshot.finish();
               } catch(const Store::KeySetMismatch& error) {
+                snapshot.clear();
                 throw Error(ErrorCode::Corruption,error.what());
+              } catch(...) {
+                snapshot.clear();throw;
               }
             } else store.scan_in(index->id,[&](auto key,auto bytes) {
               ++info.vector_index_entries_examined;
@@ -213,6 +229,7 @@ namespace minivectordb {
             visit(key,std::get<std::vector<float>>(r[e.column]));
           });
         });
+        info.snapshot_bytes=snapshot.bytes();
         for(const auto&winner:winners) {
           fetch_select(s,winner.key,info,[&](const SelectRow& row) {
             DistanceCache cache;
@@ -220,7 +237,7 @@ namespace minivectordb {
             output.reserve(b.projection.size());
             for(const auto&projection:b.projection) {
               if(projection.query&&cache.same(projection,e))output.emplace_back(winner.distance);
-              else if(projection.query)output.emplace_back(std::sqrt(cache.square(projection,row,info)));
+              else if(projection.query)output.emplace_back(cache.distance(projection,row,info));
               else output.push_back(row[projection.column]);
             }
             if(sink.row)sink.row(output);
@@ -236,7 +253,7 @@ namespace minivectordb {
         record.key=key;
         record.values.reserve(b.order.size());
         for(const auto&o:b.order) {
-          if(o.expression.query)record.values.emplace_back(cache.square(o.expression,r,info));
+          if(o.expression.query)record.values.emplace_back(cache.distance(o.expression,r,info));
           else record.values.push_back(r[o.expression.column]);
         }
         sorter.add(std::move(record));
@@ -244,6 +261,7 @@ namespace minivectordb {
       sorter.finish(limit,[&](const sql::SortRecord&record) {
         fetch_select(s,record.key,info,[&](const SelectRow& row) {
           DistanceCache cache;
+          // Sort and projection share the same rounded Euclidean values.
           for(std::size_t i=0;i<b.order.size();++i)if(b.order[i].expression.query)cache.values.emplace_back(&b.order[i].expression,std::get<double>(record.values[i]));
           emit(row,cache);
         });
@@ -264,6 +282,9 @@ namespace minivectordb {
         busy
       };
       auto statement=sql::parse(text);
+      // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
+      // avoids transaction/root ABA and does not require persisted cache metadata.
+      if(statement.kind!=sql::Statement::Select)snapshot.clear();
       ExecutionInfo info;
       if(statement.kind==sql::Statement::Begin) {
         if(active)throw Error(ErrorCode::Transaction,"transaction already active");

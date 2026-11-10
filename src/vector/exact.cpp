@@ -17,28 +17,29 @@ double squared_l2(std::span<const float> a,std::span<const float> b) {
   }
   return squared;
 }
-struct RankedNeighbor { std::int64_t key; double squared_distance; };
+struct RankedNeighbor { std::int64_t key; double distance; };
 }
 double l2_distance(std::span<const float> a,std::span<const float> b) {
   return std::sqrt(squared_l2(a,b));
 }
 std::vector<Neighbor> exact_top_k(std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
   for(float component:query) if(!std::isfinite(component)) throw std::invalid_argument("non-finite query component");
+  // Rank the same rounded Euclidean value exposed to callers, then primary key.
   auto better=[](const RankedNeighbor& a,const RankedNeighbor& b) {
-    return a.squared_distance<b.squared_distance || (a.squared_distance==b.squared_distance && a.key<b.key);
+    return a.distance<b.distance || (a.distance==b.distance && a.key<b.key);
   };
   std::priority_queue<RankedNeighbor,std::vector<RankedNeighbor>,decltype(better)> heap(better);
   if(k==0) return {};
   source([&](std::int64_t key,std::span<const float> value) {
     if(predicate && !predicate(key)) return;
-    RankedNeighbor candidate{key,squared_l2(query,value)};
+    RankedNeighbor candidate{key,l2_distance(query,value)};
     if(heap.size()<k) heap.push(candidate);
     else if(better(candidate,heap.top())) {heap.pop(); heap.push(candidate);}
   });
   std::vector<Neighbor> result; result.reserve(heap.size());
   while(!heap.empty()) {
     const auto candidate=heap.top(); heap.pop();
-    result.push_back({candidate.key,std::sqrt(candidate.squared_distance)});
+    result.push_back({candidate.key,candidate.distance});
   }
   std::reverse(result.begin(),result.end());
   return result;

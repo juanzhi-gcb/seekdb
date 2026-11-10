@@ -239,11 +239,11 @@ void edges(const std::filesystem::path&p) {
   d.execute("CREATE TABLE `T` (`Id` BIGINT PRIMARY KEY,v VECTOR(2),s VARCHAR(4))");
   d.execute("INSERT INTO t VALUES(1,[1,1.490116119384765625e-8],'a'),(2,[1,0],'b'),(-9223372036854775808,[3,4],'中😀'),(9223372036854775807,[-3,-4],'')");
   auto near=q(d,"SELECT id,L2_DISTANCE(v,[0,0]) AS d FROM t ORDER BY d LIMIT 2");
-  CHECK(id(near)==2&&id(near,1)==1);
+  CHECK(id(near)==1&&id(near,1)==2);
   CHECK(std::get<double>(near.rows[0][1])==1&&std::get<double>(near.rows[1][1])==1);
   CHECK(near.info.distances_computed==4);
   auto sorted=q(d,"SELECT id,L2_DISTANCE(v,'[0,0]') AS d FROM t ORDER BY d");
-  CHECK(id(sorted)==2&&id(sorted,1)==1&&id(sorted,2)==INT64_MIN&&id(sorted,3)==INT64_MAX);
+  CHECK(id(sorted)==1&&id(sorted,1)==2&&id(sorted,2)==INT64_MIN&&id(sorted,3)==INT64_MAX);
   CHECK(sorted.info.distances_computed==4);
   CHECK(q(d,"SELECT * FROM t WHERE id=0 ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 8").rows.empty());
   CHECK(id(q(d,"SELECT id FROM t WHERE id=-9223372036854775808"))==INT64_MIN);

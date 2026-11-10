@@ -35,6 +35,9 @@ struct Options {
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;
+  // Owned raw-row snapshot for a fully validated indexed scan; capped at 8MiB.
+  // Zero disables. Object and allocator overhead are outside the arena budget.
+  std::size_t scan_snapshot_bytes = 8 * 1024 * 1024;
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -42,6 +45,8 @@ struct QuerySink {
 };
 enum class SearchMode { Exact, Ann };
 struct ExecutionInfo {
+  std::uint64_t snapshot_rows_examined = 0;
+  std::size_t snapshot_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;

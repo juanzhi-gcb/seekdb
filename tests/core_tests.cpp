@@ -72,9 +72,9 @@ void vectors() {
   const std::array<float,2> near{1,0}, farther{1,std::ldexp(1.0f,-26)};
   VectorSource close_distances=[&](const VectorVisitor& visit) {visit(2,near); visit(1,farther);};
   auto closest=exact_top_k(a,1,close_distances);
-  CHECK(closest.size()==1 && closest[0].key==2 && closest[0].distance==1);
+  CHECK(closest.size()==1 && closest[0].key==1 && closest[0].distance==1);
   auto close_order=exact_top_k(a,2,close_distances);
-  CHECK(close_order.size()==2 && close_order[0].key==2 && close_order[1].key==1);
+  CHECK(close_order.size()==2 && close_order[0].key==1 && close_order[1].key==2);
   CHECK(close_order[0].distance==1 && close_order[1].distance==1);
 }
 void equal(Store& store,const std::map<std::int64_t,std::string>& expected) {

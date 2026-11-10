@@ -53,6 +53,7 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 
 - [上传版0e954的真实JSONL性能基线](docs/jsonl-baseline-0e954.md)
 - [同步扫描优化、负面结果和验证](docs/paired-scan-results.md)
+- [有界扫描快照、数值修复与交错读写实验](docs/scan-snapshot-results.md)
 - [跨查询缓存优化与超容量对照](docs/buffer-results.md)
 - [紧凑页生产集成与独立日志实验](docs/compact-results.md)
 - [缓存、CRC 与紧凑页/VA 实验](docs/portfolio-results.md)

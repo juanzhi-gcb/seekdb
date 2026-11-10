@@ -16,6 +16,7 @@ Result query(Database& d,SearchMode mode=SearchMode::Exact,std::string_view filt
 std::int64_t first(const Result& r){return std::get<std::int64_t>(r.rows.at(0).at(0));}
 void exercise(const std::filesystem::path& dir,bool packed) {
  Options options; options.packed_values=packed; options.memory_budget_bytes=4096;
+ options.scan_snapshot_bytes=0; // This suite asserts physical index traversal counts.
  auto file=dir/(packed?"packed":"plain");
  {
  Database d(file,options);

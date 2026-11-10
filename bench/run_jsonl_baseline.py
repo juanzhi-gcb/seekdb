@@ -23,7 +23,8 @@ with inputpath.open('wb') as f:
  f.write(struct.pack('<III',N,Q,128))
  for v in vectors+queries:f.write(struct.pack('<128f',*v))
 truthpath=OUT/'oracle-truth.txt'
-with truthpath.open('w') as f:subprocess.run([str(ROOT/'work/jsonl-baseline-oracle'),str(inputpath)],stdout=f,check=True)
+oracle=Path(os.environ.get('MVDB_ORACLE_BIN',str(ROOT/'work/jsonl-baseline-oracle')))
+with truthpath.open('w') as f:subprocess.run([str(oracle),str(inputpath)],stdout=f,check=True)
 truth=[[(int(p.split(':')[0]),float(p.split(':')[1])) for p in line.split()] for line in truthpath.read_text().splitlines()]
 assert len(truth)==Q
 meta={'commit':os.environ.get('MVDB_BENCH_COMMIT','0e954ffd90c6802ecd9fae4c0ca00eb8553201dd'),'runtime':IMAGE,'rows':N,'dimensions':128,'queries_per_round':Q,'rounds':R,'batch':100,'seed':20261110,'payload_chars':256,'top_k':10,'half_filtered_group_selectivity':0.1,'search_mode':'exact','index_creation':'after insertion','warmup_queries':10,'timing':'Session.request includes JSON serialization, pipe/Docker transport, server execution, response parsing; excludes dataset/oracle generation and answer verification','oracle_input_sha256':hashlib.sha256(inputpath.read_bytes()).hexdigest(),'constraints':config,'swap_caveat':'WSL SwapLimit=false; requested --memory-swap=2g not enforceable; global settings unchanged','official_score':None}
