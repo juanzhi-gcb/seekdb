@@ -18,7 +18,7 @@ The production commit protocol is unchanged: synchronize data, write the new roo
 
 ## Scan cache
 
-Each scan owns a lazy fixed-size direct-mapped cache of validated immutable packed pages, destroyed at scan completion or exception. SQL defaults to1MiB; the low-level Store scan budget defaults to256KiB. Entries include a4096-byte page and8-byte identifier (255 entries,1046520 bytes for1MiB on the tested ABI). Fixed object/allocation overhead, the current returned row, index recursion and nested scans are additional. This is not a process memory cap.
+Each scan owns a lazy fixed-size direct-mapped cache of validated immutable packed pages, destroyed at scan completion or exception. SQL now defaults to a16MiB cross-query data buffer and disables this scan memo; the low-level Store scan budget remains256KiB. See[data-buffer.md](data-buffer.md). When explicitly configured with1MiB, Entries include a4096-byte page and8-byte identifier (255 entries,1046520 bytes for1MiB on the tested ABI). Fixed object/allocation overhead, the current returned row, index recursion and nested scans are additional. This is not a process memory cap.
 
 A cache hit still validates the requested physical address and slot. The row is copied into an owned string before a callback can mutate the store or start another scan. No mutable/incomplete page enters this cache. Zero budget disables reuse. Index cache and packed scan cache are separate.
 

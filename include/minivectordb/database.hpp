@@ -30,8 +30,8 @@ struct Options {
   bool batch_writes = true;
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
-  std::size_t packed_scan_cache_bytes = 1024 * 1024; // Per-scan validated packed pages; zero disables.
-  std::size_t data_cache_bytes = 0; // Cross-query validated packed/overflow pages; zero disables.
+  std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
+  std::size_t data_cache_bytes = 16 * 1024 * 1024; // Bounded cross-query data pages; zero disables.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
