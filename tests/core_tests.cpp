@@ -36,6 +36,20 @@ void types() {
   std::array<double,2> v{1.25,-2}; auto converted=make_vector(v,2);
   CHECK(converted[0]==1.25f && converted[1]==-2);
   rejects([&]{make_vector(v,3);});
+  const double maximum=std::numeric_limits<float>::max();
+  const double overflow=std::ldexp(1.0,128)-std::ldexp(1.0,103);
+  for(double number:{maximum,3.40282347e38,3.4028235e38,std::nextafter(overflow,0.0)}) {
+    const std::array<double,1> positive{number},negative{-number};
+    CHECK(make_vector(positive,1)[0]==std::numeric_limits<float>::max());
+    CHECK(make_vector(negative,1)[0]==-std::numeric_limits<float>::max());
+  }
+  for(double number:{overflow,std::nextafter(overflow,std::numeric_limits<double>::infinity()),3.4028236e38}) {
+    rejects([&]{make_vector(std::array<double,1>{number},1);});
+    rejects([&]{make_vector(std::array<double,1>{-number},1);});
+  }
+  CHECK(std::signbit(make_vector(std::array<double,1>{-0.0},1)[0]));
+  CHECK(make_vector(std::array<double,1>{std::ldexp(1.0,-149)},1)[0]==std::numeric_limits<float>::denorm_min());
+
   for (double bad: {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), 1e100, -1e100}) {
     v[0]=bad; rejects([&]{make_vector(v,2);});
   }

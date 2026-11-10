@@ -5,6 +5,9 @@
 #include <cmath>
 #include <set>
 #include <limits>
+#include <locale.h>
+#include <cstdlib>
+#include <new>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -15,9 +18,24 @@ namespace minivectordb::sql {
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
       auto[end,error]=std::from_chars(text.data(),text.data()+text.size(),result);
-      if(error!=std::errc {
+      if(error==std::errc::result_out_of_range && end==text.data()+text.size()) {
+        // from_chars reports both overflow and underflow with this code.
+        // Values below binary64 range are still valid binary32 signed zeros.
+        // Use a private immutable C locale, never the caller's global locale.
+        struct NumericLocale {
+          locale_t value=::newlocale(LC_NUMERIC_MASK,"C",nullptr);
+          NumericLocale() {if(!value)throw std::bad_alloc();}
+          ~NumericLocale() {::freelocale(value);}
+        };
+        static const NumericLocale locale;
+        const std::string terminated(text);
+        char* tail=nullptr;
+        const auto tiny=::strtod_l(terminated.c_str(),&tail,locale.value);
+        if(tail==terminated.c_str()+terminated.size() && std::isfinite(tiny) &&
+           std::abs(tiny)<std::numeric_limits<double>::min()) return tiny;
       }
-      ||end!=text.data()+text.size()||!std::isfinite(result))throw Error(ErrorCode::Type,"invalid finite VECTOR component");
+      if(error!=std::errc{} ||end!=text.data()+text.size()||!std::isfinite(result))
+        throw Error(ErrorCode::Type,"invalid finite VECTOR component");
       return result;
     }
     std::vector<std::string> vector_components(const Literal&v) {

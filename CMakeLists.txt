@@ -86,6 +86,9 @@ target_link_libraries(vector_index_tests PRIVATE minivectordb_core)
 add_test(NAME core_vector_index COMMAND vector_index_tests)
 set_tests_properties(core_vector_index PROPERTIES TIMEOUT 180)
 
+add_test(NAME core_float32_literals COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/float32_literals_tests.py $<TARGET_FILE:minivectordb>)
+set_tests_properties(core_float32_literals PROPERTIES TIMEOUT 120)
+
 add_executable(paired_scan_tests tests/paired_scan_tests.cpp)
 target_link_libraries(paired_scan_tests PRIVATE minivectordb_core)
 add_test(NAME core_paired_scan COMMAND paired_scan_tests)
