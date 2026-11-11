@@ -32,3 +32,7 @@ python3 bench/run_decode.py /mnt/d/Codex/MiniVectorDB/build/decode-bench /mnt/d/
 ~~~
 
 示例须保持上述顺序，两类性能实验不要并行。默认 runner 的数据和全部产物被约束在 D 盘项目内。更换其他机器需明确调整路径和环境，不能把跨环境变化混入同一对照。
+
+## 无索引与查询临时空间实验
+
+`run_unindexed.py` 支持参考、快照、arena复用、scratch及indexed对照，三模式轮换全部执行位置，独立精确答案和重开全行校验。源码、原始输出、一次构建成本、RSS代价和负面结果见[完整报告](../docs/unindexed-results.md)。历史`run_row_cpu.py`显式关闭新增复用，使旧CPU实验仍只改变原有两个因素。

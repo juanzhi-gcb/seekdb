@@ -7,6 +7,8 @@ from _transport import Session
 IMAGE=os.environ.get('MVDB_BENCH_IMAGE','sha256:df51f7631fcf2e9ff44f93234eb64d0ed5132441e490e50cf5b7e8e528e87321')
 assert sys.flags.optimize==0, 'Assertions require normal Python mode'
 N,Q,R=map(int,sys.argv[1:4])
+index_order_offset=int(os.environ.get('MVDB_BENCH_INDEX_FIRST','0'))
+assert index_order_offset in (0,1)
 OUT=ROOT/'work'/sys.argv[4];OUT.mkdir(exist_ok=False)
 config=json.loads((ROOT/'work/official-protocol-f4d4e26/protocol_check/config.json').read_text())
 config.update(request_timeout=120,case_timeout=14400)
@@ -28,6 +30,7 @@ with truthpath.open('w') as f:subprocess.run([str(oracle),str(inputpath)],stdout
 truth=[[(int(p.split(':')[0]),float(p.split(':')[1])) for p in line.split()] for line in truthpath.read_text().splitlines()]
 assert len(truth)==Q
 meta={'commit':os.environ.get('MVDB_BENCH_COMMIT','0e954ffd90c6802ecd9fae4c0ca00eb8553201dd'),'runtime':IMAGE,'rows':N,'dimensions':128,'queries_per_round':Q,'rounds':R,'batch':100,'seed':20261110,'payload_chars':256,'top_k':10,'half_filtered_group_selectivity':0.1,'search_mode':'exact','index_creation':'after insertion','warmup_queries':10,'timing':'Session.request includes JSON serialization, pipe/Docker transport, server execution, response parsing; excludes dataset/oracle generation and answer verification','oracle_input_sha256':hashlib.sha256(inputpath.read_bytes()).hexdigest(),'constraints':config,'swap_caveat':'WSL SwapLimit=false; requested --memory-swap=2g not enforceable; global settings unchanged','official_score':None}
+meta.update(index_order_offset=index_order_offset,oracle_binary_sha256=hashlib.sha256(oracle.read_bytes()).hexdigest())
 (OUT/'metadata.json').write_text(json.dumps(meta,indent=2))
 def resource(s):
  result={}
@@ -54,7 +57,7 @@ def files(s):
  return {str(p.relative_to(s.bind_data.name)):p.stat().st_size for p in Path(s.bind_data.name).rglob('*') if p.is_file()}
 results=[]
 for roundno in range(R):
- for indexed in ([False,True] if roundno%2==0 else [True,False]):
+ for indexed in ([False,True] if (roundno+index_order_offset)%2==0 else [True,False]):
   tag='round%d-%s'%(roundno+1,'indexed' if indexed else 'unindexed')
   s=Session(config,OUT/(tag+'-stderr.log'),image=IMAGE,case_timeout=14400,data_root='/var/lib/minivectordb-jsonl-bench')
   result={'round':roundno+1,'indexed':indexed,'tag':tag}

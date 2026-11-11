@@ -71,12 +71,12 @@ void comparisons(const std::filesystem::path& p) {
       CHECK(r.info.distances_computed==eager[i].info.distances_computed);
     }
     auto filtered=query(db,"SELECT id,L2_DISTANCE(v,[0,0]) FROM t WHERE n=1 ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 2");
-    CHECK(filtered.info.vector_values_materialized==3);
+    CHECK(filtered.info.vector_values_materialized==0);
     CHECK(filtered.info.distances_computed==3);
     CHECK(query(db,"SELECT id FROM t WHERE n=1").info.vector_values_materialized==0);
     CHECK(query(db,"SELECT id FROM t LIMIT 0").info.cells_materialized==0);
     CHECK(query(db,"SELECT * FROM t WHERE id=1").info.cells_materialized==4);
-    CHECK(query(db,"SELECT id,L2_DISTANCE(v,[0,0]),L2_DISTANCE(v,[1,1]) FROM t WHERE n=1 ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 2").info.vector_values_materialized==5);
+    CHECK(query(db,"SELECT id,L2_DISTANCE(v,[0,0]),L2_DISTANCE(v,[1,1]) FROM t WHERE n=1 ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 2").info.vector_values_materialized==2);
     db.execute("BEGIN"); db.execute("UPDATE t SET n=1 WHERE id=9");
     CHECK(query(db,"SELECT id,L2_DISTANCE(v,[0,0]) FROM t WHERE n=1").info.vector_values_materialized==4);
     db.execute("ROLLBACK");

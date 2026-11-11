@@ -36,5 +36,8 @@ namespace minivectordb {
   public:
     LazyRowView(const Schema&, std::string_view, ExecutionInfo&);
     const Cell& operator[](std::size_t) const;
+    // Copy a validated VECTOR without materializing a Cell. The view's bytes must
+    // remain valid and must not alias the caller-owned scratch buffer.
+    void copy_vector(std::size_t, std::vector<float>& scratch) const;
   };
 }

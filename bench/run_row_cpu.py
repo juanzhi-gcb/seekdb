@@ -54,6 +54,9 @@ for case,(rows,queries,extra) in cases.items():
    with tempfile.TemporaryDirectory(prefix='owned-',dir=data_root) as directory:
     env={'MVDB_DATA_CACHE_BYTES':'16777216','MVDB_SCAN_CACHE_BYTES':'0',
          'MVDB_PACKED':'1','MVDB_BENCH_CGROUP':'1','MVDB_PAIRED':'1',
+         # Isolate historical row CPU factors from later buffer optimizations.
+         # Old frozen binaries ignore these flags and already use this behavior.
+         'MVDB_VECTOR_SCRATCH':'0','MVDB_REUSE_SNAPSHOT':'0',
          'MVDB_SNAPSHOT_BYTES':'8388608',**extra,**settings[mode]}
     if a.suite=='profile':env['MVDB_PROFILE']='1'
     cmd=docker+['create','--read-only','--network','none','--cpus','2','--memory','512m',
@@ -69,6 +72,8 @@ for case,(rows,queries,extra) in cases.items():
     finally:subprocess.run(docker+['rm','--force',container],check=True,capture_output=True,timeout=30)
     assert row['vector_scalar']==('MVDB_VECTOR_SCALAR' in settings[mode])
     assert row['row_heap']==('MVDB_ROW_HEAP' in settings[mode])
+    assert not row.get('reuse_vector_scratch', False)
+    assert not row.get('reuse_scan_snapshot_buffer', False)
     assert row['paired_index_scan'] and row['snapshot_budget']==int(env['MVDB_SNAPSHOT_BYTES'])
     assert row['validated_queries']==queries and row['first_query_validated']
     assert row['recovered_rows']==(rows*3//4 if case=='churn' else rows)

@@ -74,3 +74,5 @@ MVDB_TEST_DIR=/data/core-tests ctest --test-dir build --output-on-failure
 agent/conversation.json 为源，根目录 conversation.json 为同内容兼容副本，待平台明确路径后固定入口。材料区分用户、Agent 和工具来源，不把 Agent 的实现或解释冒充用户理解，不包含令牌。
 
 本轮已对照平台显示成功的 `8b7054`：两版各公开20/20、95SQL，58条协议响应仅一条排序修复差异；详见[成功版本兼容性复核](docs/successful-version-compatibility.md)。该报告记录上传前验证；最终版本以提交SHA为准，平台两项分数仍未提供。
+
+本轮新增[无索引快照、缓冲复用与临时向量优化的完整实验](docs/unindexed-results.md)，保留三轮迭代、负面结果、38项回归与真实JSONL对照。

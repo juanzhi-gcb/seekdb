@@ -7,8 +7,11 @@
 #include <string_view>
 
 namespace minivectordb::sql {
-// Owns one complete, validated index/base scan. Executor invalidates before every
-// non-SELECT, so no database root or schema can change while this proof is reused.
+// Owns one complete, validated base-table scan. An index ID additionally records
+// verified index/base consistency; index zero identifies an unindexed scan.
+// Executor invalidates before every non-SELECT, so no database root or schema can
+// change while the snapshot is reused. Every replay still validates all row bytes.
+// Invalidation may retain the arena, never old rows or their validation proof.
 // A failed or oversized builder is never readable. Budget includes record headers.
 class ScanSnapshot {
     enum class State { empty, probation, building, ready, refused } state_ = State::empty;
@@ -16,21 +19,29 @@ class ScanSnapshot {
     std::size_t capacity_ = 0, used_ = 0;
     std::unique_ptr<char[]> data_;
 public:
-    void clear() noexcept { data_.reset(); capacity_=used_=0; state_=State::empty; }
+    void invalidate() noexcept { used_=0; table_=index_=0; state_=State::empty; }
+    void clear() noexcept { data_.reset(); capacity_=0; invalidate(); }
+    bool building() const noexcept { return state_==State::building; }
     bool ready(std::uint64_t table,std::uint64_t index) const noexcept {
         return state_==State::ready && table_==table && index_==index;
     }
-    void start(std::uint64_t table,std::uint64_t index,std::size_t budget) {
+    void start(std::uint64_t table,std::uint64_t index,std::size_t budget,bool reuse_buffer=true) {
+        budget=std::min(budget,std::size_t(8*1024*1024));
+        // Release before allocating a different size; at most one arena is owned.
+        if(capacity_ && capacity_!=budget)clear();
         if(state_==State::empty || table_!=table || index_!=index) {
-            clear();table_=table;index_=index;state_=State::probation;
-            return; // One-shot and alternating write/read workloads never allocate.
+            if(reuse_buffer)invalidate();else clear();
+            table_=table;index_=index;state_=State::probation;
+            return; // The first eligible scan never allocates a new arena.
         }
         if(state_!=State::probation)return;
-        budget=std::min(budget,std::size_t(8*1024*1024));
         if(!budget) {state_=State::refused;return;}
-        try { data_.reset(new char[budget]); }
-        catch(const std::bad_alloc&) {state_=State::refused;return;}
-        capacity_=budget;state_=State::building;
+        if(!data_) {
+            try { data_.reset(new char[budget]); }
+            catch(const std::bad_alloc&) {state_=State::refused;return;}
+            capacity_=budget;
+        }
+        used_=0;state_=State::building;
     }
     void append(std::int64_t key,std::string_view bytes) {
         if(state_!=State::building)return;

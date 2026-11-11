@@ -1,10 +1,72 @@
 #include "minivectordb/database.hpp"
 #include "../src/sql/scan_cache.hpp"
+#include <cstdlib>
+#include <new>
 #include <filesystem>
 #include <iostream>
 #include <unistd.h>
+// Count only array allocations during the isolated cache test. This proves
+// reuse without exposing or depending on a private arena address.
+namespace {
+bool track_arrays=false;
+std::size_t array_allocations=0,array_releases=0;
+}
+void* operator new[](std::size_t bytes) {
+  if(auto* result=std::malloc(bytes?bytes:1)) {
+    if(track_arrays)++array_allocations;
+    return result;
+  }
+  throw std::bad_alloc();
+}
+void operator delete[](void* pointer) noexcept {
+  if(track_arrays && pointer)++array_releases;
+  std::free(pointer);
+}
+void operator delete[](void* pointer,std::size_t) noexcept {
+  ::operator delete[](pointer);
+}
 using namespace minivectordb;
 #define CHECK(x) do { if(!(x)) throw std::runtime_error(std::string(#x)+" line "+std::to_string(__LINE__)); } while(false)
+void arena_reuse() {
+ struct Tracking {
+  Tracking(){array_allocations=array_releases=0;track_arrays=true;}
+  ~Tracking(){track_arrays=false;}
+ } tracking;
+ sql::ScanSnapshot cache;
+ auto empty=[&] {unsigned count=0;cache.scan([&](auto,auto){++count;});CHECK(count==0);};
+ auto one=[&](std::int64_t expected_key,std::string_view expected_bytes) {
+  unsigned count=0;cache.scan([&](auto key,auto bytes){++count;CHECK(key==expected_key);CHECK(bytes==expected_bytes);});CHECK(count==1);
+ };
+ cache.start(1,0,256,true);CHECK(cache.bytes()==0);CHECK(array_allocations==0);
+ cache.start(1,0,256,true);CHECK(cache.building());CHECK(array_allocations==1);CHECK(array_releases==0);
+ cache.append(-1,"old first");cache.append(99,"old tail");cache.finish();CHECK(cache.ready(1,0));
+ cache.invalidate();CHECK(cache.bytes()==256);CHECK(!cache.ready(1,0));CHECK(!cache.building());empty();
+ CHECK(array_allocations==1);CHECK(array_releases==0);
+ cache.start(1,0,256,true);CHECK(cache.bytes()==256);CHECK(!cache.building());CHECK(!cache.ready(1,0));
+ cache.start(1,0,256,true);CHECK(cache.building());CHECK(array_allocations==1);CHECK(array_releases==0);
+ cache.append(7,"short");cache.finish();CHECK(cache.ready(1,0));one(7,"short");
+ // A different identity retains capacity but never the previous rows or proof.
+ cache.start(2,3,256,true);CHECK(cache.bytes()==256);CHECK(!cache.ready(1,0));CHECK(!cache.ready(2,3));empty();
+ cache.start(2,3,256,true);cache.append(-9,"different");cache.finish();one(-9,"different");
+ CHECK(cache.ready(2,3));CHECK(array_allocations==1);CHECK(array_releases==0);
+ // A changed effective budget releases the old allocation before probation.
+ cache.start(2,3,128,true);CHECK(cache.bytes()==0);CHECK(!cache.ready(2,3));empty();
+ CHECK(array_allocations==1);CHECK(array_releases==1);
+ cache.start(2,3,128,true);CHECK(cache.bytes()==128);CHECK(array_allocations==2);
+ cache.append(0,"smaller");cache.finish();one(0,"smaller");
+ cache.clear();CHECK(cache.bytes()==0);CHECK(!cache.ready(2,3));empty();CHECK(array_releases==2);
+ // Disabled reuse releases both on identity switch and after invalidate.
+ cache.start(1,0,256,false);cache.start(1,0,256,false);cache.append(1,"before");cache.finish();
+ CHECK(array_allocations==3);
+ cache.start(2,0,256,false);CHECK(cache.bytes()==0);CHECK(array_releases==3);empty();
+ cache.start(2,0,256,false);cache.append(2,"after");cache.finish();one(2,"after");CHECK(array_allocations==4);
+ cache.invalidate();CHECK(cache.bytes()==256);
+ cache.start(2,0,256,false);CHECK(cache.bytes()==0);CHECK(array_releases==4);empty();
+ cache.start(2,0,256,false);cache.finish();CHECK(cache.ready(2,0));empty();CHECK(array_allocations==5);
+ cache.start(2,0,0,true);CHECK(cache.bytes()==0);CHECK(array_releases==5);
+ cache.start(2,0,0,true);CHECK(!cache.ready(2,0));CHECK(!cache.building());CHECK(array_allocations==5);empty();
+ cache.clear();CHECK(cache.bytes()==0);CHECK(array_releases==5);
+}
 struct Result { std::vector<Row> rows; ExecutionInfo info; };
 Result query(Database& d,std::string filter="",SearchMode mode=SearchMode::Exact) {
  Result r; r.info=d.execute("SELECT id,L2_DISTANCE(v,'[0,0]') AS d FROM t "+filter+" ORDER BY d LIMIT 9",{{},[&](const Row& row){r.rows.push_back(row);}},mode);return r;
@@ -47,7 +109,7 @@ void run(const std::filesystem::path& path,bool packed,bool selective,std::size_
  {Database d(path,o);for(int attempt=0;attempt<2;++attempt){bool failed=false;try{query(d,"WHERE g=0");}catch(const Error& e){failed=e.code()==ErrorCode::Corruption;}CHECK(failed);}}
 }
 int main(){const char* env=std::getenv("MVDB_TEST_DIR");auto root=std::filesystem::path(env?env:"/data")/("snapshot-"+std::to_string(getpid()));std::filesystem::create_directories(root);
- try{sql::ScanSnapshot cache;cache.start(1,2,16*1024*1024);CHECK(cache.bytes()==0);cache.start(1,2,16*1024*1024);CHECK(cache.bytes()==8*1024*1024);CHECK(!cache.ready(1,2));cache.append(-1,"abc");cache.finish();CHECK(cache.ready(1,2));cache.clear();CHECK(!cache.ready(1,2));
+ try{arena_reuse();sql::ScanSnapshot cache;cache.start(1,2,16*1024*1024);CHECK(cache.bytes()==0);cache.start(1,2,16*1024*1024);CHECK(cache.bytes()==8*1024*1024);CHECK(!cache.ready(1,2));cache.append(-1,"abc");cache.finish();CHECK(cache.ready(1,2));cache.clear();CHECK(!cache.ready(1,2));
   cache.start(1,2,17);cache.start(1,2,17);cache.append(1,"xx");cache.finish();CHECK(!cache.ready(1,2));CHECK(cache.bytes()==0);cache.start(1,2,100);CHECK(cache.bytes()==0);cache.start(3,4,100);cache.start(3,4,100);cache.finish();CHECK(cache.ready(3,4));
   for(bool packed:{false,true})for(bool selective:{false,true})for(std::size_t budget:{0U,1U,60U,4096U})run(root/(std::to_string(packed)+std::to_string(selective)+"-"+std::to_string(budget)),packed,selective,budget);
   Options o;o.scan_snapshot_bytes=4096;Database empty(root/"empty",o);empty.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR(2),g BIGINT)");empty.execute("CREATE VECTOR INDEX tv ON t(v)");CHECK(query(empty).rows.empty());CHECK(query(empty).rows.empty());empty.execute("INSERT INTO t VALUES(1,'[0,0]',0)");CHECK(query(empty).rows.size()==1);

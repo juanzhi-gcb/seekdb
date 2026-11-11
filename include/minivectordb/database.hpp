@@ -35,9 +35,16 @@ struct Options {
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;
-  // Owned raw-row snapshot for a fully validated indexed scan; capped at 8MiB.
-  // Zero disables. Object and allocator overhead are outside the arena budget.
+  // Owned raw rows from one fully validated scan; capped at 8MiB. Indexed and
+  // unindexed scans share this arena. Zero disables both; object/allocator overhead
+  // is outside the arena budget.
   std::size_t scan_snapshot_bytes = 8 * 1024 * 1024;
+  // Allow unindexed exact TopK scans to use the shared snapshot.
+  bool table_scan_snapshot = true;
+  // Retain the arena across invalidation; every rebuild still validates all rows.
+  bool reuse_scan_snapshot_buffer = true;
+  // Reuse one candidate-vector buffer per TopK query without materializing Cells.
+  bool reuse_vector_scratch = true;
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -46,6 +53,7 @@ struct QuerySink {
 enum class SearchMode { Exact, Ann };
 struct ExecutionInfo {
   std::uint64_t snapshot_rows_examined = 0;
+  // Arena capacity retained after TopK execution; other paths do not collect it.
   std::size_t snapshot_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).

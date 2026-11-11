@@ -9,6 +9,7 @@ p.add_argument('--reference-label',default='cc0ae3f5418e8d56ebdb9530e83c96a85c8a
 p.add_argument('--current-label',default='cc0ae3f5418e8d56ebdb9530e83c96a85c8a36ba + row CPU working tree')
 p.add_argument('--output-prefix',required=True)
 p.add_argument('--rounds',type=int,default=3)
+p.add_argument('--oracle-bin',default='/mnt/d/Codex/MiniVectorDB/work/jsonl-snapshot-oracle')
 a=p.parse_args()
 root=Path('/mnt/d/Codex/MiniVectorDB')
 assert a.rounds>0 and '/' not in a.output_prefix and '\\' not in a.output_prefix
@@ -22,7 +23,7 @@ for round_no in range(1,a.rounds+1):
   name=a.output_prefix+'-'+version+'-r'+str(round_no)
   env=dict(os.environ,MVDB_BENCH_IMAGE=images[version],
            MVDB_BENCH_COMMIT=a.current_label if version=='current' else a.reference_label,
-           MVDB_ORACLE_BIN=str(root/'work/jsonl-snapshot-oracle'))
+           MVDB_ORACLE_BIN=a.oracle_bin,MVDB_BENCH_INDEX_FIRST=str((round_no-1)%2))
   print('START',name,flush=True)
   log=root/'work'/(name+'.log')
   assert not log.exists()
@@ -51,6 +52,6 @@ for version in images:
   summary[version]['indexed' if indexed else 'unindexed']=metrics
 report={'medians':summary,'samples':samples,'images':images,'metadata':metadata,
         'queries_verified':sum(s['correct_queries'] for s in samples),'restarts':len(samples),
-        'official_score':None,'order':'version order alternates by round; each driver runs unindexed then indexed'}
+        'official_score':None,'order':'version order and indexed/unindexed order both alternate by round'}
 out.write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(summary),flush=True)

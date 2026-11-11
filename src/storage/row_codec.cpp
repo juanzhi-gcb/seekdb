@@ -151,6 +151,28 @@ namespace minivectordb {
     }
     in.end();
   }
+  void LazyRowView::copy_vector(std::size_t index,std::vector<float>& scratch) const {
+    profile::detail::Scope timer(&profile::Snapshot::vector_scratch_copy);
+    if(index>=schema_.columns.size())throw std::out_of_range("row column index");
+    if(schema_.columns[index].type!=ColumnType::Vector)
+      throw Error(ErrorCode::Type,"expected VECTOR column");
+    const auto offset=inline_metadata_?inline_offsets_[index]:offsets_.at(index);
+    binary::Reader in(bytes_.substr(offset));
+    const auto count=in.get(4);
+    if(count!=schema_.columns[index].extent || count>in.remaining()/sizeof(float))
+      throw Error(ErrorCode::Corruption,"invalid VECTOR length");
+    const auto payload=in.take(static_cast<std::size_t>(count)*sizeof(float));
+    // With an unchanged dimension, resize preserves the existing allocation and values.
+    scratch.resize(static_cast<std::size_t>(count));
+    if constexpr(std::endian::native==std::endian::little) {
+      if(!scratch.empty())std::memcpy(scratch.data(),payload.data(),payload.size());
+    } else {
+      binary::Reader components(payload);
+      for(auto& value:scratch)
+        value=std::bit_cast<float>(static_cast<std::uint32_t>(components.get(4)));
+    }
+    timer.bytes(payload.size());
+  }
   const Cell& LazyRowView::operator[](std::size_t index) const {
     if(index>=schema_.columns.size())throw std::out_of_range("row column index");
     auto& cell=inline_metadata_?inline_cells_[index]:cells_.at(index);

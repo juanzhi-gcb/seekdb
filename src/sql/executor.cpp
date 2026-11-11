@@ -3,10 +3,12 @@
 #include "scan_cache.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
+#include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
 #include "../storage/binary.hpp"
 #include <limits>
+#include <span>
 namespace minivectordb {
   namespace {
     std::string index_vector(const Cell& cell) {
@@ -69,9 +71,18 @@ namespace minivectordb {
           throw Error(ErrorCode::Corruption,"row primary key disagrees with index");
       }
       const Cell& operator[](std::size_t index) const { return lazy_?(*lazy_)[index]:eager_[index]; }
+      std::span<const float> vector_for_distance(std::size_t index,std::vector<float>& scratch) const {
+        if(lazy_) {
+          lazy_->copy_vector(index,scratch);
+          return scratch;
+        }
+        return std::get<std::vector<float>>(eager_[index]);
+      }
       bool matches(const std::vector<sql::BoundPredicate>& predicates) const {
         for(const auto& p:predicates) {
-          int cmp=sql::compare_cells((*this)[p.column],p.value);
+          const Cell& cell=(*this)[p.column];
+          profile::detail::Scope timer(&profile::Snapshot::predicate_evaluation);
+          int cmp=sql::compare_cells(cell,p.value);
           if((p.op=="="&&cmp!=0)||(p.op=="<"&&cmp>=0)||(p.op=="<="&&cmp>0)||(p.op==">"&&cmp<=0)||(p.op==">="&&cmp<0))return false;
         }
         return true;
@@ -136,12 +147,38 @@ namespace minivectordb {
       else store.scan_in(s.id,callback);
     }
     void scan_select(const Schema& s,const sql::Bound& b,ExecutionInfo& info,
-                     const std::function<void(std::int64_t,const SelectRow&)>& visit) {
+                     const std::function<void(std::int64_t,const SelectRow&)>& visit,
+                     bool allow_snapshot=false) {
+      profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       auto callback=[&](auto key,auto bytes) {
+        profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
         ++info.rows_examined;
         SelectRow row(s,key,bytes,options.selective_decode,info);
         if(row.matches(b.predicates))visit(key,row);
       };
+      if(allow_snapshot && !b.primary_lookup && options.table_scan_snapshot && options.scan_snapshot_bytes>0) {
+        try {
+          if(snapshot.ready(s.id,0)) {
+            snapshot.scan([&](auto key,auto bytes) {
+              ++info.snapshot_rows_examined;
+              callback(key,bytes);
+            });
+          } else {
+            snapshot.start(s.id,0,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
+            if(snapshot.building()) {
+              store.scan_in(s.id,[&](auto key,auto bytes) {
+                callback(key,bytes);
+                // Retain every validated row, including rows rejected by this filter.
+                snapshot.append(key,bytes);
+              });
+              snapshot.finish();
+            } else store.scan_in(s.id,callback);
+          }
+        } catch(...) {
+          snapshot.clear();throw;
+        }
+        return;
+      }
       if(b.primary_lookup) {
         if(auto raw=store.get_in(s.id,*b.primary_lookup))callback(*b.primary_lookup,*raw);
       } else store.scan_in(s.id,callback);
@@ -180,7 +217,13 @@ namespace minivectordb {
       }
       if(b.order.size()==1&&!b.order[0].descending&&b.order[0].expression.query&&statement.limit&&limit<=options.memory_budget_bytes/(4*sizeof(Neighbor))) {
         const auto&e=b.order[0].expression;
+        std::vector<float> vector_scratch;
         auto winners=exact_top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
+          auto consume_row=[&](std::int64_t key,const SelectRow& row) {
+            ++info.distances_computed;
+            if(options.reuse_vector_scratch)visit(key,row.vector_for_distance(e.column,vector_scratch));
+            else visit(key,std::get<std::vector<float>>(row[e.column]));
+          };
           std::optional<VectorIndex> index;
           if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
             if(candidate.column==e.column) { index=candidate; break; }
@@ -196,12 +239,10 @@ namespace minivectordb {
               snapshot.scan([&](auto key,auto bytes) {
                 ++info.rows_examined;++info.snapshot_rows_examined;
                 SelectRow row(s,key,bytes,options.selective_decode,info);
-                if(row.matches(b.predicates)) {
-                  ++info.distances_computed;visit(key,std::get<std::vector<float>>(row[e.column]));
-                }
+                if(row.matches(b.predicates))consume_row(key,row);
               });
             } else if(options.paired_index_scan) {
-              snapshot.start(s.id,index->id,options.scan_snapshot_bytes);
+              snapshot.start(s.id,index->id,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
               try {
                 store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
                   ++info.vector_index_entries_examined;
@@ -224,10 +265,7 @@ namespace minivectordb {
               ++info.rows_examined;
               fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
             });
-          } else scan_select(s,b,info,[&](auto key,const SelectRow&r) {
-            ++info.distances_computed;
-            visit(key,std::get<std::vector<float>>(r[e.column]));
-          });
+          } else scan_select(s,b,info,consume_row,true);
         });
         info.snapshot_bytes=snapshot.bytes();
         for(const auto&winner:winners) {
@@ -284,7 +322,10 @@ namespace minivectordb {
       auto statement=sql::parse(text);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.
-      if(statement.kind!=sql::Statement::Select)snapshot.clear();
+      if(statement.kind!=sql::Statement::Select) {
+        if(options.reuse_scan_snapshot_buffer)snapshot.invalidate();
+        else snapshot.clear();
+      }
       ExecutionInfo info;
       if(statement.kind==sql::Statement::Begin) {
         if(active)throw Error(ErrorCode::Transaction,"transaction already active");

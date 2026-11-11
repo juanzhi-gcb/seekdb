@@ -1,8 +1,469 @@
 {
   "schema_version": "minivectordb-learning-record-v1",
   "synthetic": false,
-  "scope": "真实开发记录节选，2026-11-09至2026-11-10。用户发言与工具结果分开保留；不是完整聊天导出。原始含令牌的仓库URL未纳入材料。未记录隐藏思维链。",
+  "scope": "真实开发记录节选，2026-11-09至2026-11-11。用户原话、工具结果和Agent分析分别标注；不是完整聊天导出。新增概览、案例、迁移总结为Agent在2026-11-11整理的回顾，不是历史逐字对话或学生个人理解证明。后续Prompt模板为本次新拟、尚未执行。原始含令牌的仓库URL未纳入材料，未记录隐藏思维链。",
   "baseline_commit": "c842a368c3394748d0499386c18f6b465242e141",
+  "material_overview": {
+    "source": "agent_retrospective",
+    "prepared_on": "2026-11-11",
+    "project": "MiniVectorDB：基础SQL、精确向量查询、持久化、事务及崩溃恢复；第二轮工作区独立于初赛。",
+    "material_purpose": "将任务要求、实际用户指令、Agent方案和反证串成可核验的开发学习记录，不提供本地评分或排名预测。",
+    "reading_order": [
+      "先读版本边界和四条案例，再按引用查看用户原话及实验；完整记录继续保留。",
+      "最新性能/正确性证据为e57–e62，早期测量各自只适用于当时版本和环境。"
+    ],
+    "current_state": {
+      "base_commit": "64f43d1bf56af8a19eace2ddf44bae40807e6c40",
+      "local_work": "本次用户授权发布快照包含已验证的无索引快照、arena复用、vector scratch、Dockerfile、测试证据和整理后的学习材料；最终SHA以同一次Git提交为准，未正式提测。",
+      "local_validation": "最终代码38/38内部测试、20/20公开用例、12000实际JSONL查询/12重启；本次只改材料，没有重跑并冒记数据库实验。",
+      "official_status": "没有当前本地版本的正式性能/Prompt分数；用户提供的8b7054成功1/失败0仅为历史平台汇总。"
+    },
+    "provenance": {
+      "user": "conversations保留用户实际发言或明确标记的节选，原话不改写；转发组织者说明不算用户独立技术判断。",
+      "agent": "假设、代码方案、审查解释和以下复盘由Agent产生；新增结构化总结不会补足尚未记录的用户个人理解。",
+      "tools": "experiments为当时工具结果的摘要或节选，保留版本、条件、负面结果及原始文件定位。"
+    },
+    "remaining_gap": "尚无足够用户亲自解释因果、取舍与迁移的原话。现有指令可证明用户提出了测量和自检要求，不能据此证明用户已掌握每项实现。",
+    "causal_limit": "以下演变描述实际指令包含的要求；没有做过Prompt本身的随机对照，数据库性能变化不能直接归因于某句话或换算为Prompt分数。"
+  },
+  "prompt_requirement_evolution": {
+    "source": "agent_retrospective",
+    "scope": "按已有原话归纳要求的变化，不补造历史Prompt修订稿，不推断用户当时未表达的心理或理解。",
+    "steps": [
+      {
+        "title": "先查题包和现有代码",
+        "prompt": {
+          "id": "u01",
+          "pointer": "/conversations/0/content",
+          "quote": "那先检查一下 seekdb 仓库，找找正式题包、测试驱动和公开用例，看看现有代码是什么情况，再制定实现计划。"
+        },
+        "explicit_requirement": "在制定实现计划前检查正式题包、测试驱动、公开用例和代码现状。",
+        "why_it_matters": "把协议和验收入口作为输入；自研测试通过不能代替正式接口证据。",
+        "evidence_refs": [
+          {
+            "id": "e32",
+            "pointer": "/experiments/31/output"
+          },
+          {
+            "id": "e33",
+            "pointer": "/experiments/32/output"
+          },
+          {
+            "id": "e34",
+            "pointer": "/experiments/33/output"
+          }
+        ]
+      },
+      {
+        "title": "从完成功能到要求同条件对照",
+        "prompt": {
+          "id": "u06",
+          "pointer": "/conversations/5/content",
+          "quote": "继续下一阶段，先看看正式题包和测试驱动有没有更新，再做按需解码和降低写入放大的优化，跑对照实验确认收益。还是全部放 D 盘，别动初赛分支，先不推送、不提测。"
+        },
+        "explicit_requirement": "按需解码、写放大优化须跑对照实验，同时限定D盘、分支和不推送范围。",
+        "why_it_matters": "明确优化需要证据；高命中率的反例会暴露额外校验/解码成本。",
+        "evidence_refs": [
+          {
+            "id": "e15",
+            "pointer": "/experiments/14/output"
+          },
+          {
+            "id": "e16",
+            "pointer": "/experiments/15/output"
+          },
+          {
+            "id": "e17",
+            "pointer": "/experiments/16/output"
+          }
+        ]
+      },
+      {
+        "title": "先分离环境成本，再选优化方向",
+        "prompt": {
+          "id": "u09",
+          "pointer": "/conversations/8/content",
+          "quote": "就按这个方案继续，先做耗时拆分和两种 D 盘存储路径的对照，再根据结果决定缓存还是批量读取。还是全部放 D 盘，别动初赛分支，不改全局设置，先不推送、不提测。"
+        },
+        "explicit_requirement": "先拆耗时并比较两种D盘路径，根据结果决定缓存还是批量读取。",
+        "why_it_matters": "区分环境迁移收益与代码收益，不将相互包含的计时阶段相加。",
+        "evidence_refs": [
+          {
+            "id": "e21",
+            "pointer": "/experiments/20/output"
+          },
+          {
+            "id": "a12",
+            "pointer": "/agent_observations/11/content"
+          }
+        ]
+      },
+      {
+        "title": "把版本和状态一致性纳入验收",
+        "prompt": {
+          "id": "u19",
+          "pointer": "/conversations/18/content",
+          "quote": "记住修正最后要同步到最新版，优化最好的那一版"
+        },
+        "additional_prompt": {
+          "id": "u28",
+          "pointer": "/conversations/27/content",
+          "quote": "出一点刁钻的问题考考我们的数据库，并优化一下漏洞"
+        },
+        "explicit_requirement": "修复同步最新优化版，并用刁钻问题检查数据库漏洞。",
+        "why_it_matters": "需要锁定实际版本，验证失败响应、已提交数据和重试状态是否相符。",
+        "evidence_refs": [
+          {
+            "id": "e48",
+            "pointer": "/experiments/47/output"
+          },
+          {
+            "id": "e54",
+            "pointer": "/experiments/53/output"
+          },
+          {
+            "id": "e55",
+            "pointer": "/experiments/54/output"
+          }
+        ]
+      },
+      {
+        "title": "要求逐轮自检，而非只收集正收益",
+        "prompt": {
+          "id": "u35",
+          "pointer": "/conversations/34/content",
+          "quote": "不断优化，直至到你觉得ok了为止，优化完一轮之后就自觉检查自己的薄弱点，然后针对薄弱点继续优化"
+        },
+        "explicit_requirement": "每轮优化后检查薄弱点并继续处理。",
+        "why_it_matters": "将初版频繁更新退化、实验顺序偏差、内存成本带入下一轮判断。",
+        "evidence_refs": [
+          {
+            "id": "e57",
+            "pointer": "/experiments/56/output"
+          },
+          {
+            "id": "e58",
+            "pointer": "/experiments/57/output"
+          },
+          {
+            "id": "e59",
+            "pointer": "/experiments/58/output"
+          },
+          {
+            "id": "e60",
+            "pointer": "/experiments/59/output"
+          },
+          {
+            "id": "e61",
+            "pointer": "/experiments/60/output"
+          },
+          {
+            "id": "e62",
+            "pointer": "/experiments/61/output"
+          }
+        ]
+      }
+    ]
+  },
+  "case_studies": [
+    {
+      "id": "case_decode",
+      "source": "agent_retrospective",
+      "title": "按需解码为何先变慢：用反例修正假设",
+      "user_prompt_refs": [
+        {
+          "id": "u06",
+          "pointer": "/conversations/5/content",
+          "quote": "继续下一阶段，先看看正式题包和测试驱动有没有更新，再做按需解码和降低写入放大的优化，跑对照实验确认收益。还是全部放 D 盘，别动初赛分支，先不推送、不提测。"
+        }
+      ],
+      "problem": "构造较少的列值是否就能降低完整SQL耗时？行仍必须完整读取和校验。",
+      "agent_hypothesis": "过滤后才构造向量可少做对象分配；先用开关隔离按需解码与批量写入两个因素。",
+      "counterevidence": "e15中100%命中时lazy为1454.919ms，eager为830.881ms；高命中时重复逐分量转换使原假设不足。",
+      "correction": "Agent保留失败数据，改为完整校验后复制float32位模式，并核对正负零、次正规数和有限极值；没有省略坏数据检查。",
+      "result": "e17是历史8f1a679的12样本480查询四组合实验。整体组合查询17032.741→16633.361ms，约2.34%；该数同时含两因素，不能称为按需解码单项收益，更不能把专项改善当端到端改善。",
+      "transfer": "可迁移的问题提法：既测高选择性，也测全部命中；分别记录读取、校验、对象构造和输出成本。优化对象生命周期不等于减少物理I/O。",
+      "boundary": "这是历史代码阶段，不能用其耗时代表最新JSONL运行版本；迁移原则尚未在其他项目验证。",
+      "evidence_refs": [
+        {
+          "id": "a08",
+          "pointer": "/agent_observations/7/content"
+        },
+        {
+          "id": "a10",
+          "pointer": "/agent_observations/9/content"
+        },
+        {
+          "id": "e15",
+          "pointer": "/experiments/14/output"
+        },
+        {
+          "id": "e16",
+          "pointer": "/experiments/15/output"
+        },
+        {
+          "id": "e17",
+          "pointer": "/experiments/16/output"
+        }
+      ],
+      "files": [
+        "docs/optimization-results.md",
+        "docs/optimization-plan.md"
+      ]
+    },
+    {
+      "id": "case_baseline",
+      "source": "agent_retrospective",
+      "title": "先测指定上传版：有索引不一定更快",
+      "user_prompt_refs": [
+        {
+          "id": "u18",
+          "pointer": "/conversations/17/content_excerpt",
+          "quote": "先告诉我；这一版的性能指标是多少"
+        },
+        {
+          "id": "u19",
+          "pointer": "/conversations/18/content",
+          "quote": "记住修正最后要同步到最新版，优化最好的那一版"
+        }
+      ],
+      "problem": "用户追问0e954这一个提交的指标，旧缓存实验不能当作它的性能结果。",
+      "agent_hypothesis": "先用实际Docker入口和独立答案建立同一数据、同一SQL的基线，再定位差异。",
+      "counterevidence": "e37中旧0e954有索引35521.056ms，无索引6521.674ms；“已有向量索引”本身不能证明提速。",
+      "correction": "Agent转向同步遍历，减少索引扫描后逐条回查基表的重复导航；e38仍验证全部行。之后另做实际JSONL旧新对照。",
+      "result": "e41历史配对扫描阶段有索引35521.056→17491.502ms；文件和物理I/O未下降，主要收益不能叙述为少读磁盘。e40中的长文本退化仍保留。",
+      "transfer": "可迁移的问题提法：指定Commit、镜像、工作负载和答案来源，再问收益；同时保留未改路径作控制，避免版本差异或环境差异混入结论。",
+      "boundary": "这条性能链不证明0e954隐藏正式用例的具体失败原因；用户没有提供该隐藏断言日志。",
+      "evidence_refs": [
+        {
+          "id": "a20",
+          "pointer": "/agent_observations/19/content"
+        },
+        {
+          "id": "e37",
+          "pointer": "/experiments/36/output"
+        },
+        {
+          "id": "e38",
+          "pointer": "/experiments/37/output"
+        },
+        {
+          "id": "e40",
+          "pointer": "/experiments/39/output"
+        },
+        {
+          "id": "e41",
+          "pointer": "/experiments/40/output"
+        }
+      ],
+      "files": [
+        "docs/jsonl-baseline-0e954.md",
+        "docs/paired-scan-results.md"
+      ]
+    },
+    {
+      "id": "case_ack",
+      "source": "agent_retrospective",
+      "title": "刁钻测试检查状态：失败响应不一定代表写入未发生",
+      "user_prompt_refs": [
+        {
+          "id": "u28",
+          "pointer": "/conversations/27/content",
+          "quote": "出一点刁钻的问题考考我们的数据库，并优化一下漏洞"
+        }
+      ],
+      "problem": "在已支持的SQL和协议范围内，确认响应与提交状态是否一致；检查错误后重试可能产生的后果。",
+      "agent_hypothesis": "Agent将“刁钻”落实到资源边界、长请求ID、事务状态和重试结果，而不是把未支持语法一律算成漏洞。",
+      "counterevidence": "e54在RLIMIT_NOFILE=4、65510字符请求ID时，INSERT返回ok:false，随后SELECT却能读到已提交行。",
+      "correction": "Agent分离响应ID与结果临时文件；独立审查又加强测试的行列数和重试数据断言，避免比较器漏报。",
+      "result": "e55记录36/36内部及公开/模型验证通过，实际JSONL前后约1%差异按基本持平处理。修复的是已复现的状态确认漏洞，不将其指认为未知正式失败根因。",
+      "transfer": "可迁移的问题提法：对失败响应同时核对副作用、事务状态、重试、重启后的数据；故障注入的断言应针对不变量而不只看进程是否退出。",
+      "boundary": "进程强杀/系统调用失败测试不是断电或任意磁盘损坏保证；不证明任意客户端自动重试安全。",
+      "evidence_refs": [
+        {
+          "id": "a29",
+          "pointer": "/agent_observations/28/content"
+        },
+        {
+          "id": "e54",
+          "pointer": "/experiments/53/output"
+        },
+        {
+          "id": "e55",
+          "pointer": "/experiments/54/output"
+        }
+      ],
+      "files": [
+        "docs/adversarial-results.md",
+        "bench/results/adversarial-20261110/manifest.json"
+      ]
+    },
+    {
+      "id": "case_unindexed",
+      "source": "agent_retrospective",
+      "title": "无索引三轮迭代：测热点、修复退化、验证代价",
+      "user_prompt_refs": [
+        {
+          "id": "u33",
+          "pointer": "/conversations/32/content",
+          "quote": "无索引是我们的弱点部分是吗"
+        },
+        {
+          "id": "u34",
+          "pointer": "/conversations/33/content",
+          "quote": "可以，按你的方法进实验"
+        },
+        {
+          "id": "u35",
+          "pointer": "/conversations/34/content",
+          "quote": "不断优化，直至到你觉得ok了为止，优化完一轮之后就自觉检查自己的薄弱点，然后针对薄弱点继续优化"
+        }
+      ],
+      "problem": "无索引路径相对较弱，持续优化需要先判断成本来自I/O、遍历还是对象构造。",
+      "agent_hypothesis": "e57诊断pread仅0.904ms/60查询，总计316.443ms；Agent优先尝试有界原始行复用，随后优化重复分配。包含阶段不能相加，诊断时长不用于性能结论。",
+      "counterevidence": "e58主场景变快，但每三读一更新周期151.067→161.286ms；测试夹具误建双VECTOR列和三模式中间位置固定也都作为实验问题保留。",
+      "correction": "先简化禁用/拒绝路径，再将缓存失效与内存释放分开，最后复用查询内向量临时空间。各项有独立开关，失效后仍完整重建，距离和完整行校验保持不变；六轮轮换全部模式位置复测。",
+      "result": "最终同二进制核心738.615→415.285ms；真实JSONL对上传64f43d1，无索引4847.382→2922.435ms，有索引3103.185→2939.265ms。两种口径分开，不相乘历史倍率。",
+      "cost_and_uncertainty": "实际无索引容器峰值约51.01→58.05MiB，有一次快照构建成本。超容量初三轮约+4.34%，追加六轮约-2.25%且有正负样本，按接近持平解释。arena单项短读写周期参考152.732、复用154.729ms，近中性；不能只看查询变快。",
+      "validation": "38/38内部、20/20公开、12000实际JSONL查询及12重启。64MiB容器先暖小表再扩到20000行，通过答案及强杀恢复检查；交换限制在本机未被强制执行，已记录真实环境。",
+      "transfer": "可迁移的问题提法：缓存实验同时包含连续读、写后连续读、每次写读、超容量；报告构建/失效成本及驻留内存。复用内存不复用旧内容的有效性证明。",
+      "boundary": "这是本地实验结论，不是正式隐藏准入、Prompt有效性或排名保证；本轮没有用户亲自解释以上机制的记录。",
+      "evidence_refs": [
+        {
+          "id": "e57",
+          "pointer": "/experiments/56/output"
+        },
+        {
+          "id": "e58",
+          "pointer": "/experiments/57/output"
+        },
+        {
+          "id": "e59",
+          "pointer": "/experiments/58/output"
+        },
+        {
+          "id": "e60",
+          "pointer": "/experiments/59/output"
+        },
+        {
+          "id": "e61",
+          "pointer": "/experiments/60/output"
+        },
+        {
+          "id": "e62",
+          "pointer": "/experiments/61/output"
+        }
+      ],
+      "files": [
+        "docs/unindexed-results.md",
+        "bench/results/unindexed-20261111/manifest.json",
+        "bench/results/unindexed-20261111/unindexed-v4-short.summary.json",
+        "bench/results/unindexed-20261111/unindexed-resource-v2/result.json"
+      ]
+    }
+  ],
+  "historical_boundaries": [
+    {
+      "topic": "距离排序",
+      "historical_refs": [
+        {
+          "id": "a04",
+          "pointer": "/agent_observations/3/content"
+        },
+        {
+          "id": "e07",
+          "pointer": "/experiments/6/output"
+        }
+      ],
+      "current_rule": "早期平方距离排序结论已由e43/e46/a25纠正。当前按返回的欧氏距离排序，返回值相等时按有符号主键升序。",
+      "resolution_refs": [
+        {
+          "id": "e43",
+          "pointer": "/experiments/42/output"
+        },
+        {
+          "id": "e46",
+          "pointer": "/experiments/45/output"
+        },
+        {
+          "id": "a25",
+          "pointer": "/agent_observations/24/content"
+        },
+        {
+          "id": "e56",
+          "pointer": "/experiments/55/output"
+        }
+      ]
+    },
+    {
+      "topic": "float32下溢和远端修复",
+      "historical_refs": [
+        {
+          "id": "e49",
+          "pointer": "/experiments/48/output"
+        }
+      ],
+      "current_rule": "e49描述0e954旧版拒绝1e-400，不应套用到8b7054。e48保留远端修复，a30明确8b7054已接受该下溢输入。",
+      "resolution_refs": [
+        {
+          "id": "e48",
+          "pointer": "/experiments/47/output"
+        },
+        {
+          "id": "e56",
+          "pointer": "/experiments/55/output"
+        },
+        {
+          "id": "a30",
+          "pointer": "/agent_observations/29/content"
+        }
+      ]
+    },
+    {
+      "topic": "协议、平台结果和测试数量",
+      "historical_refs": [
+        {
+          "id": "a01",
+          "pointer": "/agent_observations/0/content"
+        },
+        {
+          "id": "e32",
+          "pointer": "/experiments/31/output"
+        },
+        {
+          "id": "e36",
+          "pointer": "/experiments/35/output"
+        },
+        {
+          "id": "e55",
+          "pointer": "/experiments/54/output"
+        }
+      ],
+      "current_rule": "早期缺协议/dev-tsv和测试数量均是历史状态。当前默认JSONL，38项内部测试；公开通过不代表隐藏全部通过。8b7054平台成功1/失败0不提供当前版本或两项原始分。",
+      "resolution_refs": [
+        {
+          "id": "e33",
+          "pointer": "/experiments/32/output"
+        },
+        {
+          "id": "e56",
+          "pointer": "/experiments/55/output"
+        },
+        {
+          "id": "e61",
+          "pointer": "/experiments/60/output"
+        }
+      ]
+    }
+  ],
+  "future_task_prompt": {
+    "source": "agent_authored",
+    "created_on": "2026-11-11",
+    "status": "new_template_not_executed",
+    "purpose": "供后续实际开发使用，不放入历史用户对话，也不作为已完成的学习表现或Prompt A/B结果。",
+    "text": "在 D:/Codex/MiniVectorDB/repo 的 2026-competition-round2 工作区继续优化。先记录HEAD、未提交改动、被测镜像和题包版本；所有构建、数据和日志放D盘，不改全局设置或初赛分支，本轮不提交、推送或提测。\n先用测量列出至多三个热点及证据缺口，选一项提出可证伪假设。区分环境、物理I/O、完整校验、对象构造、距离和输出成本；包含计时不相加。\n设计同条件基线和独立答案，分别控制各优化开关。覆盖冷查询、重复查询、写后读、超容量及数值/事务边界；性能计时关闭诊断探针，运行顺序轮换，其他重任务暂停。\n实现前明确不变量与失败判据，验证测试能发现目标错误或预期行为差异。不得通过跳过完整校验、改变返回距离排序或减少提交保障取得速度。\n发现退化时保存原始数据，定位后复测；实验脚本/比较器出错也要记录。报告总耗时、一次构建成本、峰值与驻留内存、文件/物理I/O差别，不只选最好样本。\n通过必要回归后，用实际Docker入口复验。输出同版本对照、保留或撤回决定、适用边界和下一项仍缺的证据；局部收益不冒充正式分数。若继续优化需要改变正确性契约或证据不足，明确收敛原因。",
+    "adaptation_note": "这是依据当前项目归纳的Agent模板。其他数据库的协议、损坏检测与持久化契约须重新核对，不能直接套用结论。"
+  },
   "conversations": [
     {
       "id": "u01",
@@ -159,6 +620,46 @@
       "id": "u30",
       "role": "user",
       "content": "先推动上去给我branch和commit"
+    },
+    {
+      "id": "u31",
+      "role": "user",
+      "content": "Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。注意这个"
+    },
+    {
+      "id": "u32",
+      "role": "user",
+      "content": "补充的规则说明"
+    },
+    {
+      "id": "u33",
+      "role": "user",
+      "content": "无索引是我们的弱点部分是吗"
+    },
+    {
+      "id": "u34",
+      "role": "user",
+      "content": "可以，按你的方法进实验"
+    },
+    {
+      "id": "u35",
+      "role": "user",
+      "content": "不断优化，直至到你觉得ok了为止，优化完一轮之后就自觉检查自己的薄弱点，然后针对薄弱点继续优化"
+    },
+    {
+      "id": "u36",
+      "role": "user",
+      "content": "这版的primpt怎么样"
+    },
+    {
+      "id": "u37",
+      "role": "user",
+      "content": "按你的理解优化prompt"
+    },
+    {
+      "id": "u38",
+      "role": "user",
+      "content": "继续"
     }
   ],
   "experiments": [
@@ -556,6 +1057,48 @@
       "purpose": "与用户提供的平台成功提交进行格式和行为对照",
       "output": "8b7054是当前HEAD祖先；Dockerfile、.dockerignore、main.cpp相同；协议仅有长ID缓冲修复。两版实际Docker各公开20/20、95SQL通过；各50通用检查和58报文，57条逐字节相同，唯一差异为返回距离均为1时旧版主键2、1，新版正确为1、2。共2次正常重启、2次强杀恢复。最新运行镜像仍为e1cdb1e7239b。两份学习材料保持相同、合法且小于128KiB。",
       "evidence": "bench/results/successful-version-20261110/manifest.json"
+    },
+    {
+      "id": "e57",
+      "source": "tool",
+      "purpose": "先拆分无索引成本",
+      "output": "60查询诊断中位316.443ms，回调外85.309、全行校验75.982、物化38.772、距离33.039、pread0.904；包含阶段不相加。正常计时另跑。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e58",
+      "source": "tool",
+      "purpose": "发现第一轮快照的负面结果",
+      "output": "主场景764.182→455.031ms，但每三读一更新完整周期151.067→161.286ms。最初两个VECTOR的测试夹具错误已修正；随后baseline RED命中预期快照行计数。禁用/拒绝路径取消逐行append包装。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e59",
+      "source": "tool",
+      "purpose": "单arena复用与实验顺序纠错",
+      "output": "删除后保留容量用例在旧实现真实RED；失效只保留分配，所有内容重新完整校验。六轮轮换短读写周期release 163.174→reuse 154.729ms；保留RSS代价。初五轮正反序未平衡中间模式，独立审查指出后重跑，旧数据保留。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e60",
+      "source": "tool",
+      "purpose": "查询内向量临时空间复用",
+      "output": "旧路径候选向量Cell计数非零而新要求零，真实RED后实现。32种SQL组合、位模式和零新增分配测试通过；完整行校验及距离累加不变。最终六轮核心参考738.615→415.285ms；单独scratch从456.239ms继续下降。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e61",
+      "source": "tool",
+      "purpose": "最终容器、实际协议与负面复验",
+      "output": "38/38内部、20/20公开95SQL、273模型/2kill、runtime通过；12000真实JSONL查询12重启通过。无索引4847.382→2922.435ms；有索引3103.185→2939.265ms。超容量初3轮约+4.34%，追加6轮238.785→233.422ms按接近持平解释，不隐藏负面记录。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e62",
+      "source": "tool",
+      "purpose": "小表预热后大表写入资源与崩溃检查",
+      "output": "64MiB容器先预热1000行快照，再扩至20000行约78.125MiB逻辑文本，超容量回退和未提交DELETE强杀恢复通过；保留当前/峰值/交换观测，WSL不能保证no-swap，不宣称正式准入。",
+      "evidence": "bench/results/unindexed-20261111/manifest.json"
     }
   ],
   "agent_observations": [
@@ -715,38 +1258,45 @@
     "材料路径在官方占位根目录和题面agent/conversation.json之间存在差异；目前两处保存字节相同的同一份材料。",
     "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。",
     "Snapshot and numeric fixes are based on latest d55b183. This record is packaged before the user-authorized GitHub push; no formal submission by the agent. Local/public checks do not establish hidden29 admission or an official score; the platform failure cause is unconfirmed without logs. WSL cannot enforce no-swap; The integrated version preserves the remote signed-underflow-to-zero repair. User prompts are authentic; agent analysis is not attributed to the user.",
-    "本轮正式失败记录仍为0e954旧版，不能据此宣称1349已正式失败或通过。材料导航由Agent生成，只索引已有真实字符串；不保证分数提高，学生自身理解仅限已记录发言。"
+    "本轮正式失败记录仍为0e954旧版，不能据此宣称1349已正式失败或通过。材料导航由Agent生成，只索引已有真实字符串；不保证分数提高，学生自身理解仅限已记录发言。",
+    "用户确认Prompt有效性文字是规则提醒，不是某次提交失败。材料摘要字段含义未由平台明确；不伪造内部评价字段，不自评分或换算。"
   ],
   "final_validation": {
     "source": "tool",
-    "internal_log_tail": "      Start 36: storage_adversarial\n36/36 Test #36: storage_adversarial ..............   Passed  248.41 sec\n\n100% tests passed, 0 tests failed out of 36\n\nTotal Test time (real) = 450.33 sec",
-    "reviewed_targets": "    Start 36: storage_adversarial\n3/3 Test #36: storage_adversarial ..............   Passed  254.94 sec\n\n100% tests passed, 0 tests failed out of 3\n\nTotal Test time (real) = 301.52 sec",
+    "internal_log_tail": "38/38 Test #38: core_vector_scratch ..............   Passed    1.85 sec\n\n100% tests passed, 0 tests failed out of 38\n\nTotal Test time (real) = 472.12 sec",
     "runtime_output": "PASS runtime: default JSONL, read-only root, network disabled, 2 CPU/512 MiB, persistence and EOF/shutdown rollback",
-    "image_ids": "sha256:df321fb1d31642c8f0dfd567bf81613c871158c82e86370727913273170819e6\nsha256:e1cdb1e7239b915403b846f0c78ab19a4d032e58ffc77c6aba6d05552a38bc07",
-    "reviewed_test_image": "sha256:82ad1cc207ad63fe02cf4e1b1ed25f8fb3b522d9e60e81061b985255899e6128",
-    "state": "Verified snapshot packaged for user-authorized GitHub upload; final commit is recorded externally to avoid self-referential SHA. No formal submission.",
-    "successful_version_comparison": {
-      "source": "tool",
-      "checks_per_version": 50,
-      "wire_messages_per_version": 58,
-      "byte_identical_messages": 57,
-      "public_per_version": "20/20,95 SQL",
-      "report": "docs/successful-version-compatibility.md"
-    }
+    "image_ids": "sha256:a5e6e4bd0ed4493e8525d91d67867c32574e5a5ab8ffc5f67387c79177ff00f7\nsha256:91fe268d07c2c0da849ef87dc00eebb96e5a9df5c2f4d9f41ac27b05ce6da856",
+    "public": "20/20,95 SQL",
+    "model": {
+      "passed": true,
+      "scope": "independent JSONL Docker model/crash diagnostic",
+      "model_checks": 273,
+      "mutations": 150,
+      "modes": [
+        "exact",
+        "ann"
+      ],
+      "crash_restarts": 2
+    },
+    "runtime_queries": 12000,
+    "runtime_restarts": 12,
+    "state": "Verified source snapshot prepared for user-authorized GitHub upload. Source, Dockerfile and learning material share the enclosing commit. No formal submission; historical validations remain in prior experiments."
   },
   "performance_caveats": {
     "source": "agent",
     "content": "首轮768维中位100.755->110.743ms，退化9.91%；保留原始负面样本后追加七轮，得到107.637->101.796ms，减少5.43%。同一代码未修改，方向反转说明此项对运行波动敏感，不能保证768维稳定收益。profile诊断会增加观测开销，不混入计分或三轮结果。",
-    "wide_repeat": "{\"medians\": {\"wide\": {\"scalar\": {\"write_ms\": 529.657912, \"index_build_ms\": 38.8422, \"query_total_ms\": 107.637214, \"query_unfiltered_ms\": 65.55252, \"query_filtered_ms\": 42.084694, \"first_query_ms\": 14.817935, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39724, \"local_cgroup_peak_bytes\": 55902208}, \"ascii_blocks\": {\"write_ms\": 532.787699, \"index_build_ms\": 40.2297, \"query_total_ms\": 101.795921, \"query_unfiltered_ms\": 62.224419, \"query_filtered_ms\": 40.002865, \"first_query_ms\": 13.419974, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39928, \"local_cgroup_peak_bytes\": 55934976}}}, \"samples\": 14, \"validated_queries\": 560, \"reopen_checks\": 14, \"diagnostic\": false, \"no_official_score\": true}"
+    "wide_repeat": "{\"medians\": {\"wide\": {\"scalar\": {\"write_ms\": 529.657912, \"index_build_ms\": 38.8422, \"query_total_ms\": 107.637214, \"query_unfiltered_ms\": 65.55252, \"query_filtered_ms\": 42.084694, \"first_query_ms\": 14.817935, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39724, \"local_cgroup_peak_bytes\": 55902208}, \"ascii_blocks\": {\"write_ms\": 532.787699, \"index_build_ms\": 40.2297, \"query_total_ms\": 101.795921, \"query_unfiltered_ms\": 62.224419, \"query_filtered_ms\": 40.002865, \"first_query_ms\": 13.419974, \"snapshot_capacity\": 8388608, \"snapshot_rows\": 80000, \"database_bytes\": 19603456, \"churn_ms\": 0, \"process_maxrss_kib\": 39928, \"local_cgroup_peak_bytes\": 55934976}}}, \"samples\": 14, \"validated_queries\": 560, \"reopen_checks\": 14, \"diagnostic\": false, \"no_official_score\": true}",
+    "unindexed": "本轮无索引快照增加最多8MiB arena；失效可保留驻留内存，第二次扫描构建有成本；超容量与交错读写负面结果完整保留。所有分数仍由平台给出。"
   },
   "version_context": {
     "source": "agent",
     "failed_formal_commit": "0e954ffd90c6802ecd9fae4c0ca00eb8553201dd",
-    "latest_uploaded_base": "cc0ae3f5418e8d56ebdb9530e83c96a85c8a36ba",
-    "current_changes": "Verified row CPU optimization, JSONL acknowledgement/state fix, adversarial suites and successful-version comparison packaged together for user-authorized GitHub upload; no formal submission.",
+    "latest_uploaded_base": "64f43d1bf56af8a19eace2ddf44bae40807e6c40",
+    "current_changes": "Verified unindexed snapshot, arena reuse, vector scratch, Dockerfile, test evidence and attributed learning material prepared together for user-authorized GitHub upload. Final SHA is supplied by the enclosing Git commit; no formal submission.",
     "historical_notes": "旧记录中的latest、未上传、1e-400拒绝和平方距离排序须按当时版本理解。e48已合并远端下溢修复，e49在最新版复验。历史结果不是当前版本正式成绩。",
     "reported_successful_commit": "8b7054ad45b76e8055d393fcd3e3d13717a072e8",
-    "reported_success_scope": "User supplied platform aggregate success1/failure0; expanded MySQL/performance/prompt results unavailable."
+    "reported_success_scope": "User supplied platform aggregate success1/failure0; expanded MySQL/performance/prompt results unavailable.",
+    "material_revision": "2026-11-11：整理日期、概览、真实指令要求演变、四条Agent复盘、版本边界和未执行模板；原用户/工具记录保留。"
   },
   "review_navigation": {
     "source": "agent",
@@ -853,12 +1403,58 @@
           }
         ],
         "attribution_limit": "用户要求出题和修复；故障条件、实现和验证由Agent/工具完成，不冒充学生独立技术结论。"
+      },
+      {
+        "chain": "测量无索引弱点并逐轮修正退化",
+        "student_evidence": {
+          "pointer": "/conversations/34/content",
+          "quote": "不断优化，直至到你觉得ok了为止，优化完一轮之后就自觉检查自己的薄弱点，然后针对薄弱点继续优化"
+        },
+        "result_evidence": [
+          {
+            "id": "e57",
+            "pointer": "/experiments/56/output",
+            "quote": "60查询诊断中位316.443ms，回调外85.309、全行校验75.982、物化38.772、距离33.039、pread0.904；包含阶段不相加。正常计时另跑。"
+          },
+          {
+            "id": "e58",
+            "pointer": "/experiments/57/output",
+            "quote": "主场景764.182→455.031ms，但每三读一更新完整周期151.067→161.286ms。最初两个VECTOR的测试夹具错误已修正；随后baseline RED命中预期快照行计数。禁用/拒绝路径取消逐行append包装。"
+          },
+          {
+            "id": "e59",
+            "pointer": "/experiments/58/output",
+            "quote": "删除后保留容量用例在旧实现真实RED；失效只保留分配，所有内容重新完整校验。六轮轮换短读写周期release 163.174→reuse 154.729ms；保留RSS代价。初五轮正反序未平衡中间模式，独立审查指出后重跑，旧数据保留。"
+          },
+          {
+            "id": "e60",
+            "pointer": "/experiments/59/output",
+            "quote": "旧路径候选向量Cell计数非零而新要求零，真实RED后实现。32种SQL组合、位模式和零新增分配测试通过；完整行校验及距离累加不变。最终六轮核心参考738.615→415.285ms；单独scratch从456.239ms继续下降。"
+          },
+          {
+            "id": "e61",
+            "pointer": "/experiments/60/output",
+            "quote": "38/38内部、20/20公开95SQL、273模型/2kill、runtime通过；12000真实JSONL查询12重启通过。无索引4847.382→2922.435ms；有索引3103.185→2939.265ms。超容量初3轮约+4.34%，追加6轮238.785→233.422ms按接近持平解释，不隐藏负面记录。"
+          },
+          {
+            "id": "e62",
+            "pointer": "/experiments/61/output",
+            "quote": "64MiB容器先预热1000行快照，再扩至20000行约78.125MiB逻辑文本，超容量回退和未提交DELETE强杀恢复通过；保留当前/峰值/交换观测，WSL不能保证no-swap，不宣称正式准入。"
+          }
+        ],
+        "attribution_limit": "用户指定持续自检目标；具体假设、实现、测试及审查修正来自Agent/工具，不视作学生独立技术解释，也不把一次迭代拆成多次学习得分。"
       }
     ],
     "excluded_as_independent_learning": [
       "泛泛的继续或帮我优化不自动作为实例。",
       "u16为转发组织者说明，不认作学生独立技术分析。",
       "同一修正链的规划、修复、复测不拆分成多个得分实例。"
+    ],
+    "case_study_order": [
+      "case_decode",
+      "case_baseline",
+      "case_ack",
+      "case_unindexed"
     ]
   }
 }

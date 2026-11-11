@@ -20,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <sys/resource.h>
+#include <unistd.h>
 
 using namespace minivectordb;
 using Clock = std::chrono::steady_clock;
@@ -42,6 +43,13 @@ std::size_t number(const char* arg) {
 }
 double elapsed(Clock::time_point start) {
     return std::chrono::duration<double,std::milli>(Clock::now()-start).count();
+}
+std::uint64_t resident_bytes() {
+    std::ifstream statm("/proc/self/statm");
+    std::uint64_t total=0,resident=0;
+    statm>>total>>resident;
+    const auto page_size=sysconf(_SC_PAGESIZE);
+    return page_size>0?resident*static_cast<std::uint64_t>(page_size):0;
 }
 std::vector<float> random_vector(std::mt19937& rng) {
     std::vector<float> result(dimensions);
@@ -99,6 +107,7 @@ int main(int argc,char** argv) {
         detail::vector_validation_mode=vector_scalar?detail::VectorValidationMode::scalar:detail::VectorValidationMode::batched;
         detail::row_metadata_heap=row_heap;
         const bool ordered=std::getenv("MVDB_ORDERED")!=nullptr;
+        const bool index_present=std::getenv("MVDB_NO_INDEX")==nullptr;
         churn=std::getenv("MVDB_CHURN")!=nullptr;
         require(dimensions>=1&&dimensions<=8192&&groups>=1&&groups<=100&&payload_bytes<=600000,"invalid dataset");
         require(extra_columns<=64,"too many extra columns");
@@ -143,11 +152,20 @@ int main(int argc,char** argv) {
         options.packed_scan_cache_bytes=std::getenv("MVDB_SCAN_CACHE_BYTES")?number(std::getenv("MVDB_SCAN_CACHE_BYTES")):262144;
         options.paired_index_scan=std::getenv("MVDB_PAIRED")!=nullptr;
         options.scan_snapshot_bytes=std::getenv("MVDB_SNAPSHOT_BYTES")?number(std::getenv("MVDB_SNAPSHOT_BYTES")):0;
+        const auto table_snapshot=std::getenv("MVDB_TABLE_SNAPSHOT")?number(std::getenv("MVDB_TABLE_SNAPSHOT")):1;
+        require(table_snapshot<=1,"MVDB_TABLE_SNAPSHOT must be 0 or 1");
+        options.table_scan_snapshot=table_snapshot!=0;
+        const auto reuse_snapshot=std::getenv("MVDB_REUSE_SNAPSHOT")?number(std::getenv("MVDB_REUSE_SNAPSHOT")):1;
+        require(reuse_snapshot<=1,"MVDB_REUSE_SNAPSHOT must be 0 or 1");
+        options.reuse_scan_snapshot_buffer=reuse_snapshot!=0;
+        const auto vector_scratch=std::getenv("MVDB_VECTOR_SCRATCH")?number(std::getenv("MVDB_VECTOR_SCRATCH")):1;
+        require(vector_scratch<=1,"MVDB_VECTOR_SCRATCH must be 0 or 1");
+        options.reuse_vector_scratch=vector_scratch!=0;
         options.data_cache_bytes=std::getenv("MVDB_DATA_CACHE_BYTES")?number(std::getenv("MVDB_DATA_CACHE_BYTES")):0;
         const bool bytewise=std::getenv("MVDB_CRC_BYTEWISE")!=nullptr;
         detail::page_checksum_mode=bytewise?detail::PageChecksumMode::bytewise:detail::PageChecksumMode::slicing_by_8;
         CacheStats write_cache{},query_cache{},write_data_cache{},query_data_cache{};
-        double first_query_ms=0,index_build_ms=0;
+        double first_query_ms=0,second_query_ms=0,index_build_ms=0;
         std::uintmax_t after_index_bytes=0;
         std::vector<Hit> first_results;
         double write_ms=0,all_ms=0,filtered_ms=0,write_cpu_ms=0,query_cpu_ms=0,churn_ms=0,churn_cpu_ms=0;
@@ -155,6 +173,8 @@ int main(int argc,char** argv) {
         profile::Snapshot write_profile{},query_profile{};
         profile::set_enabled(profiling);
         std::uint64_t snapshot_rows=0; std::size_t snapshot_capacity=0;
+        std::uint64_t warm_resident=0,invalidated_resident=0;
+        long query_minor_faults=0;
         std::uint64_t vector_cells=0,filtered_vectors=0,unfiltered_vectors=0,cells=0,examined=0,distances=0;
         std::vector<std::vector<Hit>> results(query_count);
         std::uintmax_t empty_bytes=0,database_bytes=0,after_insert_bytes=0;
@@ -187,7 +207,11 @@ int main(int argc,char** argv) {
             write_profile=profile::snapshot();
             write_cache=db.cache_stats(); write_data_cache=db.data_cache_stats();
             after_insert_bytes=std::filesystem::file_size(path);
-            auto index_start=Clock::now();db.execute("CREATE VECTOR INDEX tv ON t(v)");index_build_ms=elapsed(index_start);
+            if(index_present) {
+                const auto index_start=Clock::now();
+                db.execute("CREATE VECTOR INDEX tv ON t(v)");
+                index_build_ms=elapsed(index_start);
+            }
             after_index_bytes=std::filesystem::file_size(path);
             if(churn) {
                 const auto start=Clock::now(); const auto cpu=std::clock();
@@ -204,14 +228,19 @@ int main(int argc,char** argv) {
                     if(i==0)first_results.push_back({std::get<std::int64_t>(row[0]),std::get<double>(row[1]),std::get<std::string>(row[2])});
                 }});
                 if(i==0)first_query_ms=elapsed(start);
+                else second_query_ms=elapsed(start);
             }
             profile::reset();
             db.reset_cache_stats(); db.reset_data_cache_stats();
+            warm_resident=resident_bytes();
+            rusage before_queries{};
+            require(getrusage(RUSAGE_SELF,&before_queries)==0,"getrusage failed");
             for(std::size_t i=0;i<queries.size();++i) {
                 if(invalidate_every && i%invalidate_every==0) {
                     const auto start=Clock::now(); const auto cpu=std::clock();
                     db.execute("UPDATE t SET g="+std::to_string(records[0].group)+" WHERE id="+std::to_string(keys[0]));
                     churn_ms+=elapsed(start);churn_cpu_ms+=1000.0*(std::clock()-cpu)/CLOCKS_PER_SEC;
+                    if(i==0)invalidated_resident=resident_bytes();
                 }
                 auto& output=results[i];
                 const auto cpu_start=std::clock();
@@ -229,6 +258,9 @@ int main(int argc,char** argv) {
                 examined+=info.rows_examined;
                 distances+=info.distances_computed;
             }
+            rusage after_queries{};
+            require(getrusage(RUSAGE_SELF,&after_queries)==0,"getrusage failed");
+            query_minor_faults=after_queries.ru_minflt-before_queries.ru_minflt;
             database_bytes=std::filesystem::file_size(path);
             query_profile=profile::snapshot();
             query_cache=db.cache_stats(); query_data_cache=db.data_cache_stats();
@@ -299,6 +331,10 @@ int main(int argc,char** argv) {
             metric("page_read_overflow",s.page_read_overflow);
             metric("page_read_packed",s.page_read_packed);
             metric("packed_cache_hit",s.packed_cache_hit);
+            metric("table_scan",s.table_scan);
+            metric("scan_consume",s.scan_consume);
+            metric("predicate_evaluation",s.predicate_evaluation);
+            metric("vector_scratch_copy",s.vector_scratch_copy);
             std::cout<<"}";
         };
         auto emit_cache=[](const CacheStats& c) {
@@ -306,11 +342,17 @@ int main(int argc,char** argv) {
                      <<",\"capacity_bytes\":"<<c.capacity_bytes<<",\"resident_pages\":"<<c.resident_pages<<"}";
         };
         std::cout<<"{\"packed_values\":"<<(options.packed_values?"true":"false")
+                 <<",\"index_present\":"<<(index_present?"true":"false")
                  <<",\"vector_scalar\":"<<(vector_scalar?"true":"false")<<",\"row_heap\":"<<(row_heap?"true":"false")
                  <<",\"extra_columns\":"<<extra_columns
                  <<",\"text_scalar\":"<<(text_scalar?"true":"false")<<",\"unicode_body\":"<<(unicode_body?"true":"false")
                  <<",\"paired_index_scan\":"<<(options.paired_index_scan?"true":"false")<<",\"sparse_keys\":"<<(sparse?"true":"false")<<",\"index_build_ms\":"<<index_build_ms
                  <<",\"invalidate_every\":"<<invalidate_every
+                 <<",\"table_scan_snapshot\":"<<(options.table_scan_snapshot?"true":"false")
+                 <<",\"reuse_scan_snapshot_buffer\":"<<(options.reuse_scan_snapshot_buffer?"true":"false")
+                 <<",\"reuse_vector_scratch\":"<<(options.reuse_vector_scratch?"true":"false")
+                 <<",\"warm_resident_bytes\":"<<warm_resident<<",\"invalidated_resident_bytes\":"<<invalidated_resident
+                 <<",\"query_and_mutation_minor_faults\":"<<query_minor_faults
                  <<",\"snapshot_budget\":"<<options.scan_snapshot_bytes<<",\"snapshot_rows\":"<<snapshot_rows<<",\"snapshot_capacity\":"<<snapshot_capacity
                  <<",\"scan_cache_budget\":"<<options.packed_scan_cache_bytes
                  <<",\"payload_bytes\":"<<payload_bytes<<",\"groups\":"<<groups
@@ -321,6 +363,7 @@ int main(int argc,char** argv) {
         std::cout<<",\"query_data_cache\":";emit_cache(query_data_cache);
         std::cout<<",\"data_cache_budget\":"<<options.data_cache_bytes<<",\"first_query_validated\":true";
         std::cout<<std::setprecision(12)<<",\"first_query_ms\":"<<first_query_ms;
+        std::cout<<",\"second_query_ms\":"<<second_query_ms;
         std::cout<<std::setprecision(12)<<",\"profile_enabled\":"<<(profiling?"true":"false")
                  <<",\"write_cpu_ms\":"<<write_cpu_ms<<",\"query_cpu_ms\":"<<query_cpu_ms<<",\"write_profile\":";
         emit_profile(write_profile);std::cout<<",\"query_profile\":";emit_profile(query_profile);

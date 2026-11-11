@@ -10,14 +10,22 @@ struct Metric {
 struct Snapshot {
   Metric pread,pwrite,fsync,page_checksum,row_validation,row_materialization,row_decode,vector_distance;
   Metric page_read_branch,page_read_overflow,page_read_packed,packed_cache_hit;
+  Metric table_scan,scan_consume,predicate_evaluation,vector_scratch_copy;
   bool operator==(const Snapshot&) const = default;
 };
 // Per-thread diagnostics. Enable/reset only between synchronous operations.
 // Reset preserves the enable flag; disabling preserves the current snapshot.
 // Timings are elapsed (not CPU) nanoseconds, with instrumentation overhead.
-// Only leaf stages are timed: never sum these with enclosing phase timings.
+// table_scan and scan_consume are inclusive scan_select timings: table_scan covers
+// lookup/traversal plus every row callback; scan_consume covers each callback,
+// including validation, materialization, predicates and its visitor. Winner
+// refetch is outside both. Never add these to each other or to leaf timings.
+// Other timed stages are leaves. predicate_evaluation starts after its Cell is
+// materialized and counts evaluated predicates, including a rejecting predicate.
 // page_read_* count typed read requests (including failures), not extra I/O.
 // row_decode combines eager validation/materialization; lazy stages are separate.
+// vector_scratch_copy times candidate copies without creating Cells; bytes count
+// successfully copied float payloads. It is separate from row_materialization.
 // Materialization counts uncached cells. Syscall counts include failed attempts;
 // syscall bytes count only successfully transferred bytes (including short I/O).
 namespace detail {
