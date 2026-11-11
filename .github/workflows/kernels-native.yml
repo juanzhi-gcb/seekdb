@@ -1,0 +1,32 @@
+name: MiniVectorDB native combined kernel selection
+on:
+  push:
+    branches: ['codex/score-kernels-native-20261112']
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch exact public experiment source
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/juanzhi-gcb/seekdb.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Compare scalar, widths and exact SIMD
+        run: bash bench/run_kernel_selection.sh
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-kernels-${{ matrix.sample }}-${{ github.sha }}
+          path: kernel-results/
+          retention-days: 30
