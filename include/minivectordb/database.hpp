@@ -54,9 +54,17 @@ struct Options {
   // Reuse validation proofs of a complete owned raw snapshot. False retains
   // full per-query row validation for controlled comparisons.
   bool validated_snapshot_replay = true;
+  // Compile required field traversal once for zero/one-predicate raw replays.
+  bool projected_snapshot_replay = true;
   // Internal SQL candidates have decoder/cache finiteness proofs. Keep the
   // checked public vector API unchanged; false is the measured reference.
   bool validated_vector_kernel = true;
+  // Interleave independent exact distances, with at most 64 KiB query scratch.
+  // False retains the scalar validated kernel for measured comparisons.
+  bool batched_vector_kernel = true;
+  // New flat vector indexes keep validated table/key references instead of a
+  // second persistent vector payload. Existing version1 indexes retain copies.
+  bool referenced_vector_index = true;
   // Competition recovery model: process SIGKILL, with final fsync before ACK.
   // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;

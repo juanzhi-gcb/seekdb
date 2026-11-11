@@ -30,6 +30,15 @@ namespace minivectordb {
       }
       return result;
     }
+    std::string index_entry(const Schema& schema,const VectorIndex& index,std::int64_t key,const Row& row) {
+      if(!index.referenced)return index_vector(row[index.column]);
+      std::string bytes="MVIR";
+      binary::put(bytes,schema.id);
+      binary::put(bytes,index.column,4);
+      binary::put(bytes,schema.columns[index.column].extent,4);
+      binary::put(bytes,std::bit_cast<std::uint64_t>(key));
+      return bytes;
+    }
     struct StopScan {
     };
     void count_decoded(const Row& row,ExecutionInfo& info) {
@@ -91,6 +100,23 @@ namespace minivectordb {
         return true;
       }
     };
+    std::span<const float> index_candidate(std::string_view bytes,const Schema& schema,
+        const VectorIndex& index,std::int64_t key,const SelectRow& row,std::vector<float>& scratch) {
+      if(index.referenced) {
+        binary::Reader in(bytes);
+        if(in.take(4)!="MVIR" || in.get()!=schema.id || in.get(4)!=index.column ||
+           in.get(4)!=schema.columns[index.column].extent || in.get()!=std::bit_cast<std::uint64_t>(key))
+          throw Error(ErrorCode::Corruption,"invalid vector index reference");
+        in.end();
+        // The current transactional base row owns the vector. A complete paired
+        // traversal checks key-set equality before publishing a reusable cache.
+        return row.vector_for_distance(index.column,scratch);
+      }
+      scratch=read_index_vector(bytes,schema.columns[index.column].extent);
+      if(scratch!=std::get<std::vector<float>>(row[index.column]))
+        throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+      return scratch;
+    }
     struct DistanceCache {
       std::vector<std::pair<const sql::BoundExpr*,double>> values;
       bool same(const sql::BoundExpr&a,const sql::BoundExpr&b)const {
@@ -197,10 +223,15 @@ namespace minivectordb {
     void replay_snapshot(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                          ExecutionInfo& info,const VectorVisitor& visit,std::vector<float>& scratch) {
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      const sql::SnapshotProjection projection(s,e.column,b.predicates);
       try {
         snapshot.scan([&](auto key,auto bytes) {
           profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
           ++info.rows_examined;++info.snapshot_rows_examined;++info.validated_snapshot_rows_examined;
+          if(options.projected_snapshot_replay&&projection.usable()) {
+            if(projection.matches_and_copy(bytes,scratch)) {++info.distances_computed;visit(key,scratch);}
+            return;
+          }
           sql::SnapshotRow row(s,key,bytes);
           if(row.matches(b.predicates)) {
             row.copy_vector(e.column,scratch);
@@ -264,10 +295,8 @@ namespace minivectordb {
             store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.vector_index_entries_examined;++info.rows_examined;
-              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
               SelectRow row(s,key,base,options.selective_decode,info);
-              if(vector!=std::get<std::vector<float>>(row[e.column]))
-                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+              auto vector=index_candidate(bytes,s,*index,key,row,scratch);
               consume(key,row,vector);
             });
           } else {
@@ -317,7 +346,9 @@ namespace minivectordb {
         std::vector<float> vector_scratch;
         // Every source below validates the candidate through SelectRow/index
         // decoding, or reuses owned typed columns from a complete validated scan.
-        const auto top_k=options.validated_vector_kernel?detail::exact_top_k_validated_candidates:exact_top_k;
+        const auto top_k=!options.validated_vector_kernel?exact_top_k:
+            options.batched_vector_kernel?detail::exact_top_k_batched_validated_candidates:
+                                          detail::exact_top_k_validated_candidates;
         auto winners=top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;
@@ -331,9 +362,7 @@ namespace minivectordb {
           if(index) {
             // Exhaustive flat index: exact and ANN mode share recall 1. Read and
             // validate every base row, retaining the established corruption contract.
-            auto consume=[&](auto key,const std::vector<float>& vector,const SelectRow& row) {
-              if(vector!=std::get<std::vector<float>>(row[e.column]))
-                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+            auto consume=[&](auto key,std::span<const float> vector,const SelectRow& row) {
               if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
             };
             if(options.paired_index_scan && snapshot.ready(s.id,index->id)) {
@@ -350,9 +379,9 @@ namespace minivectordb {
               try {
                 store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
                   ++info.vector_index_entries_examined;
-                  auto vector=read_index_vector(bytes,s.columns[e.column].extent);
                   ++info.rows_examined;
                   SelectRow row(s,key,base,options.selective_decode,info);
+                  auto vector=index_candidate(bytes,s,*index,key,row,vector_scratch);
                   consume(key,vector,row);
                   snapshot.append(key,base);
                 });
@@ -365,9 +394,11 @@ namespace minivectordb {
               }
             } else store.scan_in(index->id,[&](auto key,auto bytes) {
               ++info.vector_index_entries_examined;
-              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
               ++info.rows_examined;
-              fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
+              fetch_select(s,key,info,[&](const SelectRow& row) {
+                auto vector=index_candidate(bytes,s,*index,key,row,vector_scratch);
+                consume(key,vector,row);
+              });
             });
           } else if(options.validated_snapshot_replay && options.reuse_vector_scratch && !b.primary_lookup &&
                     options.table_scan_snapshot && snapshot.ready(s.id,0)) {
@@ -485,16 +516,17 @@ namespace minivectordb {
         }
         auto maintain=[&](std::int64_t key,const Row* row) {
           for(std::size_t i=0;i<indexes.size();++i)
-            index_batches[i]->add(key,row?std::optional<std::string>(index_vector((*row)[indexes[i].column])):std::nullopt);
+            index_batches[i]->add(key,row?std::optional<std::string>(index_entry(schema,indexes[i],key,*row)):std::nullopt);
         };
         if(statement.kind==sql::Statement::Create)create_table(store,statement.schema);
         else if(statement.kind==sql::Statement::CreateIndex) {
           auto column=sql::column_index(schema,statement.index_column);
-          auto index=create_vector_index(store,schema,column,statement.index_name);
+          auto index=create_vector_index(store,schema,column,statement.index_name,
+              options.referenced_vector_index&&schema.columns[column].extent>7);
           MutationBatch entries(store,index.id,options.batch_writes);
           store.scan_in(schema.id,[&](auto key,auto bytes) {
             auto row=decode(schema,key,bytes);
-            entries.add(key,index_vector(row[column]));
+            entries.add(key,index_entry(schema,index,key,row));
           });
           entries.flush();
         }

@@ -69,6 +69,39 @@ void scenario(const std::filesystem::path& dir,bool indexed,bool selective,std::
     b=std::make_unique<Database>(dir/"reference",reference);
     reads();
 }
+void projected_layout(const std::filesystem::path& dir,int layout,bool indexed) {
+    Options aopt;aopt.typed_scan_cache=false;aopt.scan_snapshot_bytes=1024*1024;
+    Options bopt=aopt;bopt.projected_snapshot_replay=false;
+    Database a(dir/"projected",aopt),b(dir/"general",bopt);
+    auto both=[&](const std::string& sql) {
+        const auto x=run(a,sql),y=run(b,sql);
+        CHECK(x.rows==y.rows);CHECK(x.columns==y.columns);CHECK(x.error==y.error);
+        return x;
+    };
+    const char* columns[]{
+        "id BIGINT PRIMARY KEY,g VARCHAR(20),v VECTOR(16),prefix VARCHAR(12000),tail VARCHAR(80)",
+        "prefix VARCHAR(12000),v VECTOR(16),id BIGINT PRIMARY KEY,g VARCHAR(20),tail VARCHAR(80)",
+        "tail VARCHAR(80),prefix VARCHAR(12000),id BIGINT PRIMARY KEY,g VARCHAR(20),v VECTOR(16)"};
+    both("CREATE TABLE t("+std::string(columns[layout])+")");
+    const std::string vector="'[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]'";
+    for(int i=0;i<35;++i) {
+        const auto text=i%2?"é":"中";
+        both("INSERT INTO t(id,g,v,prefix,tail) VALUES("+std::to_string(i-17)+",'"+text+"',"+
+             vector+",'"+std::string(std::size_t(i)*37,'x')+"','😀')");
+    }
+    if(indexed)both("CREATE VECTOR INDEX vi ON t(v)");
+    auto reads=[&]() {
+        for(int round=0;round<3;++round)for(auto filter:{""," WHERE g='中'"," WHERE g<'é'",
+            " WHERE prefix>='xx'"," WHERE tail='😀'"," WHERE g='none'"," WHERE id>=-8",
+            " WHERE g='é' AND id<=4"}) {
+            const auto r=both("SELECT id,L2_DISTANCE(v,"+vector+") AS d,prefix,g,tail FROM t"+filter+" ORDER BY d LIMIT 10");
+            CHECK(!r.error);
+            if(round==2)CHECK(r.info.validated_snapshot_rows_examined==35);
+        }
+    };
+    reads();both("BEGIN");both("UPDATE t SET prefix='changed-length',g='é' WHERE id=0");reads();
+    both("ROLLBACK");reads();
+}
 int main() {
     try {
         const auto base=std::filesystem::path(std::getenv("MVDB_TEST_DIR")?std::getenv("MVDB_TEST_DIR"):"/tmp");
@@ -77,6 +110,10 @@ int main() {
         for(bool index:{false,true})for(bool selective:{false,true})for(auto budget:{0U,512U,32768U}) {
             auto path=std::filesystem::path(root)/(std::to_string(index)+std::to_string(selective)+std::to_string(budget));
             std::filesystem::create_directory(path);scenario(path,index,selective,budget);
+        }
+        for(int layout=0;layout<3;++layout)for(bool indexed:{false,true}) {
+            const auto path=std::filesystem::path(root)/("layout-"+std::to_string(layout)+std::to_string(indexed));
+            std::filesystem::create_directory(path);projected_layout(path,layout,indexed);
         }
         std::filesystem::remove_all(root);
         return 0;

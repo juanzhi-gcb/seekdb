@@ -1,16 +1,16 @@
-name: MiniVectorDB native x86 batch experiment
+name: MiniVectorDB native x86 contract comparison
 on:
   push:
     branches: ['codex/score-batch-native-20261111']
 permissions:
   contents: read
 concurrency:
-  group: mvdb-batch-native-${{ github.ref }}
+  group: mvdb-native-contract-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   compare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Fetch exact public source without stored credentials
         shell: bash
@@ -21,20 +21,16 @@ jobs:
           git fetch --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(uname -m)" = x86_64
-          uname -a
-          lscpu
-      - name: Build frozen baseline toolchain and database
+      - name: Validate and compare against formal 1630 baseline
         shell: bash
-        run: |
-          set -euo pipefail
-          docker build --target test --tag mvdb:batch-baseline .
-          docker image inspect --format '{{.Id}}' mvdb:batch-baseline
-      - name: Compare exact batch kernels on native x86_64
-        shell: bash
-        run: bash bench/run_batch_native.sh
+        run: bash bench/run_native_contract.sh
+      - name: Preserve full measurement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-contract-${{ github.sha }}
+          path: native-results/
+          retention-days: 30
       - name: Scope
         if: always()
-        shell: bash
-        run: |
-          echo 'Native x86_64 core-query experiment; shared-runner timing is not the competition E score. Production branch and submitted database implementation are unchanged.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Native x86_64 JSONL T/B/M comparison. Local generated data and shared runner; no official E or Prompt score. Competition branch remains unchanged.' >> "$GITHUB_STEP_SUMMARY"

@@ -8,6 +8,7 @@
 #include <locale.h>
 #include <cstdlib>
 #include <new>
+#include <exception>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -15,8 +16,8 @@ namespace minivectordb::sql {
   }
   namespace {
     // Allocation-free recognition of the lexer's plain numeric-array subset.
-    // Validate the entire grammar before converting any number, preserving
-    // error precedence. Comments/other spellings use the original lexer.
+    // Scan each number once. Callers defer numeric errors until the complete
+    // grammar is accepted; comments/other spellings use the original lexer.
     template<class F> bool plain_vector(std::string_view text,F&& consume) {
       std::size_t i=0;
       auto digit=[](char c){return c>='0'&&c<='9';};
@@ -127,10 +128,18 @@ namespace minivectordb::sql {
         return v.text;
       }
       if(fast_vector && v.kind==Literal::String) {
-        std::size_t count=0;
-        if(plain_vector(v.text,[&](auto){++count;})) {
-          std::vector<double> values;values.reserve(count);
-          (void)plain_vector(v.text,[&](auto component){values.push_back(real(component));});
+        std::vector<double> values;
+        values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
+        std::exception_ptr numeric_error;
+        const bool plain=plain_vector(v.text,[&](auto component){
+          if(numeric_error)return;
+          try {values.push_back(real(component));}
+          catch(const Error&) {numeric_error=std::current_exception();}
+        });
+        if(plain) {
+          // The lexer inspects the complete input before any conversion. A
+          // malformed suffix must still win over an earlier overflow error.
+          if(numeric_error)std::rethrow_exception(numeric_error);
           return make_vector(values,c.extent);
         }
       }

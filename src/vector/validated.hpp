@@ -11,4 +11,10 @@ namespace minivectordb::detail {
 std::vector<Neighbor> exact_top_k_validated_candidates(
     std::span<const float> query,std::size_t k,const VectorSource& source,
     const KeyPredicate& predicate = {});
+// Same contract and bitwise distance/order as the scalar validated path.
+// Batches independent candidates using at most 64 KiB of owned float scratch;
+// tiny/large dimensions and allocation failure use the scalar implementation.
+std::vector<Neighbor> exact_top_k_batched_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,
+    const KeyPredicate& predicate = {});
 }

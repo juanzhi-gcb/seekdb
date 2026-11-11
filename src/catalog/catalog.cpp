@@ -64,14 +64,15 @@ namespace minivectordb {
       if(key>=0)return;
       if(key==INT64_MIN)throw Error(ErrorCode::Corruption,"invalid vector index identifier");
       binary::Reader in(bytes);
-      if(in.get(1)!=1)throw Error(ErrorCode::Corruption,"unsupported vector index version");
-      VectorIndex index{static_cast<std::uint64_t>(-key),in.get(),static_cast<std::size_t>(in.get(4)),in.text()};
+      const auto version=in.get(1);
+      if(version!=1&&version!=2)throw Error(ErrorCode::Corruption,"unsupported vector index version");
+      VectorIndex index{static_cast<std::uint64_t>(-key),in.get(),static_cast<std::size_t>(in.get(4)),in.text(),version==2};
       in.end();
       if(index.table==table)out.push_back(std::move(index));
     });
     return out;
   }
-  VectorIndex create_vector_index(Store& store,const Schema& schema,std::size_t column,std::string_view name) {
+  VectorIndex create_vector_index(Store& store,const Schema& schema,std::size_t column,std::string_view name,bool referenced) {
     if(column>=schema.columns.size()||schema.columns[column].type!=ColumnType::Vector)
       throw Error(ErrorCode::Schema,"vector index requires VECTOR column");
     for(const auto& index:vector_indexes(store,schema.id))
@@ -82,11 +83,11 @@ namespace minivectordb {
     if(in.get(1)!=1)throw Error(ErrorCode::Corruption,"invalid catalog counter version");
     auto next=in.get(); in.end();
     if(next==0||next>INT64_MAX)throw Error(ErrorCode::Constraint,"namespace identifier exhausted");
-    std::string bytes; binary::put(bytes,1,1); binary::put(bytes,schema.id);
+    std::string bytes; binary::put(bytes,referenced?2:1,1); binary::put(bytes,schema.id);
     binary::put(bytes,column,4); binary::text(bytes,name);
     store.put(-static_cast<std::int64_t>(next),bytes);
     std::string counter; binary::put(counter,1,1); binary::put(counter,next+1); store.put(0,counter);
-    return {next,schema.id,column,std::string(name)};
+    return {next,schema.id,column,std::string(name),referenced};
   }
   Schema lookup_table(const Store&store,std::string_view name) {
     auto s=find(store,name);

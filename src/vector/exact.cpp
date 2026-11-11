@@ -4,6 +4,8 @@
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <queue>
+#include <array>
+#include <new>
 #include <stdexcept>
 namespace minivectordb {
 namespace {
@@ -55,6 +57,93 @@ namespace detail {
 std::vector<Neighbor> exact_top_k_validated_candidates(std::span<const float> query,std::size_t k,
                                                      const VectorSource& source,const KeyPredicate& predicate) {
   return top_k<false>(query,k,source,predicate);
+}
+// Interleave independent candidates while preserving each candidate's dimension
+// accumulation order. Own each callback span: streaming sources may reuse it.
+// No reduced precision, reassociation, or approximate candidate rejection.
+std::vector<Neighbor> exact_top_k_batched_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
+  for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
+  if(k==0)return {};
+  constexpr std::size_t width=16;
+  constexpr std::size_t scratch_limit=64*1024;
+  if(query.size()<16 || query.size()>scratch_limit/(width*sizeof(float)))
+    return top_k<false>(query,k,source,predicate);
+  auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
+  std::priority_queue<Neighbor,std::vector<Neighbor>,decltype(better)> heap(better);
+  std::array<std::int64_t,width> keys{};
+  std::vector<float> batch;
+  try {batch.resize(width*query.size());}
+  catch(const std::bad_alloc&) {return top_k<false>(query,k,source,predicate);}
+  std::size_t count=0;
+  auto flush=[&]() {
+    std::array<double,width> sums{};
+    {
+      profile::detail::Scope timer(&profile::Snapshot::vector_distance);
+      for(std::size_t lane=1;lane<count;++lane)profile::detail::count(&profile::Snapshot::vector_distance);
+      if(count==width) {
+        const auto n=query.size();
+        for(std::size_t d=0;d<n;++d) {
+          const double q=query[d];
+          const double d0=q-static_cast<double>(batch[0*n+d]);
+          const double d1=q-static_cast<double>(batch[1*n+d]);
+          const double d2=q-static_cast<double>(batch[2*n+d]);
+          const double d3=q-static_cast<double>(batch[3*n+d]);
+          const double d4=q-static_cast<double>(batch[4*n+d]);
+          const double d5=q-static_cast<double>(batch[5*n+d]);
+          const double d6=q-static_cast<double>(batch[6*n+d]);
+          const double d7=q-static_cast<double>(batch[7*n+d]);
+          const double d8=q-static_cast<double>(batch[8*n+d]);
+          const double d9=q-static_cast<double>(batch[9*n+d]);
+          const double d10=q-static_cast<double>(batch[10*n+d]);
+          const double d11=q-static_cast<double>(batch[11*n+d]);
+          const double d12=q-static_cast<double>(batch[12*n+d]);
+          const double d13=q-static_cast<double>(batch[13*n+d]);
+          const double d14=q-static_cast<double>(batch[14*n+d]);
+          const double d15=q-static_cast<double>(batch[15*n+d]);
+          sums[0]+=d0*d0;
+          sums[1]+=d1*d1;
+          sums[2]+=d2*d2;
+          sums[3]+=d3*d3;
+          sums[4]+=d4*d4;
+          sums[5]+=d5*d5;
+          sums[6]+=d6*d6;
+          sums[7]+=d7*d7;
+          sums[8]+=d8*d8;
+          sums[9]+=d9*d9;
+          sums[10]+=d10*d10;
+          sums[11]+=d11*d11;
+          sums[12]+=d12*d12;
+          sums[13]+=d13*d13;
+          sums[14]+=d14*d14;
+          sums[15]+=d15*d15;
+        }
+      } else {
+        for(std::size_t lane=0;lane<count;++lane)
+          for(std::size_t d=0;d<query.size();++d) {
+            const double delta=static_cast<double>(query[d])-static_cast<double>(batch[lane*query.size()+d]);
+            sums[lane]+=delta*delta;
+          }
+      }
+    }
+    for(std::size_t lane=0;lane<count;++lane) {
+      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
+      if(heap.size()<k)heap.push(candidate);
+      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    }
+    count=0;
+  };
+  source([&](std::int64_t key,std::span<const float> value) {
+    if(predicate&&!predicate(key))return;
+    if(value.size()!=query.size())throw std::invalid_argument("VECTOR dimension mismatch");
+    keys[count]=key;
+    std::copy(value.begin(),value.end(),batch.begin()+count*query.size());
+    if(++count==width)flush();
+  });
+  if(count)flush();
+  std::vector<Neighbor> result;result.reserve(heap.size());
+  while(!heap.empty()){result.push_back(heap.top());heap.pop();}
+  std::reverse(result.begin(),result.end());return result;
 }
 }
 }
