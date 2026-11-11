@@ -1,0 +1,29 @@
+name: MiniVectorDB native x86 layout experiment
+on:
+  push:
+    branches: ['codex/score-layout-native-20261112']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch exact public experiment source
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/juanzhi-gcb/seekdb.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          lscpu
+      - name: Measure scalar layout versus transposed lanes
+        run: bash bench/run_layout_native.sh
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-layout-${{ github.sha }}
+          path: layout-results/
+          retention-days: 30
