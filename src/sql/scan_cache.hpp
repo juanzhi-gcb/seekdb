@@ -22,6 +22,11 @@ public:
     void invalidate() noexcept { used_=0; table_=index_=0; state_=State::empty; }
     void clear() noexcept { data_.reset(); capacity_=0; invalidate(); }
     bool building() const noexcept { return state_==State::building; }
+    // Keep one representation for this table/index until invalidation. A raw
+    // probation/refusal is a query-shape decision, not permission to read rows.
+    bool observed(std::uint64_t table,std::uint64_t index) const noexcept {
+        return state_!=State::empty && table_==table && index_==index;
+    }
     bool ready(std::uint64_t table,std::uint64_t index) const noexcept {
         return state_==State::ready && table_==table && index_==index;
     }

@@ -9,6 +9,11 @@
 #include <span>
 #include <stdexcept>
 namespace minivectordb {
+// Ordered persists data before publishing the root. ProcessCrash targets a
+// process-only crash with the kernel/filesystem alive; it still fsyncs the whole
+// file before acknowledging commit, but does not order an unacknowledged root
+// against its data across power loss or a kernel/device failure.
+enum class CommitSyncPolicy { Ordered, ProcessCrash };
 struct CacheStats {
   std::uint64_t hits=0, misses=0, evictions=0;
   std::size_t capacity_bytes=0, resident_pages=0;
@@ -40,7 +45,8 @@ public:
   // Each scan lazily allocates its own bounded validated packed-page cache.
   explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0,
                  bool packed_values=false, std::size_t packed_scan_cache_bytes=262144,
-                 std::size_t data_cache_bytes=0);
+                 std::size_t data_cache_bytes=0,
+                 CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered);
   // Separate lazy four-way cache for validated packed and overflow pages. The budget
   // includes the entire set array (pages, IDs, ranks, padding); fixed object and
   // allocator overhead are excluded. A budget smaller than one set disables it.

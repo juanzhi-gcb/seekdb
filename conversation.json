@@ -1,7 +1,7 @@
 {
   "schema_version": "minivectordb-learning-record-v1",
   "synthetic": false,
-  "scope": "真实开发记录节选，2026-11-09至2026-11-11。用户原话、工具结果和Agent分析分别标注；不是完整聊天导出。新增概览、案例、迁移总结为Agent在2026-11-11整理的回顾，不是历史逐字对话或学生个人理解证明。后续Prompt模板为本次新拟、尚未执行。原始含令牌的仓库URL未纳入材料，未记录隐藏思维链。",
+  "scope": "真实开发记录节选，2026-11-09至2026-11-11。用户原话、工具结果和Agent分析分别标注；不是完整聊天导出。新增概览、案例、迁移总结为Agent在2026-11-11整理的回顾，不是历史逐字对话或学生个人理解证明。后续Prompt模板为本次新拟、尚未执行。原始含令牌的仓库URL未纳入材料，未记录隐藏思维链。 本轮追加524133用户提供的正式结果、榜单质疑及T/B/M指令；最终追加e63–e68本地验证及六项指标；当前未提交、未推送、未提测。",
   "baseline_commit": "c842a368c3394748d0499386c18f6b465242e141",
   "material_overview": {
     "source": "agent_retrospective",
@@ -9,14 +9,15 @@
     "project": "MiniVectorDB：基础SQL、精确向量查询、持久化、事务及崩溃恢复；第二轮工作区独立于初赛。",
     "material_purpose": "将任务要求、实际用户指令、Agent方案和反证串成可核验的开发学习记录，不提供本地评分或排名预测。",
     "reading_order": [
-      "先读版本边界和四条案例，再按引用查看用户原话及实验；完整记录继续保留。",
-      "最新性能/正确性证据为e57–e62，早期测量各自只适用于当时版本和环境。"
+      "先读formal_feedback，再读u44-u45及e69，核对材料默认入口与平台未知项。",
+      "e70保留VARCHAR退化反例及修复；e71/current_local_validation记录最新双类型三轮验证。",
+      "e63-e68与case_score_first属于前一候选；final_validation属于历史524133，均不代表本轮正式成绩。"
     ],
     "current_state": {
-      "base_commit": "64f43d1bf56af8a19eace2ddf44bae40807e6c40",
-      "local_work": "本次用户授权发布快照包含已验证的无索引快照、arena复用、vector scratch、Dockerfile、测试证据和整理后的学习材料；最终SHA以同一次Git提交为准，未正式提测。",
-      "local_validation": "最终代码38/38内部测试、20/20公开用例、12000实际JSONL查询/12重启；本次只改材料，没有重跑并冒记数据库实验。",
-      "official_status": "没有当前本地版本的正式性能/Prompt分数；用户提供的8b7054成功1/失败0仅为历史平台汇总。"
+      "base_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+      "local_work": "材料入口审计与混合过滤缓存修复已本地验证；未commit、push或提测。",
+      "local_validation": "42/42内部、20/20公开、273模型检查、24000计时查询/36次重启核验；最新e69-e71。此前41/41和12000/12属于e63-e68的旧候选。",
+      "official_status": "用户确认524133正式MySQL通过、E=856.552980；Prompt显示无效/待复核/超范围/缺少摘要的合并提示，具体原因未知。"
     },
     "provenance": {
       "user": "conversations保留用户实际发言或明确标记的节选，原话不改写；转发组织者说明不算用户独立技术判断。",
@@ -360,6 +361,64 @@
         "bench/results/unindexed-20261111/unindexed-v4-short.summary.json",
         "bench/results/unindexed-20261111/unindexed-resource-v2/result.json"
       ]
+    },
+    {
+      "id": "case_score_first",
+      "source": "agent_retrospective",
+      "title": "正式成绩反馈后：把局部提速改为六项资源对照",
+      "user_prompt_refs": [
+        {
+          "id": "u40",
+          "pointer": "/conversations/39/content_excerpt",
+          "quote": "为什么性能分这么低"
+        },
+        {
+          "id": "u43",
+          "pointer": "/conversations/42/content",
+          "quote": "对批量写入和向量 TopK 查询测量耗时 T、磁盘 I/O B、峰值内存 M优化的是这些"
+        }
+      ],
+      "problem": "524133已正式通过但E856.552980在用户给出的榜单中偏后；Prompt合并提示未提供具体失败原因。",
+      "agent_hypothesis": "Agent将重复行验证/物化、提交同步和过大数据页缓存作为候选，分别控制开关，再使用实际发布镜像作终局对照。",
+      "counterevidence": "4MiB页缓存使overflow第二查询变慢；内核对overflow近乎中性，部分写入退化。累计I/O没有改善，三项资源不能概括为都变快。类型化缓存交错写读和内核short_reuse完整周期也有退化。",
+      "correction": "缓存完整验证和失效契约、公共严格校验、最终fsync先于ACK分别接受反例测试；诊断与正式计时分开，旧材料和负面样本保留。资源回退表述按实际数值预算修正。",
+      "result": "e66给出独立的写入/查询T、累计B和峰值M；e67/e68验证同一最终程序及资源边界。不将各阶段或历史倍率相乘，不生成本地E或Prompt分数。",
+      "transfer": "可迁移的问题顺序：先明确指标采样范围及故障模型，再分离候选机制、检查退化、核验实际入口与被测源码。缓存有效性证明和不支持时回退需要先于省略校验。",
+      "boundary": "用户真实记录提出得分目标及T/B/M关注；机制、方案、实验归Agent/工具。没有新增学生独立机制解释。当前未提交，正式分数仍属于524133，Prompt状态未解决。",
+      "evidence_refs": [
+        {
+          "id": "e63",
+          "pointer": "/experiments/62/output"
+        },
+        {
+          "id": "e64",
+          "pointer": "/experiments/63/output"
+        },
+        {
+          "id": "e65",
+          "pointer": "/experiments/64/output"
+        },
+        {
+          "id": "e66",
+          "pointer": "/experiments/65/output"
+        },
+        {
+          "id": "e67",
+          "pointer": "/experiments/66/output"
+        },
+        {
+          "id": "e68",
+          "pointer": "/experiments/67/output"
+        }
+      ],
+      "files": [
+        "bench/results/score-first-20261111/tbm-summary.json",
+        "bench/results/score-first-20261111/score-first-image-source.json",
+        "bench/results/score-first-20261111/score-first-final-internal.log",
+        "bench/results/score-first-20261111/score-first-resource/result.json",
+        "bench/results/score-first-20261111/score-memory-varied.summary.json",
+        "bench/results/score-first-20261111/core-kernel-pre-default-LastTest.log"
+      ]
     }
   ],
   "historical_boundaries": [
@@ -660,6 +719,50 @@
       "id": "u38",
       "role": "user",
       "content": "继续"
+    },
+    {
+      "id": "u39",
+      "role": "user",
+      "content": "推送"
+    },
+    {
+      "id": "u40",
+      "role": "user",
+      "content_excerpt": "为什么性能分这么低",
+      "platform_result_excerpt": "通过；此项为准入条件，不计排名分\n性能评测完成；原始指标 E = 856.552980\nPrompt结果无效、待复核、超出平台0–100范围或缺少材料摘要",
+      "excerpt_note": "同一用户消息的原文节选；平台片段为非连续节选，省略表格排版。不是Agent自行访问平台所得。"
+    },
+    {
+      "id": "u41",
+      "role": "user",
+      "content_excerpt": "是的，其他队伍的",
+      "leaderboard_excerpt": "5214.002443\n1840.765422\n967.672080\n791.938624",
+      "excerpt_note": "异步回答开头原文与榜单数值非连续节选，省略其他队伍个人信息。",
+      "context_source": "agent_context_annotation",
+      "context": "用户确认提测SHA为524133baf0a4ed947805236c02cce9cecffc0be3并提供榜单；四个数值分别对应所贴榜单第1、80、97、98名。此上下文标注来自Agent，不冒充用户技术推导。"
+    },
+    {
+      "id": "u42",
+      "role": "user",
+      "content": "再次回顾题目，以得分为第一要务，不断优化得分项"
+    },
+    {
+      "id": "u43",
+      "role": "user",
+      "content": "对批量写入和向量 TopK 查询测量耗时 T、磁盘 I/O B、峰值内存 M优化的是这些",
+      "input_channel": "user_async_reply"
+    },
+    {
+      "id": "u44",
+      "role": "user",
+      "content": "https://oceanbase.yuque.com/org-wiki-obtech-vh7w9r/hc3pio/lg8enxlmwg69unt6#GM6Bz 再好好读一下评分要求，以提分为第一要求，同时解决prompt没分问题，没分就是接口问题，你要按照他官方仓库给的那个写，json文件里面路径查查有没有写错，同时你仓库的基准有不有好好用起来"
+    },
+    {
+      "id": "u45",
+      "role": "user",
+      "content": "我们之前用的是什么",
+      "input_channel": "user_async_reply",
+      "context": "询问此前Prompt材料路径。"
     }
   ],
   "experiments": [
@@ -1099,6 +1202,181 @@
       "purpose": "小表预热后大表写入资源与崩溃检查",
       "output": "64MiB容器先预热1000行快照，再扩至20000行约78.125MiB逻辑文本，超容量回退和未提交DELETE强杀恢复通过；保留当前/峰值/交换观测，WSL不能保证no-swap，不宣称正式准入。",
       "evidence": "bench/results/unindexed-20261111/manifest.json"
+    },
+    {
+      "id": "e63",
+      "source": "tool",
+      "purpose": "有界类型化扫描缓存的失效边界与受控对照",
+      "output": "旧路径在warm.stats.row_validation.calls<=warm.rows.size()断言真实RED。新增私有对齐向量/BIGINT列缓存，冷建先完整验证全部行，写入前失效；不支持的表达式或超预算回退。9份无探针对照共255样本、22236查询；另有2组诊断480查询和初测4样本800查询，分别保留，不混作受控样本。类型化缓存的交错写读查询+8.96%，完整周期+1.02%，不将主场景收益外推频繁失效场景。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/typed-red.log",
+        "bench/results/score-first-20261111/typed-validated-dense.summary.json",
+        "bench/results/score-first-20261111/typed-validated-indexed.summary.json",
+        "bench/results/score-first-20261111/typed-validated-varied.summary.json",
+        "bench/results/score-first-20261111/score-combined-dense.summary.json",
+        "bench/results/score-first-20261111/score-combined-indexed.summary.json",
+        "bench/results/score-first-20261111/score-memory-dense.summary.json",
+        "bench/results/score-first-20261111/score-memory-varied.summary.json",
+        "bench/results/score-first-20261111/score-kernel-dense.summary.json",
+        "bench/results/score-first-20261111/score-kernel-varied.summary.json"
+      ]
+    },
+    {
+      "id": "e64",
+      "source": "tool",
+      "purpose": "进程强杀模型下合并提交同步并验证确认边界",
+      "output": "旧提交同步计数expected1/got2真实RED。ProcessCrash路径保持数据写入→根写入→同文件最终fsync成功→ACK，去掉根写入前的额外同步；Store默认Ordered保留。独立测试441个提交策略案例通过，含握手SIGKILL、短写/EINTR和注入返回错误。只覆盖进程崩溃契约，不能外推断电、内核崩溃或介质故障；未据此声称写入字节减少。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/commit-policy-red.log",
+        "bench/results/score-first-20261111/core-kernel-pre-default-LastTest.log",
+        "bench/results/score-first-20261111/2026-11-11-commit-policy-review.md"
+      ]
+    },
+    {
+      "id": "e65",
+      "source": "tool",
+      "purpose": "私有已验证向量内核与较小页缓存的代价",
+      "output": "接口测试先因缺少validated.hpp编译RED，不能当作数值错误反例。最终931个逐位数值及验证边界案例通过，公共距离入口仍校验，保留double顺序累加、sqrt及主键平局次序。数据页缓存16→4MiB降低驻留，但overflow查询9.301914→10.345081ms，第二次查询7.366392→16.028449ms退化；后续内核wide35.126561→29.703480ms，overflow10.965781→10.818301ms接近持平且写入224.169912→230.316733ms变慢。原始负面结果保留，不宣称全场景获益。内核short_reuse完整周期86.366→88.793ms退化，即使其查询分项下降。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/validated-vector-red.log",
+        "bench/results/score-first-20261111/score-kernel-tests.log",
+        "bench/results/score-first-20261111/core-kernel-pre-default-LastTest.log",
+        "bench/results/score-first-20261111/score-memory-varied.summary.json",
+        "bench/results/score-first-20261111/score-kernel-varied.summary.json"
+      ]
+    },
+    {
+      "id": "e66",
+      "source": "tool",
+      "purpose": "最终镜像对正式通过524133的实际JSONL六项指标",
+      "output": "2CPU/2GiB、10000×128维、batch100、每轮1000次TopK10且半数10%过滤，各版本/索引状态3轮。12000答案核验、12重启通过。无索引write1712.011→1322.306ms、query2849.399→1196.348ms，写/查询累计峰值53764096→40648704、61079552→45031424字节；有索引write1697.999→1323.932ms、query2882.698→1250.799ms，峰值53141504→41447424、72077312→57696256。设备8:48累计I/O中位数写入均31793152字节，查询无索引31793152、有索引43196416，两版相同。B不是文件大小；包含启动、加载和建索引/预热至采样，查询区间增量0不表示整个工作负载无I/O。没有统一冷缓存或关闭后回写收敛证明，不等同官方T/B/M，也不换算E。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/tbm-summary.json",
+        "bench/results/score-first-20261111/jsonl-score-first-final-summary.json",
+        "bench/results/score-first-20261111/2026-11-11-jsonl-tbm-review.md"
+      ]
+    },
+    {
+      "id": "e67",
+      "source": "tool",
+      "purpose": "最终源码、测试镜像及运行镜像的一致性和回归",
+      "output": "最终内部41/41通过，503.87s；公开20/20共95SQL，独立模型273检查/150变更/2次强杀通过。runtime以2CPU/512MiB验证默认JSONL、只读根目录、禁网、持久化、EOF/shutdown回滚。镜像内61个源码文件与工作区一致，测试及运行二进制SHA256同为61249560c684981daa4a8e2d786f90df0021b7123303594c3b0c658c3e0cd2b4。受控核心计时为512MiB，e66实际JSONL为2GiB，资源场景为64MiB，三种限制分开报告。当前仍未commit、push或提测；不是新增正式成绩。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/score-first-final-internal.log",
+        "bench/results/score-first-20261111/score-first-final-public/result.json",
+        "bench/results/score-first-20261111/score-first-final-model/result.json",
+        "bench/results/score-first-20261111/score-first-final-runtime.log",
+        "bench/results/score-first-20261111/score-first-image-source.json",
+        "bench/results/score-first-20261111/score-first-runtime-binary.txt"
+      ]
+    },
+    {
+      "id": "e68",
+      "source": "tool",
+      "purpose": "64MiB资源场景的适用范围校正",
+      "output": "64MiB容器从1000行扩至20000行、约78.125MiB逻辑文本，7个检查点和14项验证通过，含未提交DELETE强杀恢复。数值载荷估计320008字节仍在8MiB类型化缓存预算内：这是数据集大于内存检查，不是类型化超预算回退证明。采样无OOM、swap_current=0；本机未强制限制交换，不保证no-swap，也不代表正式资源准入。",
+      "evidence_files": [
+        "bench/results/score-first-20261111/score-first-resource/result.json"
+      ]
+    },
+    {
+      "id": "e69",
+      "source": "tool",
+      "purpose": "检验Prompt路径/模板假设与官方基准可用性",
+      "output": "重新读取题面正文未变化。4.4默认agent/conversation.json，严格UTF8对象≤128KiB，业务字段自由。上游f4d4e266完整102项树中根conversation.json为0字节占位，未公开Prompt加载/评分源码或本题性能基准。524133两份材料均103281字节，同blob0d39f6eea2ef220f79a8f985eba7a489d750395d；全量引用/路径审计0问题。新增提交检查器23项通过，不能据此保证平台实际读取成功或Prompt有效。",
+      "evidence_files": [
+        "bench/results/contract-20261111/interface-before/preflight-published.json",
+        "bench/results/contract-20261111/interface-before/2026-11-11-prompt-path-interface-audit.json"
+      ]
+    },
+    {
+      "id": "e70",
+      "source": "tool",
+      "purpose": "补足过滤类型覆盖，复现并修复缓存切换退化",
+      "output": "新驱动采用未改动官方传输，分离写/查询会话、B/M累计计入准备，答案校验置于计时后，保留进程等待自有数据写回。15项辅助测试通过。VARCHAR单轮10000×128/1000查询：524133无/有索引3118.860/3040.152ms，前候选12672.420/21053.550ms；结果正确但缓存相互清空。新增独立oracle测试在旧选择器RED，保留原始缓存选择至失效后4/4定向GREEN。保持8MiB互斥预算、事务失效与完整校验；拒绝状态也保持，代价是随后纯数值查询暂不切回typed。",
+      "evidence_files": [
+        "bench/results/contract-20261111/contract-varchar-before/summary.json",
+        "bench/results/contract-20261111/mixed-filter-cache-red.log",
+        "bench/results/contract-20261111/mixed-filter-cache-green.log"
+      ]
+    },
+    {
+      "id": "e71",
+      "source": "tool",
+      "purpose": "修复后两种过滤三轮真实JSONL复验",
+      "output": "同一已正式通过524133镜像对比本地修复镜像，BIGINT/VARCHAR各3轮，每类18个新会话；总24000个计时查询精确校验、36次完整记录重启核验通过。T/B/M中位数如下；不是官方E，未预言名次。写入B未改善；预热、生成分布和设备缓存仍属本地条件。",
+      "medians": {
+        "bigint": {
+          "reference/write/unindexed": {
+            "T_ms": 1742.457538,
+            "B_bytes": 31793152,
+            "M_bytes": 53743616
+          },
+          "candidate/write/unindexed": {
+            "T_ms": 1339.65794,
+            "B_bytes": 31793152,
+            "M_bytes": 40931328
+          },
+          "reference/query/unindexed": {
+            "T_ms": 2955.066409,
+            "B_bytes": 31793152,
+            "M_bytes": 60858368
+          },
+          "candidate/query/unindexed": {
+            "T_ms": 1222.810056,
+            "B_bytes": 31793152,
+            "M_bytes": 45432832
+          },
+          "reference/query/indexed": {
+            "T_ms": 2973.353641,
+            "B_bytes": 43196416,
+            "M_bytes": 72507392
+          },
+          "candidate/query/indexed": {
+            "T_ms": 1252.858949,
+            "B_bytes": 43196416,
+            "M_bytes": 57049088
+          }
+        },
+        "varchar": {
+          "reference/write/unindexed": {
+            "T_ms": 1748.168197,
+            "B_bytes": 31793152,
+            "M_bytes": 53477376
+          },
+          "candidate/write/unindexed": {
+            "T_ms": 1350.104839,
+            "B_bytes": 31793152,
+            "M_bytes": 41074688
+          },
+          "reference/query/unindexed": {
+            "T_ms": 3101.743053,
+            "B_bytes": 31793152,
+            "M_bytes": 60956672
+          },
+          "candidate/query/unindexed": {
+            "T_ms": 3002.89828,
+            "B_bytes": 31793152,
+            "M_bytes": 48058368
+          },
+          "reference/query/indexed": {
+            "T_ms": 3078.535907,
+            "B_bytes": 43196416,
+            "M_bytes": 72421376
+          },
+          "candidate/query/indexed": {
+            "T_ms": 3067.491771,
+            "B_bytes": 43196416,
+            "M_bytes": 60076032
+          }
+        }
+      },
+      "evidence_files": [
+        "bench/results/contract-20261111/contract-final-bigint/summary.json",
+        "bench/results/contract-20261111/contract-final-varchar/summary.json",
+        "bench/results/contract-20261111/contract-final-internal.log",
+        "bench/results/contract-20261111/contract-final-image-source.json"
+      ]
     }
   ],
   "agent_observations": [
@@ -1251,6 +1529,46 @@
       "id": "a30",
       "source": "agent",
       "content": "成功版本用于差异对照，不复制未知评测器逻辑。首轮全部58条响应逐字节一致，但驱动误以为8b7054拒绝1e-400；实际它已经接受下溢，故修正预期并保留原始记录。距离扰动从1e-8调整到1.5e-8才触发平方距离与返回距离排序的差异，保留新版符合规则的行为。修正e51对可变final_validation的历史引用，直接写入当时31/31、155.27秒。用户截图仅显示成功1/失败0、无原始分；不能将本地验证承诺为正式成绩。"
+    },
+    {
+      "id": "a31",
+      "source": "agent",
+      "content": "用户报告524133正式MySQL通过、E=856.552980，并提供其他队伍榜单质疑性能。我此前主要比较自家上一版本，应明确承担评价范围不足：本地无索引查询1.659倍加速不证明竞赛领先，也不能将榜单E倍数当速度倍数。新平台反馈不是本轮重新执行的数据库测试。"
+    },
+    {
+      "id": "a32",
+      "source": "agent",
+      "content": "用户明确把批量写入和向量TopK的T、B、M列为优化对象。后续方案应分别报告六项指标、同条件版本和轮次；缺失物理I/O不能记为0或用逻辑字节、文件大小冒充。优先减少重复扫描/校验和提交开销，同时核对缓存峰值代价。这是Agent整理的计划，不等于用户独立解释机制，也不是本轮已测收益。"
+    },
+    {
+      "id": "a33",
+      "source": "agent",
+      "content": "11月11日复查官方上游仍f4d4e266，最新语雀未能在线读取。缓存题面的E范围、Prompt不封顶与平台实报范围有冲突，尚未确认实际评分版本。524133两个JSON均103281字节、严格合法且一致，只能排除已查包装问题；合并提示不能定位Prompt无效原因。本地文件摘要不是平台评价摘要，不自填分数或猜字段。"
+    },
+    {
+      "id": "a34",
+      "source": "agent",
+      "content": "正式榜单反馈暴露了此前只看自家旧版倍率的局限。本轮由Agent按用户明确的批量写入/TopK各T、B、M执行实验，最终时间和内存下降，累计I/O未下降。不能把E856.552980乘本地提速倍率预测正式分数；实际评分公式及六项平台明细仍未知。"
+    },
+    {
+      "id": "a35",
+      "source": "agent",
+      "content": "优化的证明边界比开关名称重要：私有类型化缓存只复用已完整验证且写入会失效的自有数据；私有内核不能绕过公共输入校验；ProcessCrash最终fsync仍先于成功确认。减少同步轮次不等于减少字节或获得断电保证。内存下降伴随部分短查询退化，保留反证才能复核选择。以上因果与取舍为Agent分析，不是用户已掌握的证据。"
+    },
+    {
+      "id": "a36",
+      "source": "agent",
+      "content": "审查纠正了资源场景表述：大文本超过64MiB不意味着数值缓存超过8MiB，不能沿用旧版原始行缓存的回退结论。cgroup峰值累计覆盖到采样点，查询新增I/O为0也不能代替累计B。当前材料校验只能证明包装、引用和历史证据一致；平台Prompt具体无效原因及0–100与旧题面不封顶的冲突仍待平台解释，本地摘要不冒充平台摘要。"
+    },
+    {
+      "id": "a37",
+      "source": "agent",
+      "content": "用户要求按官方入口及得分项复核，促使我检验原先只测BIGINT的盲点；正式通过不代表混合查询无性能退化。先保留反例，再固定状态选择，并用实际镜像双类型三轮验证，比只引用局部加速可信。此分析属于Agent，不代替用户机制理解证据。"
+    },
+    {
+      "id": "a38",
+      "source": "agent",
+      "content": "“没分就是接口问题”是待检验假设。路径、编码、大小和Git文件身份均通过，公开仓库又无评分接口实现，故不能凭合并错误推断原因或补猜测的score/summary字段。平台读取路径/内容哈希、具体失败类别与评审状态仍未知；本地摘要不冒充平台内部摘要。"
     }
   ],
   "limitations": [
@@ -1259,7 +1577,8 @@
     "原始完整工具日志留在本地D盘；本JSON仅包含明确标注的摘要和关键实际输出。",
     "Snapshot and numeric fixes are based on latest d55b183. This record is packaged before the user-authorized GitHub push; no formal submission by the agent. Local/public checks do not establish hidden29 admission or an official score; the platform failure cause is unconfirmed without logs. WSL cannot enforce no-swap; The integrated version preserves the remote signed-underflow-to-zero repair. User prompts are authentic; agent analysis is not attributed to the user.",
     "本轮正式失败记录仍为0e954旧版，不能据此宣称1349已正式失败或通过。材料导航由Agent生成，只索引已有真实字符串；不保证分数提高，学生自身理解仅限已记录发言。",
-    "用户确认Prompt有效性文字是规则提醒，不是某次提交失败。材料摘要字段含义未由平台明确；不伪造内部评价字段，不自评分或换算。"
+    "用户确认Prompt有效性文字是规则提醒，不是某次提交失败。材料摘要字段含义未由平台明确；不伪造内部评价字段，不自评分或换算。",
+    "旧Prompt有效性文字在当时仅为规则提醒；u40才是524133实际平台合并无效提示。按版本和时间理解，不能据未知失败类别推断内容分低。新本地优化未推送/未提测，尚无其最终验证或正式成绩。"
   ],
   "final_validation": {
     "source": "tool",
@@ -1280,7 +1599,8 @@
     },
     "runtime_queries": 12000,
     "runtime_restarts": 12,
-    "state": "Verified source snapshot prepared for user-authorized GitHub upload. Source, Dockerfile and learning material share the enclosing commit. No formal submission; historical validations remain in prior experiments."
+    "state": "Historical local validation of524133, not a new validation of ongoing changes. Current formal feedback is separately recorded from the user report.",
+    "validated_commit": "524133baf0a4ed947805236c02cce9cecffc0be3"
   },
   "performance_caveats": {
     "source": "agent",
@@ -1291,12 +1611,14 @@
   "version_context": {
     "source": "agent",
     "failed_formal_commit": "0e954ffd90c6802ecd9fae4c0ca00eb8553201dd",
-    "latest_uploaded_base": "64f43d1bf56af8a19eace2ddf44bae40807e6c40",
-    "current_changes": "Verified unindexed snapshot, arena reuse, vector scratch, Dockerfile, test evidence and attributed learning material prepared together for user-authorized GitHub upload. Final SHA is supplied by the enclosing Git commit; no formal submission.",
+    "latest_uploaded_base": "524133baf0a4ed947805236c02cce9cecffc0be3",
+    "current_changes": "Contract/path audit and mixed-filter cache fix: e69-e71. Previous e63-e68 candidate/source/material remain archived separately; not committed, pushed or formally submitted.",
     "historical_notes": "旧记录中的latest、未上传、1e-400拒绝和平方距离排序须按当时版本理解。e48已合并远端下溢修复，e49在最新版复验。历史结果不是当前版本正式成绩。",
     "reported_successful_commit": "8b7054ad45b76e8055d393fcd3e3d13717a072e8",
     "reported_success_scope": "User supplied platform aggregate success1/failure0; expanded MySQL/performance/prompt results unavailable.",
-    "material_revision": "2026-11-11：整理日期、概览、真实指令要求演变、四条Agent复盘、版本边界和未执行模板；原用户/工具记录保留。"
+    "material_revision": "2026-11-11: append authentic u44-u45 and tool evidence e69-e71; preserve all prior record prefixes. No new official Prompt score.",
+    "current_formal_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+    "current_formal_result": "User supplied: MySQL passed; E=856.552980; Prompt invalid/pending reason unspecified."
   },
   "review_navigation": {
     "source": "agent",
@@ -1443,6 +1765,54 @@
           }
         ],
         "attribution_limit": "用户指定持续自检目标；具体假设、实现、测试及审查修正来自Agent/工具，不视作学生独立技术解释，也不把一次迭代拆成多次学习得分。"
+      },
+      {
+        "chain": "正式反馈后按六项资源指标选择优化",
+        "student_evidence": {
+          "id": "u43",
+          "pointer": "/conversations/42/content",
+          "quote": "对批量写入和向量 TopK 查询测量耗时 T、磁盘 I/O B、峰值内存 M优化的是这些"
+        },
+        "context_evidence": [
+          {
+            "id": "u40",
+            "pointer": "/conversations/39/content_excerpt",
+            "quote": "为什么性能分这么低"
+          },
+          {
+            "id": "u42",
+            "pointer": "/conversations/41/content",
+            "quote": "再次回顾题目，以得分为第一要务，不断优化得分项"
+          }
+        ],
+        "result_evidence": [
+          {
+            "id": "u40",
+            "pointer": "/conversations/39/platform_result_excerpt",
+            "quote": "性能评测完成；原始指标 E = 856.552980"
+          },
+          {
+            "id": "e63",
+            "pointer": "/experiments/62/output",
+            "quote": "旧路径在warm.stats.row_validation.calls<=warm.rows.size()断言真实RED。新增私有对齐向量/BIGINT列缓存，冷建先完整验证全部行，写入前失效；不支持的表达式或超预算回退。9份无探针对照共255样本、"
+          },
+          {
+            "id": "e65",
+            "pointer": "/experiments/64/output",
+            "quote": "接口测试先因缺少validated.hpp编译RED，不能当作数值错误反例。最终931个逐位数值及验证边界案例通过，公共距离入口仍校验，保留double顺序累加、sqrt及主键平局次序。数据页缓存16→4MiB降低驻留，但overflow查询9.30"
+          },
+          {
+            "id": "e66",
+            "pointer": "/experiments/65/output",
+            "quote": "2CPU/2GiB、10000×128维、batch100、每轮1000次TopK10且半数10%过滤，各版本/索引状态3轮。12000答案核验、12重启通过。无索引write1712.011→1322.306ms、query2849.399→119"
+          },
+          {
+            "id": "e68",
+            "pointer": "/experiments/67/output",
+            "quote": "64MiB容器从1000行扩至20000行、约78.125MiB逻辑文本，7个检查点和14项验证通过，含未提交DELETE强杀恢复。数值载荷估计320008字节仍在8MiB类型化缓存预算内：这是数据集大于内存检查，不是类型化超预算回退证明。采样无OO"
+          }
+        ],
+        "attribution_limit": "用户提供正式反馈并明确六项指标；本轮e63–e68为Agent执行的本地实验。一个整体案例不拆成多项学习计分，也不把泛泛指令升级为用户机制理解。"
       }
     ],
     "excluded_as_independent_learning": [
@@ -1454,7 +1824,75 @@
       "case_decode",
       "case_baseline",
       "case_ack",
-      "case_unindexed"
+      "case_unindexed",
+      "case_score_first"
     ]
+  },
+  "formal_feedback": {
+    "source": "user_supplied_platform_result",
+    "reported_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+    "mysql_admission": "passed",
+    "performance_E_text": "856.552980",
+    "prompt_result_status": "invalid_or_pending_review_unspecified",
+    "evidence_refs": [
+      {
+        "id": "u40",
+        "pointer": "/conversations/39/platform_result_excerpt"
+      },
+      {
+        "id": "u41",
+        "pointer": "/conversations/40/content_excerpt"
+      }
+    ],
+    "verification_scope": "按用户提供反馈记录，未独立访问平台后台；缺少T/B/M明细、实际E公式和Prompt具体失败类别。",
+    "new_local_work": "本轮本地验证及T/B/M对照完成，见e63–e68；未commit、push或提测，未产生新正式成绩。"
+  },
+  "current_local_validation": {
+    "source": "tool_summary",
+    "base_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+    "state": "Uncommitted; no push or formal submission.",
+    "internal": "42/42",
+    "public": "20/20;95SQL",
+    "model": {
+      "checks": 273,
+      "mutations": 150,
+      "crash_restarts": 2
+    },
+    "jsonl": {
+      "verified_queries": 24000,
+      "restarts": 36,
+      "filter_types": [
+        "bigint",
+        "varchar"
+      ],
+      "rounds_each": 3,
+      "memory": "2GiB"
+    },
+    "binary_sha256": "a2216d15152bd259bf14073913149e36df42f059d8879e2643d5f15bb2faa6fa",
+    "source_files_matched": 64,
+    "evidence_refs": [
+      {
+        "id": "e69",
+        "pointer": "/experiments/68/output"
+      },
+      {
+        "id": "e70",
+        "pointer": "/experiments/69/output"
+      },
+      {
+        "id": "e71",
+        "pointer": "/experiments/70/output"
+      }
+    ]
+  },
+  "previous_local_validation_archive": "bench/results/contract-20261111/previous-source/agent/conversation.json",
+  "submission_contract_audit": {
+    "source": "agent_summary_of_tool_results",
+    "default_material_path": "agent/conversation.json",
+    "root_mirror": "conversation.json",
+    "published_path_audit": "passed for524133; platform override unknown",
+    "official_business_template": "none published; empty placeholder is not input schema",
+    "platform_prompt_status": "user-reported aggregate invalid/pending/range/summary error; specific cause unconfirmed",
+    "local_preflight_scope": "packaging and references only; no self-score or platform validity claim"
   }
 }

@@ -21,7 +21,8 @@ int main() {
   std::filesystem::create_directories(dir);
   {
    CHECK(!profile::enabled());
-   Database db(dir/"data");
+   Options options; options.typed_scan_cache=false; // Raw path stage-count contract.
+   Database db(dir/"data",options);
    db.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR(2))");
    db.execute("INSERT INTO t VALUES(1,[1,2]),(2,[3,4]),(3,[5,6])");
    auto expected=query(db,"WHERE id>=1");

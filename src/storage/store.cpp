@@ -139,6 +139,7 @@ struct Store::Impl {
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
   bool active=false, poisoned=false, format3=false, packing=false;
+  CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered;
   std::size_t scan_budget=0;
   // Only the entry array is allocated, lazily on the first packed reference.
   // Each scan owns its array, including recursive scans from a visitor.
@@ -343,7 +344,9 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy):impl_(std::make_unique<Impl>()) {
+  if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
+    throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);
   if(impl_->fd>=0) created=true;
@@ -353,6 +356,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
     if(impl_->fd<0) io_error("open database");
   }
   auto& s=*impl_;
+  s.commit_sync_policy=commit_sync_policy;
   s.packing=packed_values; s.format3=packed_values; s.scan_budget=packed_scan_cache_bytes;
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
@@ -480,9 +484,12 @@ void Store::commit() {
   if(s.generation==UINT64_MAX) throw std::overflow_error("generation exhausted");
   auto next=s.generation+1;
   try {
-    sync_fd(s.fd); // All new immutable data reaches stable storage before root publication.
+    // Every reachable COW page has already completed its write loop. Ordered
+    // additionally persists these dependencies before publishing the root.
+    if(s.commit_sync_policy==CommitSyncPolicy::Ordered)sync_fd(s.fd);
     write_page(s.fd,make_root(next,s.root,s.next_page,s.format3),next%2);
-    sync_fd(s.fd); // A successful return acknowledges the new durable root.
+    // Both modes acknowledge only after the root AND its data have been synced.
+    sync_fd(s.fd);
   } catch(...) {s.poisoned=true; throw;}
   s.generation=next; s.durable_root=s.root; s.active=false;
 }

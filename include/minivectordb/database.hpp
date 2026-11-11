@@ -31,7 +31,7 @@ struct Options {
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
-  std::size_t data_cache_bytes = 16 * 1024 * 1024; // Bounded cross-query data pages; zero disables.
+  std::size_t data_cache_bytes = 4 * 1024 * 1024; // Bounded cross-query data pages; zero disables.
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;
@@ -45,6 +45,15 @@ struct Options {
   bool reuse_scan_snapshot_buffer = true;
   // Reuse one candidate-vector buffer per TopK query without materializing Cells.
   bool reuse_vector_scratch = true;
+  // Reuse completely validated numeric columns instead of parsing raw rows.
+  // Shares the snapshot budget; unsupported predicates retain the raw path.
+  bool typed_scan_cache = true;
+  // Internal SQL candidates have decoder/cache finiteness proofs. Keep the
+  // checked public vector API unchanged; false is the measured reference.
+  bool validated_vector_kernel = true;
+  // Competition recovery model: process SIGKILL, with final fsync before ACK.
+  // Ordered remains available for data-before-root persistence ordering.
+  CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -55,6 +64,8 @@ struct ExecutionInfo {
   std::uint64_t snapshot_rows_examined = 0;
   // Arena capacity retained after TopK execution; other paths do not collect it.
   std::size_t snapshot_bytes = 0;
+  std::uint64_t typed_rows_examined = 0;
+  std::size_t typed_cache_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;

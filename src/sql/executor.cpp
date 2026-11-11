@@ -1,8 +1,10 @@
 #include "sql.hpp"
 #include "sorter.hpp"
 #include "scan_cache.hpp"
+#include "typed_scan_cache.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
+#include "../vector/validated.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
@@ -115,8 +117,9 @@ namespace minivectordb {
     Store store;
     Options options;
     sql::ScanSnapshot snapshot;
+    sql::TypedScanCache typed_snapshot;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -190,6 +193,83 @@ namespace minivectordb {
       SelectRow row(s,key,*raw,options.selective_decode,info);
       visit(row);
     }
+    bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                      const std::optional<VectorIndex>& index,ExecutionInfo& info,
+                      const VectorVisitor& visit,std::vector<float>& scratch) {
+      bool eligible=options.typed_scan_cache && options.scan_snapshot_bytes>0 && !b.primary_lookup &&
+          (index?options.paired_index_scan:options.table_scan_snapshot);
+      for(const auto& p:b.predicates)
+        eligible=eligible && s.columns[p.column].type==ColumnType::Bigint &&
+            std::holds_alternative<std::int64_t>(p.value);
+      const auto index_id=index?index->id:0;
+      // A VARCHAR query may already have selected the raw representation for
+      // this identity. Retain its probation/ready/refused state across numeric
+      // queries, otherwise alternating filters continually reset both caches.
+      if(eligible && snapshot.observed(s.id,index_id))eligible=false;
+      if(!eligible) {typed_snapshot.clear();return false;}
+      // Two representations never own their bounded payloads simultaneously.
+      snapshot.clear();
+      profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      try {
+        if(typed_snapshot.ready(s.id,index_id,e.column)) {
+          struct Predicate {std::size_t slot;std::int64_t value;std::string_view op;};
+          std::vector<Predicate> predicates;
+          predicates.reserve(b.predicates.size());
+          for(const auto& p:b.predicates)
+            predicates.push_back({typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),p.op});
+          for(std::size_t r=0;r<typed_snapshot.size();++r) {
+            profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+            ++info.rows_examined;++info.typed_rows_examined;
+            bool matches=true;
+            for(const auto& p:predicates) {
+              profile::detail::Scope predicate_timer(&profile::Snapshot::predicate_evaluation);
+              const auto value=typed_snapshot.scalar(r,p.slot);
+              if((p.op=="="&&value!=p.value)||(p.op=="<"&&value>=p.value)||
+                 (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
+                 (p.op==">="&&value<p.value)) {matches=false;break;}
+            }
+            if(matches) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.vector(r));}
+          }
+        } else {
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
+          auto consume=[&](std::int64_t key,const SelectRow& row,std::span<const float> vector) {
+            // Capture every row before applying this query's predicate. The cache
+            // must also answer a different filter, including after a zero-match build.
+            if(typed_snapshot.building()) {
+              if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
+              typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);});
+            }
+            if(row.matches(b.predicates)) {
+              if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
+              ++info.distances_computed;visit(key,vector);
+            }
+          };
+          if(index) {
+            store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.vector_index_entries_examined;++info.rows_examined;
+              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
+              SelectRow row(s,key,base,options.selective_decode,info);
+              if(vector!=std::get<std::vector<float>>(row[e.column]))
+                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+              consume(key,row,vector);
+            });
+          } else {
+            store.scan_in(s.id,[&](auto key,auto bytes) {
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.rows_examined;
+              SelectRow row(s,key,bytes,options.selective_decode,info);
+              consume(key,row,{});
+            });
+          }
+          typed_snapshot.finish();
+        }
+      } catch(const Store::KeySetMismatch& error) {
+        typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
+      } catch(...) {typed_snapshot.clear();throw;}
+      info.typed_cache_bytes=typed_snapshot.bytes();
+      return true;
+    }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
       ExecutionInfo info;
       std::vector<std::string> labels;
@@ -203,6 +283,7 @@ namespace minivectordb {
         ++info.affected_rows;
       };
       if(b.order.empty()) {
+        typed_snapshot.clear();
         try {
           scan_select(s,b,info,[&](auto,const SelectRow&r) {
             DistanceCache cache;
@@ -218,7 +299,10 @@ namespace minivectordb {
       if(b.order.size()==1&&!b.order[0].descending&&b.order[0].expression.query&&statement.limit&&limit<=options.memory_budget_bytes/(4*sizeof(Neighbor))) {
         const auto&e=b.order[0].expression;
         std::vector<float> vector_scratch;
-        auto winners=exact_top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
+        // Every source below validates the candidate through SelectRow/index
+        // decoding, or reuses owned typed columns from a complete validated scan.
+        const auto top_k=options.validated_vector_kernel?detail::exact_top_k_validated_candidates:exact_top_k;
+        auto winners=top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;
             if(options.reuse_vector_scratch)visit(key,row.vector_for_distance(e.column,vector_scratch));
@@ -227,6 +311,7 @@ namespace minivectordb {
           std::optional<VectorIndex> index;
           if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
             if(candidate.column==e.column) { index=candidate; break; }
+          if(typed_source(s,b,e,index,info,visit,vector_scratch))return;
           if(index) {
             // Exhaustive flat index: exact and ANN mode share recall 1. Read and
             // validate every base row, retaining the established corruption contract.
@@ -266,7 +351,7 @@ namespace minivectordb {
               fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
             });
           } else scan_select(s,b,info,consume_row,true);
-        });
+        },{});
         info.snapshot_bytes=snapshot.bytes();
         for(const auto&winner:winners) {
           fetch_select(s,winner.key,info,[&](const SelectRow& row) {
@@ -284,6 +369,7 @@ namespace minivectordb {
         }
         return info;
       }
+      typed_snapshot.clear();
       sql::Sorter sorter(options,b.order,info);
       scan_select(s,b,info,[&](auto key,const SelectRow&r) {
         DistanceCache cache;
@@ -323,8 +409,8 @@ namespace minivectordb {
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {
-        if(options.reuse_scan_snapshot_buffer)snapshot.invalidate();
-        else snapshot.clear();
+        if(options.reuse_scan_snapshot_buffer) {snapshot.invalidate();typed_snapshot.invalidate();}
+        else {snapshot.clear();typed_snapshot.clear();}
       }
       ExecutionInfo info;
       if(statement.kind==sql::Statement::Begin) {

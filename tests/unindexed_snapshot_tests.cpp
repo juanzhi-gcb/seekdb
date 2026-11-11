@@ -46,6 +46,7 @@ const std::vector<Item> initial{
 struct Result {std::vector<Row> rows;ExecutionInfo info;profile::Snapshot stats;};
 Options settings(bool packed,bool selective,std::size_t budget) {
   Options o;
+  o.typed_scan_cache=false; // This suite exercises the retained raw-row snapshot.
   o.packed_values=packed;o.selective_decode=selective;o.scan_snapshot_bytes=budget;
   o.reuse_scan_snapshot_buffer=reuse_arena;
   return o;

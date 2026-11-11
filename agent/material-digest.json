@@ -2,16 +2,16 @@
   "kind": "local-material-integrity-manifest",
   "date": "2026-11-11",
   "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
-  "base_commit": "64f43d1bf56af8a19eace2ddf44bae40807e6c40",
-  "submission_state": "Prepared release snapshot for user-authorized GitHub upload; final SHA comes from the enclosing Git commit. No formal platform submission.",
+  "base_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+  "submission_state": "Contract audit and mixed-filter fix evidence appended locally; not committed, pushed or submitted. Formal feedback remains524133 only.",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 103281,
-      "sha256": "5255100105aa4e6d4217c149f85e7c5c5aac369745736d565b5c924617138bb3"
+      "bytes": 128671,
+      "sha256": "b5d3fb9f4ab71bb4f42102e793e5643c3377a7118315d0178c6cf0426f31acaf"
     },
     "conversation.json": {
-      "bytes": 103281,
-      "sha256": "5255100105aa4e6d4217c149f85e7c5c5aac369745736d565b5c924617138bb3"
+      "bytes": 128671,
+      "sha256": "b5d3fb9f4ab71bb4f42102e793e5643c3377a7118315d0178c6cf0426f31acaf"
     }
   },
   "before_material": {
@@ -22,13 +22,26 @@
   "measurement_evidence": {
     "path": "bench/results/unindexed-20261111/manifest.json",
     "sha256": "7528f3608c7afc318bb06d85d8728cb9b61be173eeb86621aa71e4494943f79b",
-    "material_at_measurement_sha256": "bcf087a952542df442151b3ed159b2744325589fe5bf894dbf87e1b86311f970"
+    "material_at_measurement_sha256": "bcf087a952542df442151b3ed159b2744325589fe5bf894dbf87e1b86311f970",
+    "source_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
+    "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
   },
   "counts": {
-    "user_records": 38,
-    "experiments": 62,
-    "agent_observations": 30,
-    "retrospective_cases": 4
+    "user_records": 45,
+    "experiments": 71,
+    "agent_observations": 38,
+    "retrospective_cases": 5
   },
-  "original_records_preserved": true
+  "original_records_preserved": true,
+  "revision_baseline": {
+    "path": "bench/results/score-first-20261111/material-before.json",
+    "bytes": 103281,
+    "sha256": "5255100105aa4e6d4217c149f85e7c5c5aac369745736d565b5c924617138bb3",
+    "commit": "524133baf0a4ed947805236c02cce9cecffc0be3"
+  },
+  "previous_local_material": {
+    "path": "bench/results/contract-20261111/previous-source/agent/conversation.json",
+    "bytes": 122152,
+    "sha256": "ea9319cb0fa601363b7c8990ec83b99dab1aa829514777380be7a85c0e36adc4"
+  }
 }

@@ -38,7 +38,10 @@ def resource(s):
   pid=int(s.docker('inspect','--format','{{.State.Pid}}',s.name).stdout)
   cgroup=next(x.split(':',2)[2] for x in Path('/proc/%d/cgroup'%pid).read_text().splitlines() if x.startswith('0::'))
   base=Path('/sys/fs/cgroup')/cgroup.lstrip('/')
-  for name in ['memory.peak','memory.current','memory.swap.current','io.stat','cpu.stat']:
+  device=os.stat(s.bind_data.name).st_dev
+  result['data_device']=str(os.major(device))+':'+str(os.minor(device))
+  result['cgroup_path']=cgroup
+  for name in ['memory.peak','memory.current','memory.swap.current','memory.stat','memory.events','io.stat','cpu.stat']:
    try: result[name]=(base/name).read_text().strip()
    except OSError as e:result[name]=None;result[name+'_reason']=str(e)
  except Exception as e:result={'unavailable_reason':str(e)}
@@ -67,6 +70,7 @@ for roundno in range(R):
    writes=[]
    for sql in inserts: _,ms=execute(s,sql);writes.append(ms)
    result['write_ms']=sum(writes);result['write_request_ms']=writes;result['files_after_write']=files(s)
+   result['resources_after_write']=resource(s)
    result['index_build_ms']=None
    if indexed:_,result['index_build_ms']=execute(s,'CREATE VECTOR INDEX tv ON t(v);')
    result['files_after_index']=files(s);result['resources_after_load']=resource(s)

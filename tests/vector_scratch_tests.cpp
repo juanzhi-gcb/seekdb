@@ -108,7 +108,8 @@ void sql_case(const std::filesystem::path& path,std::size_t dimensions,
               bool packed,bool lazy,bool reuse,bool indexed) {
   const auto items=fixture(dimensions);
   const std::vector<float> q(dimensions,0.0f),other(dimensions,0.5f);
-  Options options;options.packed_values=packed;options.selective_decode=lazy;
+  Options options;options.typed_scan_cache=false; // Exercise the vector-copy reference path.
+  options.packed_values=packed;options.selective_decode=lazy;
   options.reuse_vector_scratch=reuse;options.scan_snapshot_bytes=8192;
   Database db(path,options);
   db.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR("+std::to_string(dimensions)+"))");

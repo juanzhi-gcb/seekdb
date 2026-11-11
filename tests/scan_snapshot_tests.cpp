@@ -72,7 +72,8 @@ Result query(Database& d,std::string filter="",SearchMode mode=SearchMode::Exact
  Result r; r.info=d.execute("SELECT id,L2_DISTANCE(v,'[0,0]') AS d FROM t "+filter+" ORDER BY d LIMIT 9",{{},[&](const Row& row){r.rows.push_back(row);}},mode);return r;
 }
 void run(const std::filesystem::path& path,bool packed,bool selective,std::size_t budget) {
- Options o; o.packed_values=packed;o.selective_decode=selective;o.scan_snapshot_bytes=budget;
+ Options o; o.typed_scan_cache=false; // Isolate raw snapshot counters and validation.
+ o.packed_values=packed;o.selective_decode=selective;o.scan_snapshot_bytes=budget;
  const bool fits=budget>=4096;
  {Database d(path,o);
   d.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,v VECTOR(2),g BIGINT)");
