@@ -297,6 +297,34 @@ def oracle(workload, binary, output):
                    "oracle_binary_sha256": sha256(binary)}
 
 
+def verify_stored_rows(request, workload):
+    # Verification is outside the resource/timing window. Keep the original
+    # 10k-row experiment unchanged; larger responses can exceed the official
+    # 16 MiB cap, so walk all keys in bounded pages without raising that cap.
+    if len(workload["vectors"]) <= 10000:
+        return verify_rows(request("SELECT id,g,v,body FROM t ORDER BY id;")[0], workload)
+    combined = {"ok": True, "columns": ["id", "g", "v", "body"], "rows": []}
+    last = None
+    while True:
+        where = "" if last is None else " WHERE id>" + str(last)
+        response, _ = request("SELECT id,g,v,body FROM t" + where + " ORDER BY id LIMIT 1000;")
+        if response.get("ok") is not True or response.get("columns") != combined["columns"]:
+            raise AssertionError("invalid verification page")
+        rows = response.get("rows")
+        if not isinstance(rows, list) or len(rows) > 1000:
+            raise AssertionError("invalid verification page size")
+        if not rows:
+            break
+        for row in rows:
+            if len(row) != 4 or type(row[0]) is not int or (last is not None and row[0] <= last):
+                raise AssertionError("non-increasing verification keys")
+            last = row[0]
+        combined["rows"].extend(rows)
+        if len(combined["rows"]) > len(workload["vectors"]):
+            raise AssertionError("unexpected stored rows")
+    verify_rows(combined, workload)
+
+
 def run_one(args, Session, config, workload, truth, version, image, round_number, phase, indexed):
     label = "r%d-%s-%s-%s" % (round_number, version, phase, "indexed" if indexed else "unindexed")
     directory = args.output / label
@@ -365,10 +393,10 @@ def run_one(args, Session, config, workload, truth, version, image, round_number
             result["recall_filtered"] = 1.0
             result["responses_sha256"] = hashlib.sha256(
                 json.dumps(replies, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
-        verify_rows(request("SELECT id,g,v,body FROM t ORDER BY id;")[0], workload)
+        verify_stored_rows(request, workload)
         session.shutdown()
         session.start()
-        verify_rows(request("SELECT id,g,v,body FROM t ORDER BY id;")[0], workload)
+        verify_stored_rows(request, workload)
         if phase == "query":
             verify_topk(request(workload["queries"][0])[0], truth[0], workload)
             if args.queries > 1:

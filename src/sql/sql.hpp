@@ -50,7 +50,7 @@ namespace minivectordb::sql {
   };
   Statement parse(std::string_view);
   std::size_t column_index(const Schema&,std::string_view);
-  Cell bind_literal(const Literal&,const Column&);
+  Cell bind_literal(const Literal&,const Column&,bool fast_vector=true);
   struct BoundExpr {
     std::size_t column;
     std::optional<std::vector<float>> query;

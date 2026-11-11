@@ -104,7 +104,7 @@ std::vector<Row> expected(const std::vector<Item>& items=initial,int qx=0,int qy
 void full_validation(const Result& r,bool selective,std::size_t count) {
   CHECK(r.info.rows_examined==count);
   CHECK(r.info.affected_rows==r.rows.size());
-  CHECK((selective?r.stats.row_validation.calls:r.stats.row_decode.calls)==count+r.rows.size());
+  CHECK((selective?r.stats.row_validation.calls:r.stats.row_decode.calls)==count-r.info.validated_snapshot_rows_examined+r.rows.size());
 }
 std::size_t retained_bytes(std::size_t budget) {
   return reuse_arena && budget>=4096?std::min(budget,std::size_t(8*1024*1024)):0;

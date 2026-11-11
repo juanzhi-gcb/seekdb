@@ -28,6 +28,9 @@ struct Options {
   std::size_t memory_budget_bytes = 8 * 1024 * 1024;
   bool selective_decode = true;
   bool batch_writes = true;
+  // Format04 omits unary radix pages; existing format02/03 files stay unchanged.
+  bool compressed_paths = true;
+  bool packed_branches = true; // Format04 sparse nodes share immutable pages.
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
@@ -48,6 +51,9 @@ struct Options {
   // Reuse completely validated numeric columns instead of parsing raw rows.
   // Shares the snapshot budget; unsupported predicates retain the raw path.
   bool typed_scan_cache = true;
+  // Reuse validation proofs of a complete owned raw snapshot. False retains
+  // full per-query row validation for controlled comparisons.
+  bool validated_snapshot_replay = true;
   // Internal SQL candidates have decoder/cache finiteness proofs. Keep the
   // checked public vector API unchanged; false is the measured reference.
   bool validated_vector_kernel = true;
@@ -62,6 +68,7 @@ struct QuerySink {
 enum class SearchMode { Exact, Ann };
 struct ExecutionInfo {
   std::uint64_t snapshot_rows_examined = 0;
+  std::uint64_t validated_snapshot_rows_examined = 0;
   // Arena capacity retained after TopK execution; other paths do not collect it.
   std::size_t snapshot_bytes = 0;
   std::uint64_t typed_rows_examined = 0;

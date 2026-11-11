@@ -41,12 +41,15 @@ public:
   };
   // Cache budget covers the allocated entry array, including page and entry metadata.
   // Fixed Store bookkeeping and allocator overhead are excluded; zero disables caching.
-  // Packing selects format03 for new files; existing formats are never migrated.
+  // Packing selects format03; compressed_paths selects format04 for new files.
+  // Existing formats are never migrated. Format04 optionally packs sparse
+  // branch nodes as well as omitting unary paths; both encodings remain readable.
   // Each scan lazily allocates its own bounded validated packed-page cache.
   explicit Store(const std::filesystem::path& path, std::size_t index_cache_bytes=0,
                  bool packed_values=false, std::size_t packed_scan_cache_bytes=262144,
                  std::size_t data_cache_bytes=0,
-                 CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered);
+                 CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered,
+                 bool compressed_paths=false, bool packed_branches=true);
   // Separate lazy four-way cache for validated packed and overflow pages. The budget
   // includes the entire set array (pages, IDs, ranks, padding); fixed object and
   // allocator overhead are excluded. A budget smaller than one set disables it.

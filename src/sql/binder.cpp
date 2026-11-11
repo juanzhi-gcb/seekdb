@@ -14,6 +14,36 @@ namespace minivectordb::sql {
     throw Error(ErrorCode::Schema,"unknown column: "+std::string(name));
   }
   namespace {
+    // Allocation-free recognition of the lexer's plain numeric-array subset.
+    // Validate the entire grammar before converting any number, preserving
+    // error precedence. Comments/other spellings use the original lexer.
+    template<class F> bool plain_vector(std::string_view text,F&& consume) {
+      std::size_t i=0;
+      auto digit=[](char c){return c>='0'&&c<='9';};
+      auto skip=[&]{while(i<text.size()&&std::string_view(" \t\r\n\f").find(text[i])!=std::string_view::npos)++i;};
+      skip();if(i==text.size()||text[i++]!='[')return false;skip();
+      if(i<text.size()&&text[i]==']') {++i;skip();return i==text.size();}
+      for(;;) {
+        const auto begin=i;
+        if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
+        bool any=false;
+        while(i<text.size()&&digit(text[i])) {++i;any=true;}
+        if(i<text.size()&&text[i]=='.') {
+          ++i;while(i<text.size()&&digit(text[i])) {++i;any=true;}
+        }
+        if(!any)return false;
+        if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
+          ++i;if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
+          const auto digits=i;while(i<text.size()&&digit(text[i]))++i;
+          if(i==digits)return false;
+        }
+        consume(text.substr(begin,i-begin));skip();
+        if(i==text.size())return false;
+        if(text[i]==']') {++i;skip();return i==text.size();}
+        if(text[i++]!=',')return false;
+        skip();
+      }
+    }
     double real(std::string_view text) {
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
@@ -85,7 +115,7 @@ namespace minivectordb::sql {
       return b;
     }
   }
-  Cell bind_literal(const Literal&v,const Column&c) {
+  Cell bind_literal(const Literal&v,const Column&c,bool fast_vector) {
     try {
       if(c.type==ColumnType::Bigint) {
         if(v.kind!=Literal::Number)throw Error(ErrorCode::Type,"expected BIGINT literal");
@@ -95,6 +125,14 @@ namespace minivectordb::sql {
         if(v.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VARCHAR literal");
         validate_text(v.text,c.extent);
         return v.text;
+      }
+      if(fast_vector && v.kind==Literal::String) {
+        std::size_t count=0;
+        if(plain_vector(v.text,[&](auto){++count;})) {
+          std::vector<double> values;values.reserve(count);
+          (void)plain_vector(v.text,[&](auto component){values.push_back(real(component));});
+          return make_vector(values,c.extent);
+        }
       }
       auto components=vector_components(v);
       std::vector<double> values;

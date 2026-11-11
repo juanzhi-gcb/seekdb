@@ -2,6 +2,7 @@
 #include "sorter.hpp"
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
+#include "snapshot_row.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include "../vector/validated.hpp"
@@ -119,7 +120,7 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -192,6 +193,21 @@ namespace minivectordb {
       if(!raw)throw Error(ErrorCode::Corruption,"selected row disappeared");
       SelectRow row(s,key,*raw,options.selective_decode,info);
       visit(row);
+    }
+    void replay_snapshot(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                         ExecutionInfo& info,const VectorVisitor& visit,std::vector<float>& scratch) {
+      profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      try {
+        snapshot.scan([&](auto key,auto bytes) {
+          profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+          ++info.rows_examined;++info.snapshot_rows_examined;++info.validated_snapshot_rows_examined;
+          sql::SnapshotRow row(s,key,bytes);
+          if(row.matches(b.predicates)) {
+            row.copy_vector(e.column,scratch);
+            ++info.distances_computed;visit(key,scratch);
+          }
+        });
+      } catch(...) {snapshot.clear();throw;}
     }
     bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                       const std::optional<VectorIndex>& index,ExecutionInfo& info,
@@ -321,6 +337,9 @@ namespace minivectordb {
               if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
             };
             if(options.paired_index_scan && snapshot.ready(s.id,index->id)) {
+              if(options.validated_snapshot_replay && options.reuse_vector_scratch) {
+                replay_snapshot(s,b,e,info,visit,vector_scratch);return;
+              }
               snapshot.scan([&](auto key,auto bytes) {
                 ++info.rows_examined;++info.snapshot_rows_examined;
                 SelectRow row(s,key,bytes,options.selective_decode,info);
@@ -350,6 +369,9 @@ namespace minivectordb {
               ++info.rows_examined;
               fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
             });
+          } else if(options.validated_snapshot_replay && options.reuse_vector_scratch && !b.primary_lookup &&
+                    options.table_scan_snapshot && snapshot.ready(s.id,0)) {
+            replay_snapshot(s,b,e,info,visit,vector_scratch);
           } else scan_select(s,b,info,consume_row,true);
         },{});
         info.snapshot_bytes=snapshot.bytes();

@@ -140,7 +140,7 @@ Result warm(Database& db,const std::vector<Item>& items,const std::vector<float>
     CHECK(validations(r)<=r.rows.size());CHECK(r.info.snapshot_bytes==0);
   } else {
     CHECK(r.info.typed_rows_examined==0);
-    CHECK(validations(r)==items.size()+r.rows.size());
+    CHECK(validations(r)==items.size()-r.info.validated_snapshot_rows_examined+r.rows.size());
   }
   return r;
 }

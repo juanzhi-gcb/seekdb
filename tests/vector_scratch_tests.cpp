@@ -129,7 +129,7 @@ void sql_case(const std::filesystem::path& path,std::size_t dimensions,
     // Cold indexed scans retain base/index equality checks. Eager decoding also
     // owns vectors in winner refetch, even if output needs only id and distance.
     const bool scratch_scan=lazy && reuse && (!indexed || phase==2);
-    const auto scan_cells=scratch_scan?0:items.size();
+    const auto scan_cells=scratch_scan?0:items.size()-r.info.validated_snapshot_rows_examined;
     CHECK(r.info.vector_values_materialized==scan_cells+(lazy?0:r.rows.size()));
     CHECK(r.info.vector_index_entries_examined==((indexed && phase<2)?items.size():0));
     CHECK(r.info.snapshot_rows_examined==(phase==2?items.size():0));
@@ -143,7 +143,7 @@ void sql_case(const std::filesystem::path& path,std::size_t dimensions,
     check_answer(r,items,q,other,project_vector,project_other);
     // Winner refetch owns its projected/evaluated vector Cell. Projecting both
     // a vector and another distance must still materialize it only once.
-    const auto scan_cells=(lazy && reuse)?0:items.size();
+    const auto scan_cells=(lazy && reuse)?0:items.size()-r.info.validated_snapshot_rows_examined;
     CHECK(r.info.vector_values_materialized==scan_cells+r.rows.size());
     CHECK(r.info.vector_index_entries_examined==0);
     CHECK(r.info.snapshot_rows_examined==items.size());

@@ -2,6 +2,7 @@
 import importlib.util
 import math
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +15,32 @@ spec.loader.exec_module(bench)
 
 
 class ContractBenchmarkTests(unittest.TestCase):
+    def test_paged_verification_checks_every_row_and_terminal_page(self):
+        count = 10001
+        w = {"vectors": [[0.0]] * count, "group_values": [0] * count, "bodies": ["x"] * count}
+        records = [[i, 0, [0.0], "x"] for i in range(count)]
+        calls = []
+        def request(sql):
+            calls.append(sql)
+            match = re.search(r"WHERE id>(-?\d+)", sql)
+            last = int(match[1]) if match else -1
+            rows = [row for row in records if row[0] > last][:1000]
+            return {"ok": True, "columns": ["id", "g", "v", "body"], "rows": rows}, 0
+        bench.verify_stored_rows(request, w)
+        self.assertEqual(len(calls), 12)
+        self.assertIn("id>10000", calls[-1])
+        for broken in (records[:-1], records + [[count, 0, [0.0], "x"]],
+                       records[:999] + records[998:]):
+            original, records = records, broken
+            with self.assertRaises(AssertionError):
+                bench.verify_stored_rows(request, w)
+            records = original
+
+    def test_paged_verification_rejects_wrong_columns(self):
+        w = {"vectors": [None] * 10001}
+        with self.assertRaises(AssertionError):
+            bench.verify_stored_rows(lambda sql: ({"ok": True, "columns": [], "rows": []}, 0), w)
+
     def test_io_requires_exact_device_and_both_counters(self):
         parsed = bench.parse_io("8:1 rbytes=11 wbytes=17 rios=1 wios=2\n8:2 rbytes=19 wbytes=23", "8:1")
         self.assertEqual(parsed, {"rbytes": 11, "wbytes": 17})

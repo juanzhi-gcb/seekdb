@@ -32,6 +32,7 @@ struct Hooks {
   std::string order;
 } hooks;
 int cases=0;
+bool compressed_paths=false;
 void check(bool value,const std::string& label) {
   if(!value)throw std::runtime_error(label);
 }
@@ -58,7 +59,7 @@ void disarm() {hooks.armed=false;}
 std::unique_ptr<Store> open_store(const fs::path& path,bool process_crash,bool packed) {
 #ifdef MVDB_COMMIT_POLICY_API
   return std::make_unique<Store>(path,65536,packed,16384,65536,
-      process_crash?CommitSyncPolicy::ProcessCrash:CommitSyncPolicy::Ordered);
+      process_crash?CommitSyncPolicy::ProcessCrash:CommitSyncPolicy::Ordered,compressed_paths);
 #else
   // TDD bootstrap: old implementation must reach the one-sync assertion and
   // fail at runtime (2 != 1), rather than fail to compile on a missing enum.
@@ -245,6 +246,7 @@ extern "C" int __wrap_fsync(int fd) {
   return result;
 }
 int main(int argc,char** argv) {
+  compressed_paths=argc>1 && std::string(argv[1])=="--compressed";
   fs::path directory;
   try {
     const char* configured=std::getenv("MVDB_TEST_DIR");check(configured,"MVDB_TEST_DIR required");

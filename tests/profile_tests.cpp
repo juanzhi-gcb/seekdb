@@ -57,8 +57,10 @@ int main() {
    CHECK(filtered.table_scan.calls==1 && filtered.scan_consume.calls==4);
    // Three rows evaluate both predicates; the fourth short-circuits after one.
    CHECK(filtered.predicate_evaluation.calls==7);
-   CHECK(filtered.row_validation.calls==6 && filtered.vector_distance.calls==3);
-   CHECK(filtered.row_materialization.calls==6);
+   // This third scan reuses the complete snapshot's validation proof. Only
+   // the two projected winners are fetched and validated again.
+   CHECK(filtered.row_validation.calls==2 && filtered.vector_distance.calls==3);
+   CHECK(filtered.row_materialization.calls==2);
    CHECK(filtered.vector_scratch_copy.calls==3 && filtered.vector_scratch_copy.bytes==24);
    CHECK(filtered.table_scan.nanoseconds>=filtered.scan_consume.nanoseconds);
    CHECK(filtered.predicate_evaluation.nanoseconds>0);

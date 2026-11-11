@@ -11,9 +11,10 @@
 #include <unistd.h>
 using namespace minivectordb;
 namespace fs=std::filesystem;
+bool compressed_paths=false;
 #define CHECK(x) do { if(!(x)) throw std::runtime_error(std::string(#x)+" line "+std::to_string(__LINE__)); } while(false)
 Options options(const fs::path& dir,bool selective=true,bool batch=true,bool packed=true,std::size_t cache=262144) {
-  Options o; o.sort_directory=dir/"sort"; o.memory_budget_bytes=4096;
+  Options o; o.sort_directory=dir/"sort"; o.memory_budget_bytes=4096; o.compressed_paths=compressed_paths;
   o.selective_decode=selective; o.batch_writes=batch; o.packed_values=packed; o.packed_scan_cache_bytes=cache; return o;
 }
 std::vector<Row> query(Database& db,const std::string& sql) {
@@ -33,7 +34,7 @@ void schema(Database& db) {
   db.execute("CREATE TABLE u(id BIGINT PRIMARY KEY,v VECTOR(2),s VARCHAR(20000),n BIGINT)");
 }
 void format03(const fs::path& path) {
-  std::ifstream f(path,std::ios::binary); std::string magic(8,'\0'); f.read(magic.data(),8); CHECK(magic.find("03")!=std::string::npos);
+  std::ifstream f(path,std::ios::binary); std::string magic(8,'\0'); f.read(magic.data(),8); CHECK(magic==(compressed_paths?"MVDBRT04":"MVDBRT03"));
 }
 void comparisons(const fs::path& dir) {
   const std::vector<std::string> queries{
@@ -127,7 +128,8 @@ void crash(const fs::path& dir) {
   for(int i=0;i<300;++i)CHECK(rows[static_cast<std::size_t>(i)]==Row({std::int64_t(i),std::int64_t(i%3)}));
   CHECK(query(db,"SELECT * FROM u").size()==150);
 }
-int main() {
+int main(int argc,char** argv) {
+  compressed_paths=argc>1 && std::string(argv[1])=="--compressed";
   try {
     const auto* root=std::getenv("MVDB_TEST_DIR"); CHECK(root); fs::create_directories(root);
     auto name=(fs::path(root)/"packed-sql-XXXXXX").string(); CHECK(mkdtemp(name.data())); fs::path dir(name);

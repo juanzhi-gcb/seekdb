@@ -2,16 +2,16 @@
   "kind": "local-material-integrity-manifest",
   "date": "2026-11-11",
   "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
-  "base_commit": "524133baf0a4ed947805236c02cce9cecffc0be3",
-  "submission_state": "Contract audit and mixed-filter fix evidence appended locally; not committed, pushed or submitted. Formal feedback remains524133 only.",
+  "base_commit": "8a67457f946b6e1cf76f5198ce5a458fc6107742",
+  "submission_state": "Resource optimization validated locally; material entry regenerated with an explicit summary; no push or formal evaluation.",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 128671,
-      "sha256": "b5d3fb9f4ab71bb4f42102e793e5643c3377a7118315d0178c6cf0426f31acaf"
+      "bytes": 125952,
+      "sha256": "baf0e8c71aab7acaf5d4c1b2b7d96d144dd5f66783e018a59d4cd00bf9c5cb93"
     },
     "conversation.json": {
-      "bytes": 128671,
-      "sha256": "b5d3fb9f4ab71bb4f42102e793e5643c3377a7118315d0178c6cf0426f31acaf"
+      "bytes": 125952,
+      "sha256": "baf0e8c71aab7acaf5d4c1b2b7d96d144dd5f66783e018a59d4cd00bf9c5cb93"
     }
   },
   "before_material": {
@@ -27,9 +27,9 @@
     "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
   },
   "counts": {
-    "user_records": 45,
-    "experiments": 71,
-    "agent_observations": 38,
+    "user_records": 48,
+    "experiments": 81,
+    "agent_observations": 40,
     "retrospective_cases": 5
   },
   "original_records_preserved": true,
@@ -43,5 +43,11 @@
     "path": "bench/results/contract-20261111/previous-source/agent/conversation.json",
     "bytes": 122152,
     "sha256": "ea9319cb0fa601363b7c8990ec83b99dab1aa829514777380be7a85c0e36adc4"
+  },
+  "previous_candidate_material": {
+    "commit": "8a67457f946b6e1cf76f5198ce5a458fc6107742",
+    "path": "bench/results/resources-20261111/material-before.json",
+    "bytes": 120492,
+    "sha256": "133942a285be61a452e668624f0d167686db0a9b7a6eddce32cfb33056f54d93"
   }
 }

@@ -10,7 +10,8 @@ namespace minivectordb::sql {
 // Owns one complete, validated base-table scan. An index ID additionally records
 // verified index/base consistency; index zero identifies an unindexed scan.
 // Executor invalidates before every non-SELECT, so no database root or schema can
-// change while the snapshot is reused. Every replay still validates all row bytes.
+// change while the snapshot is reused. The executor can reuse these admission
+// proofs on replay; structural bounds are still checked and winners are refetched.
 // Invalidation may retain the arena, never old rows or their validation proof.
 // A failed or oversized builder is never readable. Budget includes record headers.
 class ScanSnapshot {

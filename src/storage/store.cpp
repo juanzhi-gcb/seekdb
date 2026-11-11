@@ -20,9 +20,11 @@ namespace {
 constexpr std::size_t page_size=4096, payload=32, chunk_size=page_size-payload;
 using Page=std::array<unsigned char,page_size>;
 constexpr std::uint64_t packed_tag=1ULL<<63;
+constexpr std::uint64_t branch_tag=1ULL<<62;
 constexpr std::size_t max_slots=508;
-const char* page_magic(bool v3) {return v3?"MVDBPG03":"MVDBPG02";}
-const char* root_magic(bool v3) {return v3?"MVDBRT03":"MVDBRT02";}
+constexpr std::size_t prefix_offset=payload+256*8;
+const char* page_magic(bool v3,bool v4=false) {return v4?"MVDBPG04":v3?"MVDBPG03":"MVDBPG02";}
+const char* root_magic(bool v3,bool v4=false) {return v4?"MVDBRT04":v3?"MVDBRT03":"MVDBRT02";}
 enum : std::uint32_t { branch=1, overflow=2, packed=3 };
 std::atomic<std::uint64_t> next_owner{1};
 [[noreturn]] void io_error(const char* action) {throw std::system_error(errno,std::generic_category(),action);}
@@ -80,14 +82,18 @@ void sync_fd(int fd) {
     if(errno!=EINTR) io_error("fsync");
   }
 }
-Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent,bool v3) {
-  Page p{}; std::memcpy(p.data(),root_magic(v3),8);
+Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent,bool v3,bool v4=false) {
+  Page p{}; std::memcpy(p.data(),root_magic(v3,v4),8);
   encode(p,8,generation); encode(p,16,root); encode(p,24,extent);
   encode(p,32,page_checksum(p,32),4); return p;
 }
 bool valid_root(const Page& p,std::uint64_t complete_pages) {
-  if((std::memcmp(p.data(),root_magic(false),8)!=0 && std::memcmp(p.data(),root_magic(true),8)!=0) || decode(p,32,4)!=page_checksum(p,32)) return false;
+  if((std::memcmp(p.data(),root_magic(false),8)!=0 && std::memcmp(p.data(),root_magic(true),8)!=0 && std::memcmp(p.data(),root_magic(true,true),8)!=0) || decode(p,32,4)!=page_checksum(p,32)) return false;
   auto root=decode(p,16), extent=decode(p,24);
+  if((root&branch_tag) && !(root&packed_tag)) {
+    if(p[7]!='4' || (root&511)>=max_slots)return false;
+    root=(root&~branch_tag)>>9;
+  }
   return extent>=2 && extent<=complete_pages && (root==0 || (root>=2 && root<extent));
 }
 std::uint64_t ordered_key(std::int64_t key) {return std::bit_cast<std::uint64_t>(key)^(1ULL<<63);}
@@ -138,7 +144,7 @@ struct Store::Impl {
   int fd=-1;
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
-  bool active=false, poisoned=false, format3=false, packing=false;
+  bool active=false, poisoned=false, format3=false, packing=false, compressed_paths=false, packed_branches=true;
   CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered;
   std::size_t scan_budget=0;
   // Only the entry array is allocated, lazily on the first packed reference.
@@ -157,11 +163,14 @@ struct Store::Impl {
       return &entries[id%count];
     }
   };
-  std::uint64_t physical(std::uint64_t ref,bool allow_packed=false) const {
+  std::uint64_t physical(std::uint64_t ref,bool allow_packed=false,bool allow_branch=false) const {
     auto id=ref;
     if(ref&packed_tag) {
       if(!format3 || !allow_packed || (ref&511)>=max_slots)corrupt();
       id=(ref&~packed_tag)>>9;
+    } else if(ref&branch_tag) {
+      if(!compressed_paths || !allow_branch || (ref&511)>=max_slots)corrupt();
+      id=(ref&~branch_tag)>>9;
     }
     if(id<2 || id>=next_page)corrupt();
     return id;
@@ -169,18 +178,53 @@ struct Store::Impl {
   ~Impl() {if(fd>=0) ::close(fd);}
   void usable() const {if(poisoned) throw std::runtime_error("commit outcome uncertain; close and reopen Store");}
   void transaction() const {usable(); if(!active) throw std::logic_error("no active transaction");}
-  Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0) const {
+  Page branch_view(const Page& page,std::uint64_t id,unsigned depth) const {
+    if(!compressed_paths || decode(page,12,4)==depth)return page;
+    // Expand only in memory. Persisted edges remain strictly backward by page
+    // address; a virtual unary edge may point to this same immutable node.
+    auto result=empty_page(branch,depth);
+    std::copy_n(page.data()+prefix_offset,16,result.data()+prefix_offset);
+    encode(result,payload+page[prefix_offset+depth]*8,id);
+    return result;
+  }
+  Page branch_at(std::uint64_t id,unsigned depth,std::uint64_t space,std::uint64_t key,bool expand=true) const {
+    auto page=read(id,branch,depth,expand);
+    if(compressed_paths)for(unsigned i=0;i<depth;++i)
+      if(page[prefix_offset+i]!=key_index(space,key,i))corrupt();
+    return page;
+  }
+  Page unpack_branch(std::uint64_t ref) const {
+    const auto page=read(physical(ref,false,true),packed);
+    const auto slot=ref&511;
+    if(slot>=decode(page,12,4))corrupt();
+    const auto start=decode(page,payload+slot*8,4),length=decode(page,payload+slot*8+4,4);
+    if(length<50 || page[static_cast<std::size_t>(start)]!=1)corrupt();
+    const auto* bytes=page.data()+start;
+    const auto depth=bytes[1];if(depth>15)corrupt();
+    auto result=empty_page(branch,depth);
+    std::copy_n(bytes+2,16,result.data()+prefix_offset);
+    std::size_t offset=50,count=0;
+    for(unsigned i=0;i<256;++i)if(bytes[18+i/8]&(1u<<(i%8))) {
+      if(offset+8>length)corrupt();
+      std::uint64_t child=0;for(unsigned n=0;n<8;++n)child|=std::uint64_t(bytes[offset+n])<<(8*n);
+      if(!child)corrupt();
+      encode(result,payload+i*8,child);offset+=8;++count;
+    }
+    if(!count || offset!=length)corrupt();
+    return result;
+  }
+  Page read(std::uint64_t id,std::uint32_t type,unsigned depth=0,bool expand=true) const {
     profile::detail::count(type==branch?&profile::Snapshot::page_read_branch:
         type==packed?&profile::Snapshot::page_read_packed:&profile::Snapshot::page_read_overflow);
-    (void)physical(id);
+    const auto physical_id=physical(id,false,type==branch);
     CacheEntry* slot=nullptr;
     if(type==branch && cache_count) {
       slot=&cache[id%cache_count];
       if(slot->id==id) {
         // Range was checked above; a validated page is only reusable at its depth/type.
-        if(slot->depth!=depth || decode(slot->page,8,4)!=type) corrupt();
+        if((compressed_paths?slot->depth<depth:slot->depth!=depth) || decode(slot->page,8,4)!=type) corrupt();
         ++stats.hits;
-        return slot->page;
+        return expand?branch_view(slot->page,id,depth):slot->page;
       }
       ++stats.misses;
     }
@@ -201,13 +245,22 @@ struct Store::Impl {
         }
       }
     }
-    auto p=read_raw(fd,id);
-    if(std::memcmp(p.data(),page_magic(format3),8)!=0 || decode(p,24,4)!=page_checksum(p,24) || decode(p,8,4)!=type) corrupt();
+    const bool packed_node=type==branch && (id&branch_tag)!=0;
+    auto p=packed_node?unpack_branch(id):read_raw(fd,id);
+    if(std::memcmp(p.data(),page_magic(format3,compressed_paths),8)!=0 || (!packed_node && decode(p,24,4)!=page_checksum(p,24)) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
-      if(decode(p,12,4)!=depth) corrupt();
+      const auto stored_depth=decode(p,12,4);
+      if(stored_depth>15 || (compressed_paths?stored_depth<depth:stored_depth!=depth)) corrupt();
+      if(compressed_paths)for(auto i=stored_depth;i<16;++i)
+        if(p[prefix_offset+static_cast<std::size_t>(i)]!=0)corrupt();
       for(unsigned i=0;i<256;++i) {
         auto child=decode(p,payload+i*8);
-        if(child!=0 && physical(child,depth==15)>=id) corrupt();
+        if(child) {
+          const auto target=physical(child,stored_depth==15,stored_depth<15);
+          if(target>physical_id)corrupt();
+          if(target==physical_id && !(stored_depth<15 && packed_node &&
+              (child&branch_tag) && !(child&packed_tag) && (child&511)<(id&511)))corrupt();
+        }
       }
     } else if(type==overflow) {
       auto next=decode(p,16);
@@ -228,7 +281,7 @@ struct Store::Impl {
     if(slot) {
       if(slot->id) ++stats.evictions;
       else ++stats.resident_pages;
-      slot->page=p; slot->depth=depth; slot->id=id;
+      slot->page=p; slot->depth=static_cast<unsigned>(decode(p,12,4)); slot->id=id;
     }
     if(data_slot) {
       if(data_slot->id)++data_stats.evictions;
@@ -236,14 +289,56 @@ struct Store::Impl {
       touch(*set,*data_slot);
       data_slot->page=p; data_slot->id=id;
     }
-    return p;
+    return type==branch&&expand?branch_view(p,id,depth):p;
   }
   std::uint64_t append(Page p) {
     // Publish an address only after its complete write. A failed page has no root references.
-    auto id=next_page; if(id&packed_tag)throw std::length_error("database page address exhausted"); encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
+    auto id=next_page; if(id&(packed_tag|branch_tag))throw std::length_error("database page address exhausted"); encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
   }
   Page empty_page(std::uint32_t type,unsigned used) const {
-    Page p{}; std::memcpy(p.data(),page_magic(format3),8); encode(p,8,type,4); encode(p,12,used,4); return p;
+    Page p{}; std::memcpy(p.data(),page_magic(format3,compressed_paths),8); encode(p,8,type,4); encode(p,12,used,4); return p;
+  }
+  struct NodeBatch {
+    Impl& store;
+    Page page;
+    std::size_t slots=0,end=page_size;
+    explicit NodeBatch(Impl& owner):store(owner),page(owner.empty_page(packed,0)) {}
+    bool enabled() const {return store.compressed_paths && store.packed_branches;}
+    void flush() {
+      if(!slots)return;
+      encode(page,12,slots,4);store.append(page);
+      page=store.empty_page(packed,0);slots=0;end=page_size;
+    }
+    std::uint64_t add(const Page& node) {
+      std::array<unsigned char,50+256*8> bytes{};
+      bytes[0]=1;bytes[1]=static_cast<unsigned char>(decode(node,12,4));
+      std::copy_n(node.data()+prefix_offset,16,bytes.data()+2);
+      std::size_t length=50;
+      for(unsigned i=0;i<256;++i)if(auto child=decode(node,payload+i*8)) {
+        bytes[18+i/8]|=static_cast<unsigned char>(1u<<(i%8));
+        for(unsigned n=0;n<8;++n)bytes[length+n]=static_cast<unsigned char>(child>>(8*n));
+        length+=8;
+      }
+      if(slots==max_slots || end<payload+(slots+1)*8+length)flush();
+      if(store.next_page>((branch_tag-1)>>9))throw std::length_error("node page address exhausted");
+      const auto reference=branch_tag|(store.next_page<<9)|slots;
+      end-=length;std::copy_n(bytes.data(),length,page.data()+end);
+      encode(page,payload+slots*8,end,4);encode(page,payload+slots*8+4,length,4);++slots;
+      return reference;
+    }
+  };
+  std::uint64_t publish_branch(Page page,unsigned depth,std::uint64_t space,std::uint64_t key,NodeBatch& nodes) {
+    unsigned count=0; std::uint64_t only=0;
+    for(unsigned i=0;i<256;++i)if(auto child=decode(page,payload+i*8)) {++count;only=child;}
+    if(!count)return 0;
+    if(compressed_paths) {
+      // Values at depth15 are not nodes. Only intermediate unary nodes can
+      // disappear; their prefix lives in the first retained descendant.
+      if(count==1 && depth<15)return only;
+      for(unsigned i=0;i<16;++i)
+        page[prefix_offset+i]=i<depth?static_cast<unsigned char>(key_index(space,key,i)):0;
+    }
+    return nodes.enabled()?nodes.add(page):append(page);
   }
   std::uint64_t write_value(std::string_view value) {
     std::uint64_t next=0; std::size_t end=value.size();
@@ -281,22 +376,38 @@ struct Store::Impl {
   }
   std::uint64_t find(std::uint64_t space,std::uint64_t key) const {
     auto id=root;
-    for(unsigned depth=0;depth<16 && id;++depth) {auto p=read(id,branch,depth); id=decode(p,payload+key_index(space,key,depth)*8);}
+    for(unsigned depth=0;depth<16 && id;) {
+      auto p=branch_at(id,depth,space,key,false);
+      const auto terminal=static_cast<unsigned>(decode(p,12,4));
+      if(compressed_paths)for(unsigned i=depth;i<terminal;++i)
+        if(p[prefix_offset+i]!=key_index(space,key,i))return 0;
+      id=decode(p,payload+key_index(space,key,terminal)*8);depth=terminal+1;
+    }
     return id;
   }
-  std::uint64_t replace(std::uint64_t id,unsigned depth,std::uint64_t space,std::uint64_t key,std::uint64_t new_value) {
-    auto p=id?read(id,branch,depth):empty_page(branch,depth);
+  std::uint64_t locate_namespace(std::uint64_t snapshot,std::uint64_t space) const {
+    auto id=snapshot;
+    for(unsigned depth=0;depth<8 && id;) {
+      const auto page=branch_at(id,depth,space,0,false);
+      const auto terminal=static_cast<unsigned>(decode(page,12,4));
+      if(compressed_paths)for(unsigned i=depth;i<std::min(terminal,8u);++i)
+        if(page[prefix_offset+i]!=key_index(space,0,i))return 0;
+      if(terminal>=8)return id;
+      id=decode(page,payload+key_index(space,0,terminal)*8);depth=terminal+1;
+    }
+    return id;
+  }
+  std::uint64_t replace(std::uint64_t id,unsigned depth,std::uint64_t space,std::uint64_t key,std::uint64_t new_value,NodeBatch& nodes) {
+    auto p=id?branch_at(id,depth,space,key):empty_page(branch,depth);
     auto offset=payload+key_index(space,key,depth)*8;
-    auto child=depth==15?new_value:replace(decode(p,offset),depth+1,space,key,new_value);
+    auto child=depth==15?new_value:replace(decode(p,offset),depth+1,space,key,new_value,nodes);
     encode(p,offset,child);
-    bool empty=true;
-    for(unsigned i=0;i<256;++i) if(decode(p,payload+i*8)) {empty=false; break;}
-    return empty?0:append(p);
+    return publish_branch(p,depth,space,key,nodes);
   }
   struct Replacement { std::uint64_t key, value; };
   std::uint64_t merge_batch(std::uint64_t id,unsigned depth,std::uint64_t space,
-                            std::span<const Replacement> replacements) {
-    auto page=id?read(id,branch,depth):empty_page(branch,depth);
+                            std::span<const Replacement> replacements,NodeBatch& nodes) {
+    auto page=id?branch_at(id,depth,space,replacements.front().key):empty_page(branch,depth);
     bool changed=false;
     for(std::size_t first=0;first<replacements.size();) {
       const auto index=key_index(space,replacements[first].key,depth);
@@ -305,22 +416,22 @@ struct Store::Impl {
       const auto offset=payload+index*8;
       const auto old_child=decode(page,offset);
       const auto child=depth==15?replacements[first].value:
-          merge_batch(old_child,depth+1,space,replacements.subspan(first,end-first));
+          merge_batch(old_child,depth+1,space,replacements.subspan(first,end-first),nodes);
       if(child!=old_child) { encode(page,offset,child); changed=true; }
       first=end;
     }
     if(!changed)return id;
-    for(unsigned i=0;i<256;++i)if(decode(page,payload+i*8))return append(page);
-    return 0;
+    return publish_branch(page,depth,space,replacements.front().key,nodes);
   }
   void walk_equal(std::uint64_t left,std::uint64_t right,unsigned depth,std::uint64_t prefix,
+                  std::uint64_t left_space,std::uint64_t right_space,
                   const std::function<void(std::int64_t,std::string_view,std::string_view)>& visitor,
                   ScanCache& memo) const {
     if(!left && !right)return;
     if(!left || !right)throw KeySetMismatch();
     // Copies remain valid if visitor mutations evict cache entries or change root.
-    const auto a=read(left,branch,depth);
-    const auto b=read(right,branch,depth);
+    const auto a=branch_at(left,depth,left_space,prefix);
+    const auto b=branch_at(right,depth,right_space,prefix);
     for(unsigned i=0;i<256;++i) {
       const auto ac=decode(a,payload+i*8),bc=decode(b,payload+i*8);
       if(!ac && !bc)continue;
@@ -329,22 +440,26 @@ struct Store::Impl {
       if(depth==15) {
         const auto av=value(ac,&memo),bv=value(bc,&memo);
         visitor(signed_key(key),av,bv);
-      } else walk_equal(ac,bc,depth+1,key,visitor,memo);
+      } else walk_equal(ac,bc,depth+1,key,left_space,right_space,visitor,memo);
     }
   }
-  void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,const std::function<void(std::int64_t,std::string_view)>& visitor,ScanCache& memo) const {
+  void walk(std::uint64_t id,unsigned depth,std::uint64_t prefix,std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor,ScanCache& memo) const {
     if(!id) return;
-    auto p=read(id,branch,depth);
+    auto p=branch_at(id,depth,space,prefix,false);
+    const auto terminal=static_cast<unsigned>(decode(p,12,4));
+    if(compressed_paths)for(unsigned i=depth;i<terminal;++i)
+      prefix|=static_cast<std::uint64_t>(p[prefix_offset+i])<<((15-i)*8);
+    depth=terminal;
     for(unsigned i=0;i<256;++i) {
       auto child=decode(p,payload+i*8); if(!child) continue;
       auto key=prefix|(static_cast<std::uint64_t>(i)<<((15-depth)*8));
       if(depth==15) {auto contents=value(child,&memo); visitor(signed_key(key),contents);}
-      else walk(child,depth+1,key,visitor,memo);
+      else walk(child,depth+1,key,space,visitor,memo);
     }
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches):impl_(std::make_unique<Impl>()) {
   if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
     throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
@@ -357,11 +472,13 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   }
   auto& s=*impl_;
   s.commit_sync_policy=commit_sync_policy;
-  s.packing=packed_values; s.format3=packed_values; s.scan_budget=packed_scan_cache_bytes;
+  s.compressed_paths=compressed_paths;
+  s.packed_branches=packed_branches;
+  s.packing=packed_values; s.format3=packed_values||compressed_paths; s.scan_budget=packed_scan_cache_bytes;
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created) {
-    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3),0); sync_fd(s.fd);
+    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3,s.compressed_paths),0); sync_fd(s.fd);
     auto parent=path.parent_path(); if(parent.empty()) parent=".";
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
     if(directory<0) io_error("open database directory");
@@ -377,7 +494,8 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   if(!av && !bv) corrupt();
   if(av && bv && a[7]!=b[7])corrupt();
   const auto& selected=(!av || (bv && decode(b,8)>decode(a,8)))?b:a;
-  s.format3=selected[7]=='3';
+  s.compressed_paths=selected[7]=='4';
+  s.format3=selected[7]=='3'||s.compressed_paths;
   s.generation=decode(selected,8); s.root=s.durable_root=decode(selected,16);
   // Validate the published root against its durable extent. Trailing uncommitted pages are ignored.
   s.next_page=decode(selected,24);
@@ -411,13 +529,16 @@ std::optional<std::string> Store::get_in(std::uint64_t space,std::int64_t key) c
 void Store::put_in(std::uint64_t space,std::int64_t key,std::string_view value) {
   auto& s=*impl_; s.transaction();
   const auto data=s.write_value(value);
-  const auto next=s.replace(s.root,0,space,ordered_key(key),data);
+  Impl::NodeBatch nodes(s);
+  const auto next=s.replace(s.root,0,space,ordered_key(key),data,nodes);
+  nodes.flush();
   s.root=next;
 }
 bool Store::erase_in(std::uint64_t space,std::int64_t key) {
   auto& s=*impl_; s.transaction(); auto ordered=ordered_key(key);
   if(!s.find(space,ordered)) return false;
-  const auto next=s.replace(s.root,0,space,ordered,0); s.root=next; return true;
+  Impl::NodeBatch nodes(s);
+  const auto next=s.replace(s.root,0,space,ordered,0,nodes);nodes.flush();s.root=next;return true;
 }
 void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutations) {
   auto& state=*impl_; state.transaction();
@@ -476,7 +597,9 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   flush();
   // Values and every changed child precede their immutable parent. The working root
   // is assigned only when the whole merge succeeds; failed appends are unreachable.
-  const auto next=state.merge_batch(state.root,0,space,replacements);
+  Impl::NodeBatch nodes(state);
+  const auto next=state.merge_batch(state.root,0,space,replacements,nodes);
+  nodes.flush();
   state.root=next;
 }
 void Store::commit() {
@@ -487,7 +610,7 @@ void Store::commit() {
     // Every reachable COW page has already completed its write loop. Ordered
     // additionally persists these dependencies before publishing the root.
     if(s.commit_sync_policy==CommitSyncPolicy::Ordered)sync_fd(s.fd);
-    write_page(s.fd,make_root(next,s.root,s.next_page,s.format3),next%2);
+    write_page(s.fd,make_root(next,s.root,s.next_page,s.format3,s.compressed_paths),next%2);
     // Both modes acknowledge only after the root AND its data have been synced.
     sync_fd(s.fd);
   } catch(...) {s.poisoned=true; throw;}
@@ -507,24 +630,18 @@ void Store::scan(const std::function<void(std::int64_t,std::string_view)>& visit
   scan_in(0,visitor);
 }
 void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
-  auto& s=*impl_; s.usable(); auto id=s.root;
-  for(unsigned depth=0;depth<8 && id;++depth) {auto p=s.read(id,branch,depth); id=decode(p,payload+key_index(space,0,depth)*8);}
+  auto& s=*impl_; s.usable(); auto id=s.locate_namespace(s.root,space);
   Impl::ScanCache memo(s.scan_budget);
-  s.walk(id,8,0,visitor,memo);
+  s.walk(id,8,0,space,visitor,memo);
 }
 void Store::scan_equal_in(std::uint64_t left_space,std::uint64_t right_space,
                           const std::function<void(std::int64_t,std::string_view,std::string_view)>& visitor) const {
   auto& s=*impl_; s.usable(); const auto root=s.root;
   const auto locate=[&](std::uint64_t space) {
-    auto id=root;
-    for(unsigned depth=0;depth<8 && id;++depth) {
-      const auto page=s.read(id,branch,depth);
-      id=decode(page,payload+key_index(space,0,depth)*8);
-    }
-    return id;
+    return s.locate_namespace(root,space);
   };
   const auto left=locate(left_space),right=locate(right_space);
   Impl::ScanCache memo(s.scan_budget);
-  s.walk_equal(left,right,8,0,visitor,memo);
+  s.walk_equal(left,right,8,0,left_space,right_space,visitor,memo);
 }
 }
