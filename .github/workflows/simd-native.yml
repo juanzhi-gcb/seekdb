@@ -1,7 +1,7 @@
-name: MiniVectorDB native SIMD integration comparison
+name: MiniVectorDB Ubuntu22 native SIMD comparison
 on:
   push:
-    branches: ['codex/score-simd-native-20261112']
+    branches: ['codex/score-simd-ubuntu22-20261112']
 permissions:
   contents: read
 concurrency:
@@ -12,8 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [1, 2]
-    runs-on: ubuntu-24.04
+        sample: [1]
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
       - name: Fetch exact public source without stored credentials
