@@ -76,6 +76,9 @@ struct Options {
   // Cluster a completed snapshot by a reusable ordinary column before SIMD
   // transposition, making selective filters occupy dense candidate blocks.
   bool clustered_scan_cache = true;
+  // Restrict cached scans to bounds on the column actually clustered. False
+  // retains complete cached scans for controlled comparisons.
+  bool clustered_range_scan = true;
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;

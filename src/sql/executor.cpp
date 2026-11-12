@@ -290,6 +290,23 @@ namespace minivectordb {
       }
       return true;
     }
+    std::pair<std::size_t,std::size_t> typed_scan_range(const std::vector<CachedPredicate>& predicates) const {
+      std::size_t begin=0,end=typed_snapshot.size();
+      if(!options.clustered_range_scan)return {begin,end};
+      for(const auto& p:predicates) {
+        const auto bounds=p.text?typed_snapshot.ordered_bounds(p.value):
+            typed_snapshot.ordered_bounds(p.slot,p.number);
+        if(!bounds)continue;
+        const auto [lower,upper]=*bounds;
+        if(p.op=="=") {begin=std::max(begin,lower);end=std::min(end,upper);}
+        else if(p.op=="<")end=std::min(end,lower);
+        else if(p.op=="<=")end=std::min(end,upper);
+        else if(p.op==">")begin=std::max(begin,upper);
+        else if(p.op==">=")begin=std::max(begin,lower);
+        if(begin>=end)return {0,0};
+      }
+      return {begin,end};
+    }
     bool transpose_enabled() const noexcept {
       return options.transposed_scan_cache && options.validated_vector_kernel &&
           options.batched_vector_kernel && options.simd_vector_kernel && detail::has_avx2();
@@ -301,15 +318,19 @@ namespace minivectordb {
           !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
+      const auto [begin,end]=typed_scan_range(predicates);
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
           std::array<std::int64_t,16> keys{};
           std::vector<float> tail;
-          for(std::size_t r=0;r<typed_snapshot.size();r+=16) {
+          // The stored transpose is aligned to physical cache blocks. Keep
+          // that alignment and mask the two interval boundaries explicitly.
+          for(std::size_t r=begin/16*16;r<end;r+=16) {
             const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
             std::uint16_t mask=0;
             for(std::size_t lane=0;lane<count;++lane) {
+              if(r+lane<begin || r+lane>=end)continue;
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.rows_examined;++info.typed_rows_examined;
               keys[lane]=typed_snapshot.key(r+lane);
@@ -346,7 +367,8 @@ namespace minivectordb {
         if(typed_snapshot.ready(s.id,index_id,e.column) &&
             text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
           const auto predicates=typed_predicates(s,b);
-          for(std::size_t r=0;r<typed_snapshot.size();++r) {
+          const auto [begin,end]=typed_scan_range(predicates);
+          for(std::size_t r=begin;r<end;++r) {
             profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
             ++info.rows_examined;++info.typed_rows_examined;
             if(typed_matches(r,predicates)) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}

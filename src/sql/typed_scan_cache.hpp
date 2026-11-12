@@ -27,10 +27,13 @@ class TypedScanCache {
     std::size_t text_width_=0;
     std::unique_ptr<char[]> texts_;
     std::unique_ptr<std::uint32_t[]> text_lengths_;
+    std::optional<std::size_t> ordered_scalar_slot_;
+    bool ordered_text_=false;
 
     void release() noexcept {
         vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
+        ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
     void cluster() {
@@ -78,9 +81,29 @@ class TypedScanCache {
             }
             order[row]=static_cast<std::uint32_t>(row);
         }
+        // Publish ordering only after the full permutation succeeds. Refused
+        // preparation (including allocation failure) must retain full scans.
+        if(text_column_)ordered_text_=true;
+        else ordered_scalar_slot_=slot;
+    }
+    template<class Compare> std::pair<std::size_t,std::size_t> equal_bounds(Compare&& compare) const {
+        std::size_t lo=0,hi=count_;
+        while(lo<hi) {
+            const auto mid=lo+(hi-lo)/2;
+            if(compare(mid)<0)lo=mid+1;else hi=mid;
+        }
+        const auto lower=lo;hi=count_;
+        while(lo<hi) {
+            const auto mid=lo+(hi-lo)/2;
+            if(compare(mid)<=0)lo=mid+1;else hi=mid;
+        }
+        return {lower,lo};
     }
 public:
-    void invalidate() noexcept {count_=0;table_=index_=0;state_=State::empty;transposed_=false;}
+    void invalidate() noexcept {
+        count_=0;table_=index_=0;state_=State::empty;transposed_=false;
+        ordered_scalar_slot_.reset();ordered_text_=false;
+    }
     void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=0;text_column_.reset();}
     bool building() const noexcept {return state_==State::building;}
     bool refused() const noexcept {return state_==State::refused;}
@@ -175,6 +198,18 @@ public:
         state_=State::ready;
     }
     bool transposed() const noexcept {return transposed_;}
+    std::optional<std::pair<std::size_t,std::size_t>> ordered_bounds(
+            std::size_t slot,std::int64_t value) const {
+        if(state_!=State::ready || ordered_scalar_slot_!=slot)return {};
+        return equal_bounds([&](std::size_t row) {
+            const auto current=scalar(row,slot);
+            return current<value?-1:(current>value?1:0);
+        });
+    }
+    std::optional<std::pair<std::size_t,std::size_t>> ordered_bounds(std::string_view value) const {
+        if(state_!=State::ready || !ordered_text_)return {};
+        return equal_bounds([&](std::size_t row) {return text(row).compare(value);});
+    }
     std::optional<std::size_t> text_column(std::uint64_t table,std::uint64_t index,std::size_t column) const noexcept {
         return table_==table && index_==index && column_==column?text_column_:std::nullopt;
     }
