@@ -105,8 +105,8 @@
   ],
   "files": {
     ".github/workflows/release-material-check.yml": {
-      "bytes": 1341,
-      "sha256": "8007cb7a7d40c5ef0b5b5a8fe18fc63f576c6413a78a9dc716c83d6c56d27410"
+      "bytes": 1423,
+      "sha256": "3c42213e73a8dc5f9cdeb494ebb993db8cf5cc75512c2f7848cd535762e3779e"
     },
     "README.md": {
       "bytes": 4057,
@@ -353,5 +353,10 @@
     "Generated workloads; no official E conversion.",
     "Formal Prompt invalid reason unknown; local packaging checks do not guarantee score.",
     "Original capacity write outlier not reproduced; precise wait cause unconfirmed."
-  ]
+  ],
+  "preflight_first_attempt": {
+    "run": 43237490170,
+    "commit": "e426a6b47b90868373eab80c664b635493b3246a",
+    "result": "Material packaging/provenance and7selection tests passed.23CLI unit cases could not initialize /data/tmp on host runner. Set TMPDIR to RUNNER_TEMP, keep production code and test assertions unchanged."
+  }
 }

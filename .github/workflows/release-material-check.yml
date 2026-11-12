@@ -16,6 +16,8 @@ jobs:
       - name: Verify material, history and measured production sources
         run: |
           set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP/release-check"
+          mkdir -p "$TMPDIR"
           mkdir release-check-results
           python3 -B scripts/check-submission-contract.py --ref "$GITHUB_SHA" --check-internal-references | tee release-check-results/packaging.json
           python3 -B scripts/check-learning-material.py | tee release-check-results/provenance.json
