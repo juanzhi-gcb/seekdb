@@ -2,6 +2,7 @@
 """Alternative distribution for robustness, with the unchanged resource collector."""
 import hashlib
 import json
+import math
 from pathlib import Path
 import random
 import struct
@@ -29,11 +30,31 @@ def continuous(rows,queries,seed,filter_type):
     return w
 
 linux.benchmark.make_workload=continuous
+def verify_float32_rows(response,workload):
+    # JSON prints binary32 with max_digits10, which round-trips exactly to f32
+    # but need not equal its full binary64 decimal expansion. Require identical
+    # binary32 bits (including signed zero), never a numeric tolerance.
+    assert response.get('ok') is True
+    assert response['columns']==['id','g','v','body']
+    assert len(response['rows'])==len(workload['vectors'])
+    seen=set()
+    for row in response['rows']:
+        assert len(row)==4
+        ident=row[0]
+        assert type(ident) is int and 0<=ident<len(workload['vectors']) and ident not in seen
+        seen.add(ident)
+        assert row[1]==workload['group_values'][ident] and row[3]==workload['bodies'][ident]
+        assert len(row[2])==len(workload['vectors'][ident])
+        for actual,expected in zip(row[2],workload['vectors'][ident]):
+            assert type(actual) in (int,float) and math.isfinite(actual)
+            assert struct.pack('<f',actual)==struct.pack('<f',expected)
+linux.benchmark.verify_rows=verify_float32_rows
 if __name__=='__main__':
     result=linux.benchmark.main()
     output=Path(sys.argv[sys.argv.index('--output')+1])
     metadata={'distribution':'continuous finite float32, random 256-character ASCII payload',
               'generator_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-              'resource_and_oracle_logic':'unchanged run_contract_benchmark.py via run_linux_contract.py'}
+              'resource_and_oracle_logic':'unchanged resource collector and independent exact TopK oracle',
+              'row_verification':'exact binary32 bit round trip for JSON vectors; all other values exact'}
     (output/'distribution.json').write_text(json.dumps(metadata,indent=2)+'\n')
     sys.exit(result)
