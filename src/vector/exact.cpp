@@ -1,3 +1,4 @@
+#include "int8_bound.hpp"
 #include "minivectordb/exact.hpp"
 #include "validated.hpp"
 #include "batch_simd.hpp"
@@ -73,7 +74,7 @@ bool has_avx512() noexcept {
 }
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide,
-    bool allow_lower_bound,BoundScreenStats* screen_stats) {
+    bool allow_lower_bound,BoundScreenStats* screen_stats,const Int8BoundCache* integer_cache) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
   if(k==0)return {};
   auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
@@ -90,7 +91,10 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
 #else
   (void)allow_lower_bound;
 #endif
-  if(screen_stats)screen_stats->environment_supported=screen;
+  Int8BoundCache::Query integer_query;
+  if(allow_lower_bound && allow_wide && integer_cache)try {integer_query=integer_cache->query(query);}catch(const std::bad_alloc&) {}
+  bool integer_screen=integer_query.valid;
+  if(screen_stats)screen_stats->environment_supported=screen||integer_screen;
   unsigned trial_lanes=0,trial_rejected=0;
   double rejection_bound=std::numeric_limits<double>::infinity();
   // n<=4096. Wide: RZ estimate <= mathematical sum; factor covers the
@@ -103,7 +107,17 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
     if(!mask)return;
-    if(screen && heap.size()==k && std::popcount(mask)>=8) {
+    if(integer_screen && heap.size()==k && std::popcount(mask)>=8) {
+      const auto before=std::popcount(mask);
+      mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask);
+      const auto removed=before-std::popcount(mask);
+      trial_lanes+=static_cast<unsigned>(before);trial_rejected+=static_cast<unsigned>(removed);
+      if(screen_stats){screen_stats->integer_screened+=before;screen_stats->integer_rejected+=removed;}
+      if(trial_lanes>=128) {
+        if(trial_rejected*2<trial_lanes)integer_screen=false;
+        trial_lanes=trial_rejected=0;
+      }
+    } else if(screen && heap.size()==k && std::popcount(mask)>=8) {
 #if defined(__x86_64__) && defined(__GNUC__)
       std::array<float,16> lower{};
       if(wide)batch16_lower_bound_avx512(values.data(),query.data(),query.size(),lower.data());

@@ -361,7 +361,8 @@ namespace minivectordb {
             } else block=typed_snapshot.block(r);
             visit({keys.data(),count},block,mask);
           }
-        },options.wide_simd_vector_kernel,options.bounded_fp32_screen);
+        },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
+          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
         info.typed_cache_bytes=typed_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();throw;}
@@ -421,7 +422,7 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache);
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());

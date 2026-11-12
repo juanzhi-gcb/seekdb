@@ -73,6 +73,7 @@ struct Options {
   // Experimental exact rejection by a conservatively bounded FP32 estimate.
   // Remaining candidates always use the original double distance kernel.
   bool bounded_fp32_screen = true;
+  bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool certified_block_scan = true; // Skip redundant predicates only with an exact interval proof.
   // Transpose completed numeric snapshots once, within the existing arena.
   // AVX2 queries can then read candidate blocks without per-query repacking.
