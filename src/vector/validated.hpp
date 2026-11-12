@@ -17,4 +17,9 @@ std::vector<Neighbor> exact_top_k_validated_candidates(
 std::vector<Neighbor> exact_top_k_batched_validated_candidates(
     std::span<const float> query,std::size_t k,const VectorSource& source,
     const KeyPredicate& predicate = {});
+// Runtime-dispatched AVX2 across independent candidates. Unsupported CPUs and
+// non-x86 builds use the portable batch path, with the same scratch bound.
+std::vector<Neighbor> exact_top_k_simd_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,
+    const KeyPredicate& predicate = {});
 }

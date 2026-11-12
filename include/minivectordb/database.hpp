@@ -62,6 +62,9 @@ struct Options {
   // Interleave independent exact distances, with at most 64 KiB query scratch.
   // False retains the scalar validated kernel for measured comparisons.
   bool batched_vector_kernel = true;
+  // AVX2 executes only after CPU capability detection; portable batching remains
+  // the fallback. Independent candidate lanes keep scalar double result bits.
+  bool simd_vector_kernel = true;
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;

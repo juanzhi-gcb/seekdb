@@ -18,7 +18,8 @@ namespace {
 struct Item {std::int64_t key;std::vector<float> value;};
 using Kernel=std::vector<Neighbor>(*)(std::span<const float>,std::size_t,const VectorSource&,const KeyPredicate&);
 constexpr Kernel kernels[]{exact_top_k,detail::exact_top_k_validated_candidates,
-                          detail::exact_top_k_batched_validated_candidates};
+                          detail::exact_top_k_batched_validated_candidates,
+                          detail::exact_top_k_simd_validated_candidates};
 std::uint64_t cases=0;
 void same(const std::vector<Neighbor>& actual,const std::vector<Neighbor>& expected) {
     CHECK(actual.size()==expected.size());
@@ -53,7 +54,8 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
     const auto reference=exact_top_k(query,k,source,predicate);
     const auto validated=detail::exact_top_k_validated_candidates(query,k,source,predicate);
     const auto batched=detail::exact_top_k_batched_validated_candidates(query,k,source,predicate);
-    same(reference,expected);same(validated,reference);same(batched,reference);++cases;
+    const auto simd=detail::exact_top_k_simd_validated_candidates(query,k,source,predicate);
+    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);++cases;
 }
 float arbitrary_finite(std::mt19937& random) {
     auto bits=static_cast<std::uint32_t>(random());
@@ -138,6 +140,8 @@ void validation_boundaries() {
     invalid([&]{l2_distance(finite,short_value);});
 }
 void batch_lifetimes_and_tails() {
+    for(const auto kernel:{detail::exact_top_k_batched_validated_candidates,
+                           detail::exact_top_k_simd_validated_candidates})
     for(std::size_t count=0;count<=65;++count) {
         std::vector<Item> data;
         const std::vector<float> query(128,0.125f);
@@ -154,7 +158,7 @@ void batch_lifetimes_and_tails() {
             }
         };
         profile::set_enabled(true);profile::reset();
-        const auto result=detail::exact_top_k_batched_validated_candidates(query,7,source);
+        const auto result=kernel(query,7,source,{});
         const auto measured=profile::snapshot();profile::set_enabled(false);
         same(result,oracle(data,query,7,{}));
         CHECK(measured.vector_distance.calls==count);++cases;

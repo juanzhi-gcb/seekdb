@@ -347,8 +347,9 @@ namespace minivectordb {
         // Every source below validates the candidate through SelectRow/index
         // decoding, or reuses owned typed columns from a complete validated scan.
         const auto top_k=!options.validated_vector_kernel?exact_top_k:
-            options.batched_vector_kernel?detail::exact_top_k_batched_validated_candidates:
-                                          detail::exact_top_k_validated_candidates;
+            !options.batched_vector_kernel?detail::exact_top_k_validated_candidates:
+            options.simd_vector_kernel?detail::exact_top_k_simd_validated_candidates:
+                                       detail::exact_top_k_batched_validated_candidates;
         auto winners=top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;

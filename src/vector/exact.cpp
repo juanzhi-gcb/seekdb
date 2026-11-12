@@ -1,5 +1,6 @@
 #include "minivectordb/exact.hpp"
 #include "validated.hpp"
+#include "batch_simd.hpp"
 #include <algorithm>
 #include "minivectordb/profile.hpp"
 #include <cmath>
@@ -61,7 +62,8 @@ std::vector<Neighbor> exact_top_k_validated_candidates(std::span<const float> qu
 // Interleave independent candidates while preserving each candidate's dimension
 // accumulation order. Own each callback span: streaming sources may reuse it.
 // No reduced precision, reassociation, or approximate candidate rejection.
-std::vector<Neighbor> exact_top_k_batched_validated_candidates(
+template<bool Simd>
+static std::vector<Neighbor> batched_top_k_impl(
     std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
   if(k==0)return {};
@@ -82,6 +84,12 @@ std::vector<Neighbor> exact_top_k_batched_validated_candidates(
       profile::detail::Scope timer(&profile::Snapshot::vector_distance);
       for(std::size_t lane=1;lane<count;++lane)profile::detail::count(&profile::Snapshot::vector_distance);
       if(count==width) {
+#if defined(__x86_64__) && defined(__GNUC__)
+        if constexpr(Simd) {
+          batch16_transposed_avx2(batch.data(),query.data(),query.size(),sums.data());
+        } else
+#endif
+        {
         const auto n=query.size();
         for(std::size_t d=0;d<n;++d) {
           const double q=query[d];
@@ -118,10 +126,12 @@ std::vector<Neighbor> exact_top_k_batched_validated_candidates(
           sums[14]+=d14*d14;
           sums[15]+=d15*d15;
         }
+        }
       } else {
         for(std::size_t lane=0;lane<count;++lane)
           for(std::size_t d=0;d<query.size();++d) {
-            const double delta=static_cast<double>(query[d])-static_cast<double>(batch[lane*query.size()+d]);
+            const auto offset=Simd?d*width+lane:lane*query.size()+d;
+            const double delta=static_cast<double>(query[d])-static_cast<double>(batch[offset]);
             sums[lane]+=delta*delta;
           }
       }
@@ -137,13 +147,26 @@ std::vector<Neighbor> exact_top_k_batched_validated_candidates(
     if(predicate&&!predicate(key))return;
     if(value.size()!=query.size())throw std::invalid_argument("VECTOR dimension mismatch");
     keys[count]=key;
-    std::copy(value.begin(),value.end(),batch.begin()+count*query.size());
+    if constexpr(Simd) {
+      for(std::size_t d=0;d<query.size();++d)batch[d*width+count]=value[d];
+    } else std::copy(value.begin(),value.end(),batch.begin()+count*query.size());
     if(++count==width)flush();
   });
   if(count)flush();
   std::vector<Neighbor> result;result.reserve(heap.size());
   while(!heap.empty()){result.push_back(heap.top());heap.pop();}
   std::reverse(result.begin(),result.end());return result;
+}
+std::vector<Neighbor> exact_top_k_batched_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
+  return batched_top_k_impl<false>(query,k,source,predicate);
+}
+std::vector<Neighbor> exact_top_k_simd_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
+#if defined(__x86_64__) && defined(__GNUC__)
+  if(__builtin_cpu_supports("avx2"))return batched_top_k_impl<true>(query,k,source,predicate);
+#endif
+  return batched_top_k_impl<false>(query,k,source,predicate);
 }
 }
 }
