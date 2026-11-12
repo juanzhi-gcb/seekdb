@@ -240,9 +240,8 @@ namespace minivectordb {
         });
       } catch(...) {snapshot.clear();throw;}
     }
-    bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
-                      const std::optional<VectorIndex>& index,ExecutionInfo& info,
-                      const VectorVisitor& visit,std::vector<float>& scratch) {
+    bool typed_eligible(const Schema& s,const sql::Bound& b,
+                        const std::optional<VectorIndex>& index) const {
       bool eligible=options.typed_scan_cache && options.scan_snapshot_bytes>0 && !b.primary_lookup &&
           (index?options.paired_index_scan:options.table_scan_snapshot);
       for(const auto& p:b.predicates)
@@ -253,6 +252,65 @@ namespace minivectordb {
       // this identity. Retain its probation/ready/refused state across numeric
       // queries, otherwise alternating filters continually reset both caches.
       if(eligible && snapshot.observed(s.id,index_id))eligible=false;
+      return eligible;
+    }
+    bool transpose_enabled() const noexcept {
+      return options.transposed_scan_cache && options.validated_vector_kernel &&
+          options.batched_vector_kernel && options.simd_vector_kernel && detail::has_avx2();
+    }
+    std::optional<std::vector<Neighbor>> typed_block_top_k(
+        const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+        const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
+      if(!transpose_enabled() || !typed_eligible(s,b,index) ||
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed())return {};
+      struct Predicate {std::size_t slot;std::int64_t value;std::string_view op;};
+      std::vector<Predicate> predicates;
+      for(const auto& p:b.predicates)
+        predicates.push_back({typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),p.op});
+      profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      try {
+        auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
+          std::array<std::int64_t,16> keys{};
+          std::vector<float> tail;
+          for(std::size_t r=0;r<typed_snapshot.size();r+=16) {
+            const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
+            std::uint16_t mask=0;
+            for(std::size_t lane=0;lane<count;++lane) {
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.rows_examined;++info.typed_rows_examined;
+              keys[lane]=typed_snapshot.key(r+lane);
+              bool matches=true;
+              for(const auto& p:predicates) {
+                profile::detail::Scope predicate_timer(&profile::Snapshot::predicate_evaluation);
+                const auto value=typed_snapshot.scalar(r+lane,p.slot);
+                if((p.op=="="&&value!=p.value)||(p.op=="<"&&value>=p.value)||
+                   (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
+                   (p.op==">="&&value<p.value)) {matches=false;break;}
+              }
+              if(matches){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
+            }
+            if(!mask)continue;
+            std::span<const float> block;
+            if(count<16) {
+              tail.assign(16*e.query->size(),0);
+              for(std::size_t lane=0;lane<count;++lane) {
+                const auto vector=typed_snapshot.vector(r+lane);
+                for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
+              }
+              block=tail;
+            } else block=typed_snapshot.block(r);
+            visit({keys.data(),count},block,mask);
+          }
+        });
+        info.typed_cache_bytes=typed_snapshot.bytes();
+        return result;
+      } catch(...) {typed_snapshot.clear();throw;}
+    }
+    bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                      const std::optional<VectorIndex>& index,ExecutionInfo& info,
+                      const VectorVisitor& visit,std::vector<float>& scratch) {
+      const bool eligible=typed_eligible(s,b,index);
+      const auto index_id=index?index->id:0;
       if(!eligible) {typed_snapshot.clear();return false;}
       // Two representations never own their bounded payloads simultaneously.
       snapshot.clear();
@@ -275,7 +333,7 @@ namespace minivectordb {
                  (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
                  (p.op==">="&&value<p.value)) {matches=false;break;}
             }
-            if(matches) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.vector(r));}
+            if(matches) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
           }
         } else {
           typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
@@ -307,7 +365,7 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          typed_snapshot.finish();
+          typed_snapshot.finish(transpose_enabled());
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
@@ -350,15 +408,16 @@ namespace minivectordb {
             !options.batched_vector_kernel?detail::exact_top_k_validated_candidates:
             options.simd_vector_kernel?detail::exact_top_k_simd_validated_candidates:
                                        detail::exact_top_k_batched_validated_candidates;
-        auto winners=top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
+        std::optional<VectorIndex> index;
+        if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
+          if(candidate.column==e.column) { index=candidate; break; }
+        auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
+        auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;
             if(options.reuse_vector_scratch)visit(key,row.vector_for_distance(e.column,vector_scratch));
             else visit(key,std::get<std::vector<float>>(row[e.column]));
           };
-          std::optional<VectorIndex> index;
-          if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
-            if(candidate.column==e.column) { index=candidate; break; }
           if(typed_source(s,b,e,index,info,visit,vector_scratch))return;
           if(index) {
             // Exhaustive flat index: exact and ANN mode share recall 1. Read and

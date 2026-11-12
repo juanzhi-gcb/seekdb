@@ -65,6 +65,9 @@ struct Options {
   // AVX2 executes only after CPU capability detection; portable batching remains
   // the fallback. Independent candidate lanes keep scalar double result bits.
   bool simd_vector_kernel = true;
+  // Transpose completed numeric snapshots once, within the existing arena.
+  // AVX2 queries can then read candidate blocks without per-query repacking.
+  bool transposed_scan_cache = true;
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;

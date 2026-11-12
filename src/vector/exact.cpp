@@ -8,6 +8,7 @@
 #include <array>
 #include <new>
 #include <stdexcept>
+#include <bit>
 namespace minivectordb {
 namespace {
 template<bool CheckComponents>
@@ -55,6 +56,48 @@ std::vector<Neighbor> exact_top_k(std::span<const float> query,std::size_t k,con
   return top_k<true>(query,k,source,predicate);
 }
 namespace detail {
+bool has_avx2() noexcept {
+#if defined(__x86_64__) && defined(__GNUC__)
+  return __builtin_cpu_supports("avx2");
+#else
+  return false;
+#endif
+}
+std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
+    std::span<const float> query,std::size_t k,const BlockVectorSource& source) {
+  for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
+  if(k==0)return {};
+  auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
+  std::priority_queue<Neighbor,std::vector<Neighbor>,decltype(better)> heap(better);
+  source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
+    if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
+       (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
+    if(!mask)return;
+    std::array<double,16> sums{};
+    {
+      profile::detail::Scope timer(&profile::Snapshot::vector_distance);
+      const auto count=std::popcount(mask);
+      for(int i=1;i<count;++i)profile::detail::count(&profile::Snapshot::vector_distance);
+#if defined(__x86_64__) && defined(__GNUC__)
+      if(count>=4 && has_avx2())batch16_transposed_avx2(values.data(),query.data(),query.size(),sums.data());
+      else
+#endif
+      for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane))
+        for(std::size_t d=0;d<query.size();++d) {
+          const double delta=static_cast<double>(query[d])-static_cast<double>(values[d*16+lane]);
+          sums[lane]+=delta*delta;
+        }
+    }
+    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
+      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
+      if(heap.size()<k)heap.push(candidate);
+      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    }
+  });
+  std::vector<Neighbor> result;result.reserve(heap.size());
+  while(!heap.empty()){result.push_back(heap.top());heap.pop();}
+  std::reverse(result.begin(),result.end());return result;
+}
 std::vector<Neighbor> exact_top_k_validated_candidates(std::span<const float> query,std::size_t k,
                                                      const VectorSource& source,const KeyPredicate& predicate) {
   return top_k<false>(query,k,source,predicate);
@@ -164,7 +207,7 @@ std::vector<Neighbor> exact_top_k_batched_validated_candidates(
 std::vector<Neighbor> exact_top_k_simd_validated_candidates(
     std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
 #if defined(__x86_64__) && defined(__GNUC__)
-  if(__builtin_cpu_supports("avx2"))return batched_top_k_impl<true>(query,k,source,predicate);
+  if(has_avx2())return batched_top_k_impl<true>(query,k,source,predicate);
 #endif
   return batched_top_k_impl<false>(query,k,source,predicate);
 }

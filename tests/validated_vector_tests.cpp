@@ -55,7 +55,20 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
     const auto validated=detail::exact_top_k_validated_candidates(query,k,source,predicate);
     const auto batched=detail::exact_top_k_batched_validated_candidates(query,k,source,predicate);
     const auto simd=detail::exact_top_k_simd_validated_candidates(query,k,source,predicate);
-    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);++cases;
+    const auto blocked=detail::exact_top_k_transposed_validated_candidates(query,k,[&](const detail::BlockVectorVisitor& visit) {
+        std::vector<float> block(16*query.size());
+        std::vector<std::int64_t> keys;
+        for(std::size_t start=0;start<data.size();start+=16) {
+            keys.clear();std::fill(block.begin(),block.end(),0);std::uint16_t mask=0;
+            for(std::size_t lane=0;lane<16&&start+lane<data.size();++lane) {
+                const auto& item=data[start+lane];keys.push_back(item.key);
+                if(!predicate||predicate(item.key))mask|=std::uint16_t(1U<<lane);
+                for(std::size_t d=0;d<query.size();++d)block[d*16+lane]=item.value[d];
+            }
+            visit(keys,block,mask);
+        }
+    });
+    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);same(blocked,reference);++cases;
 }
 float arbitrary_finite(std::mt19937& random) {
     auto bits=static_cast<std::uint32_t>(random());

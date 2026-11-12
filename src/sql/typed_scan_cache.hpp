@@ -20,14 +20,15 @@ class TypedScanCache {
     std::unique_ptr<float[]> vectors_;
     std::unique_ptr<std::int64_t[]> scalars_;
     std::unique_ptr<std::size_t[]> columns_;
+    bool transposed_=false;
 
     void release() noexcept {
         vectors_.reset();scalars_.reset();columns_.reset();
-        capacity_=count_=bytes_=0;
+        capacity_=count_=bytes_=0;transposed_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
 public:
-    void invalidate() noexcept {count_=0;table_=index_=0;state_=State::empty;}
+    void invalidate() noexcept {count_=0;table_=index_=0;state_=State::empty;transposed_=false;}
     void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=0;}
     bool building() const noexcept {return state_==State::building;}
     bool ready(std::uint64_t table,std::uint64_t index,std::size_t column) const noexcept {
@@ -82,7 +83,36 @@ public:
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
     }
-    void finish() noexcept {if(building())state_=State::ready;}
+    void finish(bool transpose=false) noexcept {
+        if(!building())return;
+        // Only complete blocks are transposed; the final short block remains
+        // AoS, so padding never grows the arena or reduces cache admission.
+        if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
+            try {
+                auto scratch=std::make_unique<float[]>(16*dimension_);
+                for(std::size_t row=0;row+16<=count_;row+=16) {
+                    auto* block=vectors_.get()+row*dimension_;
+                    for(std::size_t lane=0;lane<16;++lane)
+                        for(std::size_t d=0;d<dimension_;++d)
+                            scratch[d*16+lane]=block[lane*dimension_+d];
+                    std::memcpy(block,scratch.get(),16*dimension_*sizeof(float));
+                }
+                transposed_=true;
+            } catch(const std::bad_alloc&) {} // No block changed before allocation.
+        }
+        state_=State::ready;
+    }
+    bool transposed() const noexcept {return transposed_;}
+    std::span<const float> block(std::size_t row) const noexcept {
+        return {vectors_.get()+row*dimension_,16*dimension_};
+    }
+    std::span<const float> read_vector(std::size_t row,std::vector<float>& scratch) const {
+        if(!transposed_ || row>=count_/16*16)return vector(row);
+        scratch.resize(dimension_);
+        const auto* values=vectors_.get()+(row/16*16)*dimension_;
+        for(std::size_t d=0;d<dimension_;++d)scratch[d]=values[d*16+row%16];
+        return scratch;
+    }
     std::size_t size() const noexcept {return count_;}
     std::size_t bytes() const noexcept {return bytes_;}
     std::size_t scalar_slot(std::size_t column) const {
