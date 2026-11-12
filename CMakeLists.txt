@@ -266,3 +266,8 @@ add_executable(journal_storage_tests tests/journal_storage_tests.cpp)
 target_link_libraries(journal_storage_tests PRIVATE minivectordb_core)
 add_test(NAME journal_storage_model COMMAND journal_storage_tests)
 set_tests_properties(journal_storage_model PROPERTIES TIMEOUT 180)
+
+add_executable(projection_probation_tests tests/projection_probation_tests.cpp)
+target_link_libraries(projection_probation_tests PRIVATE minivectordb_core)
+add_test(NAME core_projection_probation COMMAND projection_probation_tests)
+set_tests_properties(core_projection_probation PROPERTIES TIMEOUT 120)

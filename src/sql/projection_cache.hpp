@@ -40,6 +40,10 @@ public:
   }
   void append(const Schema& schema,std::int64_t key,std::string_view validated) {
     if(state_!=State::probation&&state_!=State::building)return;
+    // An already completed sizing scan belongs to this immutable table/index.
+    // Another vector-cache probation (for example when a VARCHAR predicate is
+    // first seen) must not count every projection row a second time.
+    if(state_==State::probation&&complete_)return;
     // Bound scratch before copying even when a valid row has very large text.
     binary::Reader scan(validated);if(scan.get(1)!=1||scan.get(4)!=schema.columns.size())throw Error(ErrorCode::Corruption,"projection row header");
     std::size_t size=0;
