@@ -27,6 +27,7 @@ docker build --target test -t mvdb:int8screen-test . > "$result/build-test.log" 
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --entrypoint ctest mvdb:int8screen-test --test-dir /build -V > "$result/ctest.log" 2>&1
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --entrypoint /build/bounded_screen_tests mvdb:int8screen-test > "$result/bounds.json" 2> "$result/bounds.stderr.log"
 mkdir "$scratch/probe"
+chmod 0777 "$scratch/probe"
 docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/int8_kernel_probe.cpp,dst=/probe.cpp,readonly" \
   --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh mvdb:int8screen-test \
   -c 'g++ -std=c++20 -O3 -ffp-contract=off -I/src/include -I/src/src /probe.cpp /build/libminivectordb_core.a -o /out/probe' > "$result/probe-build.log" 2>&1
