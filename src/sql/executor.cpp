@@ -337,11 +337,12 @@ namespace minivectordb {
           using Hit=std::pair<std::uint64_t,std::int64_t>;
           std::priority_queue<Hit> heap;
           if(k)for(std::size_t r=begin/16*16;r<end;r+=16) {
+            if(bulk)++info.certified_blocks_examined;
             std::array<std::uint64_t,16> squares{};fixed->squares(query,r,squares);
             for(std::size_t lane=0;lane<16 && r+lane<end;++lane) {
               if(r+lane<begin)continue;
               ++info.rows_examined;++info.typed_rows_examined;
-              if(!certified && !typed_matches(r+lane,predicates))continue;
+              if(!bulk && !typed_matches(r+lane,predicates))continue;
               ++info.distances_computed;++info.fixed_point_rows;
               Hit hit{squares[lane],typed_snapshot.key(r+lane)};
               if(heap.size()<k)heap.push(hit);else if(hit<heap.top()){heap.pop();heap.push(hit);}
