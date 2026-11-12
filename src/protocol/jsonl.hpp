@@ -2,7 +2,10 @@
 #include "minivectordb/database.hpp"
 #include "minivectordb/value.hpp"
 #include <array>
+#include <algorithm>
 #include <charconv>
+#include <cerrno>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -191,14 +194,38 @@ inline const char* code(ErrorCode c) {
     case ErrorCode::Transaction:return "TRANSACTION";case ErrorCode::Corruption:return "CORRUPTION";
     } return "EXECUTION";
 }
+class LineReader {
+    std::array<char,65536> bytes;
+    std::size_t begin=0,end=0;
+    bool eof=false;
+public:
+    bool next(std::string& line,bool& oversized,std::size_t limit) {
+        line.clear();oversized=false;
+        for(;;) {
+            if(begin==end) {
+                if(eof)return !line.empty()||oversized;
+                ssize_t count;
+                do {count=::read(STDIN_FILENO,bytes.data(),bytes.size());} while(count<0&&errno==EINTR);
+                if(count<0)throw std::runtime_error("JSON input read failed");
+                if(count==0){eof=true;continue;}
+                begin=0;end=static_cast<std::size_t>(count);
+            }
+            const auto* newline=static_cast<const char*>(std::memchr(bytes.data()+begin,'\n',end-begin));
+            const auto count=newline?static_cast<std::size_t>(newline-(bytes.data()+begin)):end-begin;
+            const auto keep=std::min(limit-line.size(),count);
+            line.append(bytes.data()+begin,keep);oversized|=keep!=count;
+            begin+=count;
+            if(newline){++begin;return true;}
+        }
+    }
+};
 inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& directory) {
     std::cout<<"{\"type\":\"ready\"}\n"<<std::flush;
     constexpr std::size_t limit=16*1024*1024;
+    LineReader input;
     for(;;) {
-        std::string line; bool oversized=false; char c;
-        while(std::cin.get(c) && c!='\n') {if(line.size()<limit) line+=c;else oversized=true;}
-        if(std::cin.bad()) throw std::runtime_error("JSON input read failed");
-        if(line.empty() && !oversized && !std::cin) break;
+        std::string line;bool oversized=false;
+        if(!input.next(line,oversized,limit))break;
         std::string id="null";
         bool shutdown=false;
         Response response(directory);

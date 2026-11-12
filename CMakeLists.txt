@@ -81,6 +81,8 @@ set_tests_properties(core_data_cache_sql PROPERTIES TIMEOUT 180)
 
 add_test(NAME jsonl COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jsonl_tests.py $<TARGET_FILE:minivectordb>)
 set_tests_properties(jsonl PROPERTIES TIMEOUT 120)
+add_test(NAME jsonl_buffered_frames COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jsonl_buffer_tests.py $<TARGET_FILE:minivectordb>)
+set_tests_properties(jsonl_buffered_frames PROPERTIES TIMEOUT 90)
 add_executable(vector_index_tests tests/vector_index_tests.cpp)
 target_link_libraries(vector_index_tests PRIVATE minivectordb_core)
 add_test(NAME core_vector_index COMMAND vector_index_tests)
