@@ -65,6 +65,8 @@ struct Options {
   // AVX2 executes only after CPU capability detection; portable batching remains
   // the fallback. Independent candidate lanes keep scalar double result bits.
   bool simd_vector_kernel = true;
+  // Optional wider exact lanes on CPUs/OSes with AVX-512F support.
+  bool wide_simd_vector_kernel = true;
   // Transpose completed numeric snapshots once, within the existing arena.
   // AVX2 queries can then read candidate blocks without per-query repacking.
   bool transposed_scan_cache = true;

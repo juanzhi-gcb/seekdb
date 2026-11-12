@@ -63,12 +63,20 @@ bool has_avx2() noexcept {
   return false;
 #endif
 }
+bool has_avx512() noexcept {
+#if defined(__x86_64__) && defined(__GNUC__)
+  return __builtin_cpu_supports("avx512f") && has_avx2();
+#else
+  return false;
+#endif
+}
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
-    std::span<const float> query,std::size_t k,const BlockVectorSource& source) {
+    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
   if(k==0)return {};
   auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
   std::priority_queue<Neighbor,std::vector<Neighbor>,decltype(better)> heap(better);
+  [[maybe_unused]] const bool wide=allow_wide && has_avx512();
   source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
@@ -79,7 +87,10 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       const auto count=std::popcount(mask);
       for(int i=1;i<count;++i)profile::detail::count(&profile::Snapshot::vector_distance);
 #if defined(__x86_64__) && defined(__GNUC__)
-      if(count>=4 && has_avx2())batch16_transposed_avx2(values.data(),query.data(),query.size(),sums.data());
+      if(count>=4 && has_avx2()) {
+        if(wide)batch16_transposed_avx512(values.data(),query.data(),query.size(),sums.data());
+        else batch16_transposed_avx2(values.data(),query.data(),query.size(),sums.data());
+      }
       else
 #endif
       for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane))
@@ -105,7 +116,7 @@ std::vector<Neighbor> exact_top_k_validated_candidates(std::span<const float> qu
 // Interleave independent candidates while preserving each candidate's dimension
 // accumulation order. Own each callback span: streaming sources may reuse it.
 // No reduced precision, reassociation, or approximate candidate rejection.
-template<bool Simd>
+template<bool Simd,bool Wide=false>
 static std::vector<Neighbor> batched_top_k_impl(
     std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
@@ -129,7 +140,8 @@ static std::vector<Neighbor> batched_top_k_impl(
       if(count==width) {
 #if defined(__x86_64__) && defined(__GNUC__)
         if constexpr(Simd) {
-          batch16_transposed_avx2(batch.data(),query.data(),query.size(),sums.data());
+          if constexpr(Wide)batch16_transposed_avx512(batch.data(),query.data(),query.size(),sums.data());
+          else batch16_transposed_avx2(batch.data(),query.data(),query.size(),sums.data());
         } else
 #endif
         {
@@ -210,6 +222,13 @@ std::vector<Neighbor> exact_top_k_simd_validated_candidates(
   if(has_avx2())return batched_top_k_impl<true>(query,k,source,predicate);
 #endif
   return batched_top_k_impl<false>(query,k,source,predicate);
+}
+std::vector<Neighbor> exact_top_k_wide_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,const KeyPredicate& predicate) {
+#if defined(__x86_64__) && defined(__GNUC__)
+  if(has_avx512())return batched_top_k_impl<true,true>(query,k,source,predicate);
+#endif
+  return exact_top_k_simd_validated_candidates(query,k,source,predicate);
 }
 }
 }

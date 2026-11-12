@@ -3,6 +3,19 @@
 #if defined(__x86_64__) && defined(__GNUC__)
 #include <immintrin.h>
 namespace minivectordb::detail {
+__attribute__((target("avx512f,no-fma")))
+inline void batch16_transposed_avx512(const float* batch,const float* query,
+                                    std::size_t n,double* out) {
+    auto s0=_mm512_setzero_pd(),s1=s0;
+    for(std::size_t d=0;d<n;++d) {
+        const auto q=_mm512_set1_pd(static_cast<double>(query[d]));
+        const auto d0=_mm512_sub_pd(q,_mm512_cvtps_pd(_mm256_loadu_ps(batch+d*16)));
+        const auto d1=_mm512_sub_pd(q,_mm512_cvtps_pd(_mm256_loadu_ps(batch+d*16+8)));
+        s0=_mm512_add_pd(s0,_mm512_mul_pd(d0,d0));
+        s1=_mm512_add_pd(s1,_mm512_mul_pd(d1,d1));
+    }
+    _mm512_storeu_pd(out,s0);_mm512_storeu_pd(out+8,s1);
+}
 // Call only after the AVX2 runtime check. Lanes are independent candidates;
 // accumulation stays in dimension order with separate multiply and add.
 __attribute__((target("avx2,no-fma")))

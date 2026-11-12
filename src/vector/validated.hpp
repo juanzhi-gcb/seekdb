@@ -3,13 +3,14 @@
 
 namespace minivectordb::detail {
 bool has_avx2() noexcept;
+bool has_avx512() noexcept;
 // Internal fixed-stride layout: 16 independent lanes per dimension, finite
 // values admitted by a complete scan; keys.size() <= 16 and mask selects lanes.
 using BlockVectorVisitor = std::function<void(std::span<const std::int64_t>,
                                              std::span<const float>,std::uint16_t)>;
 using BlockVectorSource = std::function<void(const BlockVectorVisitor&)>;
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
-    std::span<const float> query,std::size_t k,const BlockVectorSource& source);
+    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide=true);
 // Internal execution contract: each candidate span must contain finite float32
 // values already validated by the row/index decoder or an immutable owned cache
 // published after a complete validated scan. The source must keep those values
@@ -28,6 +29,9 @@ std::vector<Neighbor> exact_top_k_batched_validated_candidates(
 // Runtime-dispatched AVX2 across independent candidates. Unsupported CPUs and
 // non-x86 builds use the portable batch path, with the same scratch bound.
 std::vector<Neighbor> exact_top_k_simd_validated_candidates(
+    std::span<const float> query,std::size_t k,const VectorSource& source,
+    const KeyPredicate& predicate = {});
+std::vector<Neighbor> exact_top_k_wide_validated_candidates(
     std::span<const float> query,std::size_t k,const VectorSource& source,
     const KeyPredicate& predicate = {});
 }

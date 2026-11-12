@@ -19,7 +19,8 @@ struct Item {std::int64_t key;std::vector<float> value;};
 using Kernel=std::vector<Neighbor>(*)(std::span<const float>,std::size_t,const VectorSource&,const KeyPredicate&);
 constexpr Kernel kernels[]{exact_top_k,detail::exact_top_k_validated_candidates,
                           detail::exact_top_k_batched_validated_candidates,
-                          detail::exact_top_k_simd_validated_candidates};
+                          detail::exact_top_k_simd_validated_candidates,
+                          detail::exact_top_k_wide_validated_candidates};
 std::uint64_t cases=0;
 void same(const std::vector<Neighbor>& actual,const std::vector<Neighbor>& expected) {
     CHECK(actual.size()==expected.size());
@@ -55,7 +56,8 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
     const auto validated=detail::exact_top_k_validated_candidates(query,k,source,predicate);
     const auto batched=detail::exact_top_k_batched_validated_candidates(query,k,source,predicate);
     const auto simd=detail::exact_top_k_simd_validated_candidates(query,k,source,predicate);
-    const auto blocked=detail::exact_top_k_transposed_validated_candidates(query,k,[&](const detail::BlockVectorVisitor& visit) {
+    const auto wide=detail::exact_top_k_wide_validated_candidates(query,k,source,predicate);
+    const detail::BlockVectorSource blocks=[&](const detail::BlockVectorVisitor& visit) {
         std::vector<float> block(16*query.size());
         std::vector<std::int64_t> keys;
         for(std::size_t start=0;start<data.size();start+=16) {
@@ -67,8 +69,10 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
             }
             visit(keys,block,mask);
         }
-    });
-    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);same(blocked,reference);++cases;
+    };
+    const auto blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks);
+    const auto narrow_blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks,false);
+    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);same(blocked,reference);same(narrow_blocked,reference);same(wide,reference);++cases;
 }
 float arbitrary_finite(std::mt19937& random) {
     auto bits=static_cast<std::uint32_t>(random());
@@ -154,7 +158,8 @@ void validation_boundaries() {
 }
 void batch_lifetimes_and_tails() {
     for(const auto kernel:{detail::exact_top_k_batched_validated_candidates,
-                           detail::exact_top_k_simd_validated_candidates})
+                           detail::exact_top_k_simd_validated_candidates,
+                           detail::exact_top_k_wide_validated_candidates})
     for(std::size_t count=0;count<=65;++count) {
         std::vector<Item> data;
         const std::vector<float> query(128,0.125f);

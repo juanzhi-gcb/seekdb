@@ -327,7 +327,7 @@ namespace minivectordb {
             } else block=typed_snapshot.block(r);
             visit({keys.data(),count},block,mask);
           }
-        });
+        },options.wide_simd_vector_kernel);
         info.typed_cache_bytes=typed_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();throw;}
@@ -426,7 +426,8 @@ namespace minivectordb {
         // decoding, or reuses owned typed columns from a complete validated scan.
         const auto top_k=!options.validated_vector_kernel?exact_top_k:
             !options.batched_vector_kernel?detail::exact_top_k_validated_candidates:
-            options.simd_vector_kernel?detail::exact_top_k_simd_validated_candidates:
+            options.simd_vector_kernel?(options.wide_simd_vector_kernel?detail::exact_top_k_wide_validated_candidates:
+                                                                        detail::exact_top_k_simd_validated_candidates):
                                        detail::exact_top_k_batched_validated_candidates;
         std::optional<VectorIndex> index;
         if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
