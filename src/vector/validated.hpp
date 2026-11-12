@@ -9,8 +9,13 @@ bool has_avx512() noexcept;
 using BlockVectorVisitor = std::function<void(std::span<const std::int64_t>,
                                              std::span<const float>,std::uint16_t)>;
 using BlockVectorSource = std::function<void(const BlockVectorVisitor&)>;
+struct BoundScreenStats {
+  std::uint64_t screened_lanes=0,rejected_lanes=0,exact_lanes=0;
+  bool environment_supported=false,adaptive_disabled=false;
+};
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
-    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide=true);
+    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide=true,
+    bool allow_lower_bound=false,BoundScreenStats* screen_stats=nullptr);
 // Internal execution contract: each candidate span must contain finite float32
 // values already validated by the row/index decoder or an immutable owned cache
 // published after a complete validated scan. The source must keep those values

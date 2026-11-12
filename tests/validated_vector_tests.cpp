@@ -72,6 +72,8 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
     };
     const auto blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks);
     const auto narrow_blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks,false);
+    const auto screened=detail::exact_top_k_transposed_validated_candidates(query,k,blocks,true,true);
+    same(screened,expected);
     same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);same(blocked,reference);same(narrow_blocked,reference);same(wide,reference);++cases;
 }
 float arbitrary_finite(std::mt19937& random) {

@@ -348,7 +348,7 @@ namespace minivectordb {
             } else block=typed_snapshot.block(r);
             visit({keys.data(),count},block,mask);
           }
-        },options.wide_simd_vector_kernel);
+        },options.wide_simd_vector_kernel,options.bounded_fp32_screen);
         info.typed_cache_bytes=typed_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();throw;}

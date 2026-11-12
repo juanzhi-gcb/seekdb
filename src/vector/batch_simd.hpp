@@ -3,6 +3,26 @@
 #if defined(__x86_64__) && defined(__GNUC__)
 #include <immintrin.h>
 namespace minivectordb::detail {
+// Embedded rounding is part of each instruction, not a process rounding-mode
+// change. Under the caller's checked FP environment this is a lower bound on
+// the existing sequential double sum. It never supplies a returned distance.
+#if !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+__attribute__((target("avx512f,no-fma"),noinline))
+inline void batch16_lower_bound_avx512(const float* batch,const float* query,
+                                      std::size_t n,float* out) {
+    constexpr int rz=_MM_FROUND_TO_ZERO|_MM_FROUND_NO_EXC;
+    auto sum=_mm512_setzero_ps();
+    for(std::size_t d=0;d<n;++d) {
+        const auto delta=_mm512_sub_round_ps(_mm512_set1_ps(query[d]),
+                                            _mm512_loadu_ps(batch+d*16),rz);
+        const auto term=_mm512_mul_round_ps(delta,delta,rz);
+        sum=_mm512_add_round_ps(sum,term,rz);
+    }
+    _mm512_storeu_ps(out,sum);
+}
+
 // AVX-512F itself admits 512-bit FMA: disabling the separate FMA target bit
 // does not prohibit contraction. Keep an independently compiled strict body.
 #if !defined(__clang__)
