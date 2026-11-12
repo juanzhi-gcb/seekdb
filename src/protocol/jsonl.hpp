@@ -167,6 +167,9 @@ public:
     explicit Response(std::filesystem::path dir):directory(std::move(dir)) {buffer.reserve(65536);}
     Response(const Response&)=delete;
     ~Response() {if(file) std::fclose(file);}
+    // Reuse only bounded response storage. Close/unlink spools and discard all
+    // previous payload bytes before accepting the next request.
+    void reset() noexcept {if(file){std::fclose(file);file=nullptr;}buffer.clear();}
     void append(std::string_view s) {
         if(!file && s.size()<=65536-buffer.size()) {buffer.append(s);return;}
         if(!file) {
@@ -249,12 +252,13 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
     std::cout<<"{\"type\":\"ready\"}\n"<<std::flush;
     constexpr std::size_t limit=16*1024*1024;
     LineReader input;
+    Response response(directory);
     for(;;) {
         std::string line;bool oversized=false;
         if(!input.next(line,oversized,limit))break;
         std::string id="null";
         bool shutdown=false;
-        Response response(directory);
+        response.reset();
         try {
             if(oversized) throw std::invalid_argument("JSON request exceeds 16 MiB");
             auto request=Parser(line).parse();
