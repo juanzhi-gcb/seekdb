@@ -146,7 +146,7 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }

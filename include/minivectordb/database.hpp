@@ -31,6 +31,7 @@ struct Options {
   // Format04 omits unary radix pages; existing format02/03 files stay unchanged.
   bool compressed_paths = true;
   bool packed_branches = true; // Format04 sparse nodes share immutable pages.
+  bool compact_node_refs = true; // Format06 canonical compact node addresses.
   bool compact_values = true; // Format05 bounded lossless packed payloads.
   bool discard_file_cache = false; // Optional advisory release after owned copies/fsync.
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.

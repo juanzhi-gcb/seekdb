@@ -16,7 +16,27 @@
 
 namespace minivectordb::jsonl {
 // Preserve raw validated JSON identifiers, avoiding any conversion through double.
-struct Value { char kind = 0; std::string text, raw; };
+// Raw lexemes borrow the immutable input frame until the response is finished.
+struct Value { char kind = 0; std::string text; std::string_view raw; };
+inline std::size_t plain_string_prefix(std::string_view input) noexcept {
+    constexpr std::uint64_t ones=0x0101010101010101ULL,high=0x8080808080808080ULL;
+    const auto zero=[](std::uint64_t x){return (x-ones)&~x&high;};
+    std::size_t size=0;
+    while(input.size()-size>=8) {
+        std::uint64_t word;std::memcpy(&word,input.data()+size,8);
+        // The subtraction tests can stop early on a neighbouring byte after
+        // a borrow, but never skip a quote, backslash or raw control byte.
+        if(zero(word^(ones*'"')) || zero(word^(ones*'\\')) ||
+           ((word-ones*32)&~word&high))break;
+        size+=8;
+    }
+    while(size<input.size()) {
+        const auto c=static_cast<unsigned char>(input[size]);
+        if(c<32 || c=='"' || c=='\\')break;
+        ++size;
+    }
+    return size;
+}
 class Parser {
     std::string_view input;
     std::size_t pos = 0;
@@ -46,6 +66,9 @@ class Parser {
         if(!take('"')) bad();
         std::string s;
         while(pos<input.size()) {
+            const auto count=plain_string_prefix(input.substr(pos));
+            s.append(input.substr(pos,count));pos+=count;
+            if(pos==input.size())bad();
             unsigned char c=static_cast<unsigned char>(input[pos++]);
             if(c=='"') { validate_text(s, s.size()); return s; }
             if(c<32) bad();
@@ -97,11 +120,11 @@ class Parser {
             }
             v.kind='0';
         }
-        v.raw=std::string(input.substr(start,pos-start));
+        v.raw=input.substr(start,pos-start);
         // Integer identifiers are arbitrary precision lexemes. JSON floating IDs
         // must remain finite for the official Python driver (C locale is unchanged).
         if(v.kind=='0' && v.raw.find_first_of(".eE")!=std::string::npos &&
-           !std::isfinite(std::strtod(v.raw.c_str(),nullptr))) bad();
+           !std::isfinite(std::strtod(std::string(v.raw).c_str(),nullptr))) bad();
         return v;
     }
     std::map<std::string,Value> object(unsigned depth) {
@@ -122,9 +145,12 @@ public:
     auto parse() { auto result=object(0);space();if(pos!=input.size()) bad();return result; }
 };
 inline std::string quote(std::string_view s) {
-    std::string out="\"";
+    std::string out;out.reserve(s.size()+2);out+='"';
     constexpr char hex[]="0123456789abcdef";
-    for(unsigned char c:s) {
+    while(!s.empty()) {
+        const auto count=plain_string_prefix(s);out.append(s.substr(0,count));s.remove_prefix(count);
+        if(s.empty())break;
+        const auto c=static_cast<unsigned char>(s.front());s.remove_prefix(1);
         if(c=='"'||c=='\\') {out+='\\';out+=char(c);}
         else if(c<32) {out+="\\u00";out+=hex[c>>4];out+=hex[c&15];}
         else out+=char(c);
@@ -235,7 +261,7 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
             auto ident=request.find("id");
             if(ident==request.end()) throw std::invalid_argument("missing id");
             id=ident->second.raw;
-            auto field=[&](const char* name) -> std::string {
+            auto field=[&](const char* name) -> std::string_view {
                 auto it=request.find(name);
                 if(it==request.end() || it->second.kind!='"') throw std::invalid_argument(std::string("missing or invalid ")+name);
                 return it->second.text;
