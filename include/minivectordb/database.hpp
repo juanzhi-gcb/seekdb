@@ -70,6 +70,7 @@ struct Options {
   // Experimental exact rejection by a conservatively bounded FP32 estimate.
   // Remaining candidates always use the original double distance kernel.
   bool bounded_fp32_screen = false;
+  bool certified_block_scan = true; // Skip redundant predicates only with an exact interval proof.
   // Transpose completed numeric snapshots once, within the existing arena.
   // AVX2 queries can then read candidate blocks without per-query repacking.
   bool transposed_scan_cache = true;
@@ -100,6 +101,7 @@ struct ExecutionInfo {
   // Arena capacity retained after TopK execution; other paths do not collect it.
   std::size_t snapshot_bytes = 0;
   std::uint64_t typed_rows_examined = 0;
+  std::uint64_t certified_blocks_examined = 0;
   std::size_t typed_cache_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).

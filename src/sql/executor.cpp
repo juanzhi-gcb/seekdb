@@ -290,21 +290,26 @@ namespace minivectordb {
       }
       return true;
     }
-    std::pair<std::size_t,std::size_t> typed_scan_range(const std::vector<CachedPredicate>& predicates) const {
+    std::pair<std::size_t,std::size_t> typed_scan_range(const std::vector<CachedPredicate>& predicates,
+                                                     bool* certified=nullptr) const {
       std::size_t begin=0,end=typed_snapshot.size();
+      if(certified)*certified=predicates.empty();
       if(!options.clustered_range_scan)return {begin,end};
+      bool complete=true;
       for(const auto& p:predicates) {
         const auto bounds=p.text?typed_snapshot.ordered_bounds(p.value):
             typed_snapshot.ordered_bounds(p.slot,p.number);
-        if(!bounds)continue;
+        if(!bounds){complete=false;continue;}
         const auto [lower,upper]=*bounds;
         if(p.op=="=") {begin=std::max(begin,lower);end=std::min(end,upper);}
         else if(p.op=="<")end=std::min(end,lower);
         else if(p.op=="<=")end=std::min(end,upper);
         else if(p.op==">")begin=std::max(begin,upper);
         else if(p.op==">=")begin=std::max(begin,lower);
+        else complete=false;
         if(begin>=end)return {0,0};
       }
+      if(certified)*certified=complete;
       return {begin,end};
     }
     bool transpose_enabled() const noexcept {
@@ -318,7 +323,9 @@ namespace minivectordb {
           !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
-      const auto [begin,end]=typed_scan_range(predicates);
+      bool certified=false;
+      const auto [begin,end]=typed_scan_range(predicates,&certified);
+      const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -329,6 +336,14 @@ namespace minivectordb {
           for(std::size_t r=begin/16*16;r<end;r+=16) {
             const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
             std::uint16_t mask=0;
+            if(bulk) {
+              const auto lo=begin>r?begin-r:0,hi=std::min(count,end-r);
+              const auto selected=hi-lo;
+              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
+              info.rows_examined+=selected;info.typed_rows_examined+=selected;
+              info.distances_computed+=selected;++info.certified_blocks_examined;
+              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+            } else
             for(std::size_t lane=0;lane<count;++lane) {
               if(r+lane<begin || r+lane>=end)continue;
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);

@@ -1,7 +1,7 @@
-name: Experimental pipelined exact screen
+name: Experimental certified block scan
 "on":
   push:
-    branches: ['codex/score-screen2-20261112']
+    branches: ['codex/score-screen3-20261112']
 permissions:
   contents: read
 jobs:
