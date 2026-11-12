@@ -70,7 +70,11 @@ void run_case(std::size_t dimension,unsigned mode) {
         for(double radius:{distance,std::nextafter(distance,INFINITY)}) {
           const auto portable=cache.survivors(encoded,radius,values,65535,false);
           CHECK(portable&(1U<<lane));
-          if(detail::Int8BoundCache::available()){CHECK(cache.survivors(encoded,radius,values,65535,true)==portable);++native_masks;}
+          if(detail::Int8BoundCache::available()){
+            CHECK(cache.survivors(encoded,radius,values,65535,true)==portable);
+            CHECK(cache.survivors(encoded,radius,values,65535,true,true)==portable);
+            ++native_masks;
+          }
           ++compared;
         }
       }
@@ -89,6 +93,7 @@ int main(){try{
   for(std::size_t dimension:{32u,127u,128u,129u,1024u,4096u})
     for(unsigned mode=0;mode<6;++mode)run_case(dimension,mode);
   CHECK(rejections>1000);
-  std::cout<<"{\"native_vnni\":"<<(detail::Int8BoundCache::available()?"true":"false")
+  std::cout<<"{\"native_vnni\":"<<(detail::Int8BoundCache::native_vnni()?"true":"false")
+           <<",\"native_avx2\":"<<(detail::Int8BoundCache::available()?"true":"false")
            <<",\"compared\":"<<compared<<",\"rejected\":"<<rejections<<",\"native_mask_checks\":"<<native_masks<<"}\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -37,6 +37,30 @@ class Int8BoundCache {
     return up(std::sqrt(square)*(1+static_cast<double>(n+8)*0x1p-48));
   }
 #if defined(__x86_64__) && defined(__GNUC__)
+  __attribute__((target("avx2"),noinline))
+  static void dots_avx2(const std::int8_t* codes,const std::uint32_t* query,
+                       const std::int32_t* sums,std::size_t groups,std::int32_t* output) {
+    auto a=_mm256_setzero_si256(),b=a,c=a,d=a;
+    const auto ones=_mm256_set1_epi16(1),bias=_mm256_set1_epi8(char(-128));
+    for(std::size_t g=0;g<groups;++g) {
+      // Restore signed query codes. Neither operand contains -128; therefore
+      // abs(query)*sign(code,query) has adjacent sums bounded by 32258.
+      // VPMADDUBSW cannot saturate, unlike using the biased unsigned query.
+      const auto q=_mm256_xor_si256(_mm256_set1_epi32(std::bit_cast<std::int32_t>(query[g])),bias);
+      const auto magnitude=_mm256_abs_epi8(q);
+      const auto lo=_mm256_sign_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes+g*64)),q);
+      const auto hi=_mm256_sign_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes+g*64+32)),q);
+      const auto x=_mm256_madd_epi16(_mm256_maddubs_epi16(magnitude,lo),ones);
+      const auto y=_mm256_madd_epi16(_mm256_maddubs_epi16(magnitude,hi),ones);
+      if(g&1){c=_mm256_add_epi32(c,x);d=_mm256_add_epi32(d,y);}
+      else {a=_mm256_add_epi32(a,x);b=_mm256_add_epi32(b,y);}
+    }
+    // Match VNNI's unsigned-query dot product for the shared bound evaluator.
+    a=_mm256_add_epi32(_mm256_add_epi32(a,c),_mm256_slli_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(sums)),7));
+    b=_mm256_add_epi32(_mm256_add_epi32(b,d),_mm256_slli_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(sums+8)),7));
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(output),a);
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(output+8),b);
+  }
   __attribute__((target("avx512f,avx512vnni"),noinline))
   static void dots_native(const std::int8_t* codes,const std::uint32_t* query,
                           std::size_t groups,std::int32_t* output) {
@@ -81,6 +105,34 @@ class Int8BoundCache {
     }
     return rejected;
   }
+#if !defined(__clang__)
+  __attribute__((optimize("fp-contract=off")))
+#endif
+  __attribute__((target("avx2"),noinline))
+  static std::uint16_t reject_avx2(const std::int32_t* dots,const std::int32_t* norms,
+      const std::int32_t* sums,const double* errors,double scale_square,double cross,
+      double a,double expanded) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+    const auto one=_mm256_set1_epi64x(1);const auto zero=_mm256_setzero_pd();std::uint16_t rejected=0;
+    for(unsigned lane=0;lane<16;lane+=4) {
+      const auto dot=_mm_sub_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(dots+lane)),
+                     _mm_slli_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(sums+lane)),7));
+      const auto b=_mm256_mul_pd(_mm256_cvtepi32_pd(_mm_loadu_si128(reinterpret_cast<const __m128i*>(norms+lane))),_mm256_set1_pd(scale_square));
+      const auto c=_mm256_mul_pd(_mm256_cvtepi32_pd(dot),_mm256_set1_pd(cross));
+      const auto abs_c=_mm256_max_pd(c,_mm256_sub_pd(zero,c));
+      const auto ab=_mm256_add_pd(_mm256_set1_pd(a),b);
+      const auto allowance=_mm256_mul_pd(_mm256_add_pd(ab,abs_c),_mm256_set1_pd(0x1p-45));
+      const auto lower=_mm256_sub_pd(_mm256_sub_pd(ab,c),allowance);
+      auto bound=_mm256_add_pd(_mm256_set1_pd(expanded),_mm256_loadu_pd(errors+lane));
+      bound=_mm256_castsi256_pd(_mm256_add_epi64(_mm256_castpd_si256(bound),one));
+      auto upper=_mm256_mul_pd(_mm256_mul_pd(bound,bound),_mm256_set1_pd(1+0x1p-45));
+      upper=_mm256_castsi256_pd(_mm256_add_epi64(_mm256_castpd_si256(upper),one));
+      rejected|=std::uint16_t(unsigned(_mm256_movemask_pd(_mm256_cmp_pd(lower,upper,_CMP_GT_OQ)))<<lane);
+    }
+    return rejected;
+  }
 #endif
 public:
   struct Query {
@@ -90,7 +142,14 @@ public:
   };
   static bool available() noexcept {
 #if defined(__x86_64__) && defined(__GNUC__)
-    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512vnni");
+    return __builtin_cpu_supports("avx2");
+#else
+    return false;
+#endif
+  }
+  static bool native_vnni() noexcept {
+#if defined(__x86_64__) && defined(__GNUC__)
+    return available() && __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512vnni");
 #else
     return false;
 #endif
@@ -159,7 +218,7 @@ public:
     result.valid=true;return result;
   }
   std::uint16_t survivors(const Query& query,double radius,std::span<const float> original,
-                          std::uint16_t mask,bool native=true) const {
+                          std::uint16_t mask,bool native=true,bool force_avx2=false) const {
     if(!query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
     const auto begin=reinterpret_cast<std::uintptr_t>(source_);
     const auto address=reinterpret_cast<std::uintptr_t>(original.data());
@@ -169,10 +228,11 @@ public:
     const auto row=offset/(dimension_*sizeof(float));
     std::array<std::int32_t,16> dots{};
 #if defined(__x86_64__) && defined(__GNUC__)
-    if(native&&available())dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
+    if(native&&native_vnni()&&!force_avx2)dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(native&&available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
     else
 #else
-    (void)native;
+    (void)native;(void)force_avx2;
 #endif
     for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
       for(std::size_t k=0;k<4;++k)
@@ -182,7 +242,9 @@ public:
     // square/add, sqrt rounding and equality/tie ordering, n <= 4096.
     const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
 #if defined(__x86_64__) && defined(__GNUC__)
-    if(native&&available())return mask&std::uint16_t(~reject_native(dots.data(),norms_.get()+row,sums_.get()+row,
+    if(native&&native_vnni()&&!force_avx2)return mask&std::uint16_t(~reject_native(dots.data(),norms_.get()+row,sums_.get()+row,
+                      errors_.get()+row,scale_square,cross,query.norm_scaled,expanded));
+    if(native&&available())return mask&std::uint16_t(~reject_avx2(dots.data(),norms_.get()+row,sums_.get()+row,
                       errors_.get()+row,scale_square,cross,query.norm_scaled,expanded));
 #endif
     for(std::size_t lane=0;lane<16;++lane)if(mask&(1U<<lane)) {

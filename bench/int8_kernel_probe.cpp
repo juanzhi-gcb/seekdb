@@ -228,7 +228,7 @@ int main(int argc,char** argv) {
             <<",\"vector_values_filtered\":"<<filtered_vectors<<",\"vector_values_unfiltered\":"<<unfiltered_vectors
             <<",\"vector_values_materialized\":"<<vector_cells<<",\"cells_materialized\":"<<cells
             <<",\"process_maxrss_kib\":"<<usage.ru_maxrss<<",\"local_cgroup_peak_bytes\":"<<local_peak
-            <<",\"native_vnni\":"<<(detail::Int8BoundCache::available()?"true":"false")<<",\"int8_enabled\":"<<(options.bounded_int8_screen?"true":"false")<<",\"typed_bytes\":"<<typed_bytes
+            <<",\"native_vnni\":"<<(detail::Int8BoundCache::native_vnni()?"true":"false")<<",\"int8_enabled\":"<<(options.bounded_int8_screen?"true":"false")<<",\"typed_bytes\":"<<typed_bytes
             <<",\"branch_hits\":"<<branch_stats.hits<<",\"branch_misses\":"<<branch_stats.misses<<",\"branch_evictions\":"<<branch_stats.evictions
             <<",\"value_hits\":"<<value_stats.hits<<",\"value_misses\":"<<value_stats.misses
             <<",\"validated_queries\":"<<query_count<<",\"recovered_rows\":"<<recovered
