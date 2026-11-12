@@ -1,0 +1,66 @@
+name: MiniVectorDB native candidate comparison
+
+"on":
+  push:
+    branches: ['codex/score-next-candidates-20261112']
+  workflow_dispatch:
+    inputs:
+      overflow:
+        description: Include one 30k-row overflow round for each schema
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  BASELINE_REF: ff117199f8077de7a6e3e1f91a611397bb6641a0
+  RANGE_REF: d8a9eb45d3fc0e3c7d36a01a47166cd0c871523e
+  WRITE_REF: 285015cf44a616b38b59bced11e4f8ddf226d4f2
+  STORE_REF: 459aa4d81d472efac0b2c993f4a26050ac8f3e67
+  COMBINED_REF: 48e31fa98f4ba2a6c9d440d425259bc21556aad3
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare pinned candidates on this native x86 runner
+        env:
+          NATIVE_REPLICA: ${{ matrix.replica }}
+          RUN_OVERFLOW: ${{ github.event_name == 'push' && '1' || (inputs.overflow && '1' || '0') }}
+        run: bash bench/run_native_candidates.sh
+
+      - name: Record interpretation limits
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'TEXT'
+          Five pinned source variants, compared in interleaved order on each of two native x86 runners.
+          The artifacts retain every sample, exact-result checks, full source identities and CPU capabilities.
+          Explicit AVX2/AVX512 range checks report unsupported hardware separately; unsupported is not a pass.
+          Full combined CTest and 20 public SQL cases are required before performance comparison.
+          Microbench timings and real JSONL T/B/M are local diagnostics; no official E or Prompt score is inferred.
+          TEXT
+
+      - name: Preserve all logs and JSON, including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-candidates-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-candidate-results-${{ matrix.replica }}/
+          if-no-files-found: error
+          retention-days: 14
