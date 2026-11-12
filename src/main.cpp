@@ -166,12 +166,15 @@ int serve(minivectordb::Database& db) {
 }
 } // namespace
 int main(int argc, char** argv) {
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
     try {
         const auto args = arguments(argc, argv);
         std::filesystem::create_directories(args.directory);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
+        minivectordb::Options options{args.directory / "tmp",args.sort_memory};options.journal_store=true;
         auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
-                                minivectordb::Options{args.directory / "tmp", args.sort_memory});
+                                options);
         return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);
     } catch (const std::exception& error) {
         std::cerr << "MiniVectorDB: " << error.what()

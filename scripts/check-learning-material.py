@@ -86,6 +86,23 @@ def verify_selection(current, archive):
             'Curated material must preserve every recorded user statement')
 
 
+def append_records(archive, supplement):
+    """Extend the immutable source log without permitting replacement by ID."""
+    result = dict(archive)
+    for field in ['conversations', 'experiments', 'agent_observations']:
+        require(isinstance(supplement.get(field), list), 'Missing appendix records: ' + field)
+        old = archive[field]
+        existing = {row['id'] for row in old}
+        added = supplement[field]
+        for row in added:
+            identity = row.get('id')
+            require(isinstance(identity, str) and identity and identity not in existing,
+                    'Appendix duplicates or replaces record: ' + str(identity))
+            existing.add(identity)
+        result[field] = old + added
+    return result
+
+
 def resolve_pointer(document, pointer):
     require(isinstance(pointer, str) and pointer.startswith('/'), 'Invalid JSON pointer')
     target, parent = document, None
@@ -163,6 +180,15 @@ def main():
         require(archive_path.stat().st_size == selection['bytes'] and
                 sha(archive_path) == selection['sha256'], 'Selection archive digest')
         history_records = read_json(archive_path)
+        for extra in binding.get('selection_supplements', []):
+            extra_path = path_in_repo(extra['path'])
+            require(extra_path.stat().st_size == extra['bytes'] and
+                    sha(extra_path) == extra['sha256'], 'Appendix digest')
+            extra_records = read_json(extra_path)
+            require(extra_records.get('schema_version') == 'minivectordb-learning-evidence-appendix-v1' and
+                    extra_records.get('base_archive_sha256') == selection['sha256'],
+                    'Appendix must bind the unchanged original archive')
+            history_records = append_records(history_records, extra_records)
         verify_selection(current, history_records)
     history = binding['before_material']
     previous_path = path_in_repo(history['path'])

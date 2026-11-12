@@ -79,6 +79,19 @@ class JsonlTests(unittest.TestCase):
         self.query('BEGIN;'); self.query('DELETE FROM t;'); self.stop(); self.start()
         self.assertEqual(len(self.query('SELECT id FROM t;')['rows']),100)
         self.shutdown()
+    def test_repeated_spooled_small_and_error_responses(self):
+        self.start()
+        self.query('CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(2000));')
+        payload='r'*1500
+        self.query('INSERT INTO t VALUES '+','.join("(%d,'%s')"%(i,payload) for i in range(60))+';')
+        for round in range(12):
+            rows=self.query('SELECT s FROM t ORDER BY id;',ident={'round':round})['rows']
+            self.assertEqual(rows,[[payload] for _ in range(60)])
+            self.query('SELECT unknown FROM t;',ident='error-'+str(round),ok=False)
+            self.assertEqual(self.query('SELECT id FROM t WHERE id=17;')['rows'],[[17]])
+            self.assertEqual(self.query('SELECT id FROM t WHERE id<0;')['rows'],[])
+            self.assertFalse(list(self.data.glob('.jsonl-*')))
+        self.shutdown()
     def test_spool_failure_is_one_error_then_session_continues(self):
         import resource, signal
         self.start(); self.query('CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(2000));')

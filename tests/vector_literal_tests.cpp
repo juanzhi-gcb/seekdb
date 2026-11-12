@@ -42,9 +42,25 @@ void quoted_tokens() {
     CHECK(failed);
   }
 }
+void parsed_ownership() {
+  const std::string text(16384,'x');
+  std::string input="INSERT INTO `LongTable` (`LongId`,`LongText`,`LongVector`) VALUES (17,'"+text+"','[1,-0,3]'),(18,'tail',[4,5,6]);";
+  const auto parsed=sql::parse(input);
+  input.assign(input.size(),'!');
+  CHECK(parsed.table=="longtable");CHECK(parsed.insert_columns==std::vector<std::string>({"longid","longtext","longvector"}));
+  CHECK(parsed.values.size()==2);CHECK(parsed.values[0][0].text=="17");
+  CHECK(parsed.values[0][1].text==text);CHECK(parsed.values[0][2].text=="[1,-0,3]");
+  CHECK(parsed.values[1][0].text=="18");CHECK(parsed.values[1][1].text=="tail");
+  CHECK(parsed.values[1][2].components==std::vector<std::string>({"4","5","6"}));
+  const auto query=sql::parse("SELECT L2_DISTANCE(v,'[1,2,3]') AS d,id FROM t WHERE tag='still-owned' AND id>=17 ORDER BY d,id DESC LIMIT 10;");
+  CHECK(query.predicates.size()==2);CHECK(query.predicates[0].value.text=="still-owned");
+  CHECK(query.predicates[0].op=="=");CHECK(query.predicates[1].op==">=");
+  CHECK(query.projection[0].alias=="d");CHECK(query.order[0].expression.column=="d");
+}
 int main() {
   try {
     quoted_tokens();
+    parsed_ownership();
     const std::string cases[]{"[]","[0,-0,+0,0e-999,-1e-999]","[3.4028235e38,-3.4028235e38]",
       "[3.4028236e38]","[1e309]","[1e-324]","[.1,1.,+1E+3,-.0]","[16777217,16777219]",
       " [ 1 ,\t2\r\n, 3\f] ","[1/*keep*/,2]","[1,--comment\n2]","[1,2]/*tail*/",

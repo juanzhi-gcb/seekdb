@@ -49,7 +49,8 @@ public:
                  bool packed_values=false, std::size_t packed_scan_cache_bytes=262144,
                  std::size_t data_cache_bytes=0,
                  CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered,
-                 bool compressed_paths=false, bool packed_branches=true);
+                 bool compressed_paths=false, bool packed_branches=true,bool compact_values=false,
+                 bool discard_file_cache=false, bool compact_node_refs=false,bool byteplane_values=false,bool journal_format=false);
   // Separate lazy four-way cache for validated packed and overflow pages. The budget
   // includes the entire set array (pages, IDs, ranks, padding); fixed object and
   // allocator overhead are excluded. A budget smaller than one set disables it.
@@ -59,6 +60,8 @@ public:
   // Reset event counters, retaining the cache and its capacity/residency.
   void reset_cache_stats() noexcept;
   ~Store();
+  // Memory-only hint for mutation binding/duplicate checks before begin().
+  void set_write_cache_hint(bool enabled) noexcept;
   Store(const Store&) = delete;
   Store& operator=(const Store&) = delete;
   void begin();

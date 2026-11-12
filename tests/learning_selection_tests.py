@@ -23,6 +23,26 @@ class SelectionTests(unittest.TestCase):
     def test_exact_record_selection_passes(self):
         module.verify_selection(self.current, self.archive)
 
+    def test_appendix_keeps_original_immutable_and_requires_all_user_records(self):
+        before = copy.deepcopy(self.archive)
+        extra = {'conversations': [{'id': 'u2', 'source': 'user', 'content': 'actual feedback'}],
+                 'experiments': [], 'agent_observations': []}
+        extended = module.append_records(self.archive, extra)
+        self.assertEqual(self.archive, before)
+        current = copy.deepcopy(self.current)
+        current['conversations'] += extra['conversations']
+        module.verify_selection(current, extended)
+        current['conversations'].pop()
+        with self.assertRaises(ValueError):
+            module.verify_selection(current, extended)
+
+    def test_appendix_cannot_replace_record_or_repeat_id(self):
+        for rows in [[{'id': 'u1', 'content': 'replacement'}],
+                     [{'id': 'u2'}, {'id': 'u2'}]]:
+            extra = {'conversations': rows, 'experiments': [], 'agent_observations': []}
+            with self.assertRaises(ValueError):
+                module.append_records(self.archive, extra)
+
     def test_cannot_rewrite_or_invent_user_explanation(self):
         self.current['conversations'][0]['content'] = 'I independently understood the implementation'
         with self.assertRaises(ValueError):

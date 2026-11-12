@@ -31,17 +31,20 @@ struct Options {
   // Format04 omits unary radix pages; existing format02/03 files stay unchanged.
   bool compressed_paths = true;
   bool packed_branches = true; // Format04 sparse nodes share immutable pages.
+  bool compact_node_refs = true; // Format06 canonical compact node addresses.
+  bool compact_values = true; // Format05 bounded lossless packed payloads.
+  bool discard_file_cache = false; // Optional advisory release after owned copies/fsync.
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
-  std::size_t data_cache_bytes = 4 * 1024 * 1024; // Bounded cross-query data pages; zero disables.
+  std::size_t data_cache_bytes = 524288; // Bounded cross-query data pages; zero disables.
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;
-  // Owned raw rows from one fully validated scan; capped at 8MiB. Indexed and
-  // unindexed scans share this arena. Zero disables both; object/allocator overhead
-  // is outside the arena budget.
-  std::size_t scan_snapshot_bytes = 8 * 1024 * 1024;
+  // Shared validated-snapshot budget: numeric columns cap at 64 MiB, raw rows
+  // at 8 MiB. Complete probation scans size numeric arrays to actual rows.
+  // Zero disables both; allocator and bounded preparation scratch are separate.
+  std::size_t scan_snapshot_bytes = 64 * 1024 * 1024;
   // Allow unindexed exact TopK scans to use the shared snapshot.
   bool table_scan_snapshot = true;
   // Retain the arena across invalidation; every rebuild still validates all rows.
@@ -67,6 +70,10 @@ struct Options {
   bool simd_vector_kernel = true;
   // Optional wider exact lanes on CPUs/OSes with AVX-512F support.
   bool wide_simd_vector_kernel = true;
+  // Experimental exact rejection by a conservatively bounded FP32 estimate.
+  // Remaining candidates always use the original double distance kernel.
+  bool bounded_fp32_screen = true;
+  bool certified_block_scan = true; // Skip redundant predicates only with an exact interval proof.
   // Transpose completed numeric snapshots once, within the existing arena.
   // AVX2 queries can then read candidate blocks without per-query repacking.
   bool transposed_scan_cache = true;
@@ -76,12 +83,19 @@ struct Options {
   // Cluster a completed snapshot by a reusable ordinary column before SIMD
   // transposition, making selective filters occupy dense candidate blocks.
   bool clustered_scan_cache = true;
+  // Restrict cached scans to bounds on the column actually clustered. False
+  // retains complete cached scans for controlled comparisons.
+  bool clustered_range_scan = true;
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;
   // Competition recovery model: process SIGKILL, with final fsync before ACK.
   // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
+  bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
+  bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
+  std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
+  bool journal_store=false; // New-file backend; existing formats autodetected.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -94,7 +108,9 @@ struct ExecutionInfo {
   // Arena capacity retained after TopK execution; other paths do not collect it.
   std::size_t snapshot_bytes = 0;
   std::uint64_t typed_rows_examined = 0;
+  std::uint64_t certified_blocks_examined = 0;
   std::size_t typed_cache_bytes = 0;
+  std::size_t projection_cache_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;

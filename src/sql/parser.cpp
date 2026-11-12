@@ -22,7 +22,7 @@ namespace minivectordb::sql {
       std::string name() {
         if(peek().kind!=TokenKind::Word&&peek().kind!=TokenKind::Identifier)throw Error(ErrorCode::Syntax,"expected identifier");
         if(peek().text.empty())throw Error(ErrorCode::Syntax,"empty identifier");
-        return tokens[at++].text;
+        return std::move(tokens[at++].text);
       }
       std::uint64_t integer() {
         if(peek().kind!=TokenKind::Number)throw Error(ErrorCode::Syntax,"expected integer");
@@ -39,18 +39,18 @@ namespace minivectordb::sql {
         Literal v;
         if(peek().kind==TokenKind::Number) {
           v.kind=Literal::Number;
-          v.text=tokens[at++].text;
+          v.text=std::move(tokens[at++].text);
         }
         else if(peek().kind==TokenKind::String) {
           v.kind=Literal::String;
-          v.text=tokens[at++].text;
+          v.text=std::move(tokens[at++].text);
         }
         else if(take("[")) {
           v.kind=Literal::Vector;
           if(!take("]")) {
             do {
               if(peek().kind!=TokenKind::Number)throw Error(ErrorCode::Syntax,"expected VECTOR component");
-              v.components.push_back(tokens[at++].text);
+              v.components.push_back(std::move(tokens[at++].text));
             }
             while(take(","));
             need("]");

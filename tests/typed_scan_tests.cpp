@@ -43,6 +43,9 @@ struct Result {std::vector<Row> rows;ExecutionInfo info;profile::Snapshot stats;
 using Filter=std::function<bool(const Item&)>;
 Options settings(std::size_t budget=65536,bool packed=true,bool selective=true) {
   Options o;o.typed_scan_cache=true;o.scan_snapshot_bytes=budget;
+  // These historical fixtures assert the complete-scan instrumentation
+  // contract. Range-enabled correctness and counters are exercised below.
+  o.clustered_range_scan=false;
   o.packed_values=packed;o.selective_decode=selective;return o;
 }
 std::string literal(const std::vector<float>& values) {
@@ -223,9 +226,9 @@ void compatibility(const std::filesystem::path& path) {
   CHECK(string_filter.rows==oracle(items,q,[](const Item& i){return i.label>="body20";}));
   CHECK(string_filter.info.typed_rows_examined==0);CHECK(string_filter.info.typed_cache_bytes==0);
   CHECK(validations(string_filter)==items.size()+string_filter.rows.size());
-  // The raw representation selected by a string filter stays usable for this
-  // table/index until invalidation, including subsequent numeric queries.
-  warm(db,items,q,"",{},false);
+  // A wide VARCHAR declaration with short actual values now fits the measured
+  // text arena; subsequent numeric queries retain that validated representation.
+  warm(db,items,q,"",{},true);
   db.execute("UPDATE t SET g=0 WHERE id=9223372036854775807");
   warm(db,items,q);
   const auto key=items.front().id;
@@ -490,7 +493,7 @@ void transposed_lifecycle(const std::filesystem::path& path,bool indexed) {
   db.execute("DELETE FROM t WHERE id="+std::to_string(changed.back().id));changed.pop_back();warm(db,changed,q);
   db.execute("ROLLBACK");CHECK(query(db,statement(q)).info.typed_rows_examined==0);warm(db,items,q);
   CHECK(query(db,statement(q,"label>='body20'")).rows==oracle(items,q,[](const Item& i){return i.label>="body20";}));
-  warm(db,items,q,"",{},false);
+  warm(db,items,q,"",{},true);
 }
 
 void clustered_cache_contract() {
@@ -522,6 +525,144 @@ void clustered_cache_contract() {
   }
 }
 
+void ordered_bounds_contract() {
+  const Schema schema{71,"t",{{"id",ColumnType::Bigint,0},{"g",ColumnType::Bigint,0},
+    {"v",ColumnType::Vector,1}},0};
+  for(std::size_t count:{0U,1U,2U,15U,16U,17U,33U,16384U,16385U,131072U,131073U})for(bool clustered:{false,true}) {
+    sql::TypedScanCache cache;const std::size_t budget=2*sizeof(std::size_t)+count*20+64;
+    cache.start(schema,0,2,budget);cache.start(schema,0,2,budget);
+    const std::vector<float> v{0};
+    for(std::size_t i=0;i<count;++i)cache.append(v,[&](std::size_t column) {
+      return column==0?-std::int64_t(i):std::int64_t((i*13)%7)-3;
+    });
+    CHECK(!cache.ordered_bounds(1,0));cache.finish(false,clustered);
+    CHECK(cache.ready(71,0,2));CHECK(!cache.ordered_bounds(0,0));
+    CHECK(!cache.ordered_bounds(std::string_view("")));
+    for(std::int64_t value:std::vector<std::int64_t>{INT64_MIN,-4,-3,0,3,4,INT64_MAX}) {
+      const auto bounds=cache.ordered_bounds(1,value);
+      if(!clustered||count<2||count>131072)CHECK(!bounds);
+      else {
+        CHECK(bounds);std::size_t lower=0,upper=0;
+        for(std::size_t i=0;i<count;++i) {
+          const auto g=std::int64_t((i*13)%7)-3;
+          lower+=g<value;upper+=g<=value;
+        }
+        CHECK(bounds->first==lower&&bounds->second==upper);
+      }
+    }
+    cache.invalidate();CHECK(!cache.ordered_bounds(1,0));
+    cache.start(schema,0,2,budget);CHECK(!cache.ordered_bounds(1,0));
+  }
+  // Even a two-row cache may exceed the bounded clustering scratch allowance.
+  // It must stay a valid cache but must not expose unproven ordered bounds.
+  auto wide=schema;wide.columns[2].extent=16385;
+  sql::TypedScanCache cache;cache.start(wide,0,2,262144);cache.start(wide,0,2,262144);
+  std::vector<float> vector(16385,1);
+  for(int i=0;i<2;++i)cache.append(vector,[&](auto column){return std::int64_t(column==0?i:1-i);});
+  cache.finish(false,true);CHECK(cache.ready(71,0,2));CHECK(!cache.ordered_bounds(1,0));
+}
+
+std::vector<Item> range_fixture() {
+  const std::string labels[]{"","a",std::string("a\0b",3),"é","中","😀"};
+  std::vector<Item> items;
+  for(int i=0;i<97;++i) {
+    std::vector<float> v(128);
+    for(std::size_t d=0;d<v.size();++d)v[d]=float((i%11)-5)*float(d%3+1)/4;
+    items.push_back({std::int64_t(i)*700003-34000001,(i*17)%5-2,i%3,std::move(v),labels[i%6]});
+  }
+  items[0].g=INT64_MIN;items[1].g=INT64_MAX;
+  std::reverse(items.begin(),items.end());return items;
+}
+void range_seed(Database& db,const std::vector<Item>& items) {
+  // The primary key is deliberately not scalar slot zero.
+  db.execute("CREATE TABLE t(v VECTOR(128),g BIGINT,label VARCHAR(16),h BIGINT,id BIGINT PRIMARY KEY,tag VARCHAR(16))");
+  std::string sql="INSERT INTO t(v,g,label,h,id,tag) VALUES ";
+  for(std::size_t n=0;n<items.size();++n) {
+    if(n)sql+=',';const auto& r=items[n];
+    sql+="('"+literal(r.v)+"',"+std::to_string(r.g)+",'"+r.label+"',"+
+      std::to_string(r.h)+','+std::to_string(r.id)+",'z')";
+  }
+  db.execute(sql);
+}
+void check_range(Database& db,const std::vector<Item>& items,const std::string& where,
+                 const Filter& all,const Filter& range,bool enabled=true) {
+  const std::vector<float> q(128,0.25f);Result result;
+  // A changed text-column identity and a post-write cache both require a full
+  // probation/build cycle; validate every cold/build/warm answer independently.
+  for(int phase=0;phase<3;++phase) {
+    result=query(db,statement(q,where,200));CHECK(result.rows==oracle(items,q,all,200));
+  }
+  CHECK(result.info.typed_cache_bytes>0&&result.info.snapshot_bytes==0);
+  const auto examined=enabled&&range?std::count_if(items.begin(),items.end(),range):items.size();
+  CHECK(result.info.typed_rows_examined==static_cast<std::uint64_t>(examined));
+  CHECK(result.info.distances_computed==result.rows.size());
+}
+void range_lifecycle(const std::filesystem::path& path,bool indexed,bool transposed,bool text,bool enabled) {
+  auto options=settings(262144);options.clustered_range_scan=enabled;options.transposed_scan_cache=transposed;
+  const auto original=range_fixture();auto committed=original;const std::vector<float> q(128,0.25f);
+  const auto integer_range=[](const Item& i){return i.g==0;};
+  const auto text_range=[](const Item& i){return i.label=="a";};
+  const auto selected=text?Filter(text_range):Filter(integer_range);
+  const std::string selected_sql=text?"label='a'":"g=0";
+  {
+    Database db(path,options);range_seed(db,original);if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
+    if(text) {
+      for(const auto& [where,predicate]:std::vector<std::pair<std::string,Filter>>{
+        {"label=''",[](const Item&i){return i.label.empty();}},
+        {"label='"+std::string("a\0b",3)+"'",[](const Item&i){return i.label==std::string("a\0b",3);}},
+        {"label='😀'",[](const Item&i){return i.label=="😀";}},
+        {"label='absent'",[](const Item&i){return i.label=="absent";}},
+        {"label<'a'",[](const Item&i){return i.label<"a";}},
+        {"label<='中'",[](const Item&i){return i.label<="中";}},
+        {"label>'é'",[](const Item&i){return i.label>"é";}},
+        {"label>='中'",[](const Item&i){return i.label>="中";}},
+        {"label>='a' AND label<'😀'",[](const Item&i){return i.label>="a"&&i.label<"😀";}},
+        {"label>'中' AND label<'a'",[](const Item&){return false;}}})
+          check_range(db,original,where,predicate,predicate,enabled);
+      check_range(db,original,"label>='a' AND h=1",[](const Item&i){return i.label>="a"&&i.h==1;},
+                  [](const Item&i){return i.label>="a";},enabled);
+      // Switching the retained VARCHAR column must rebuild its order metadata.
+      check_range(db,original,"tag='z'",[](const Item&){return true;},[](const Item&){return true;},enabled);
+    } else {
+      for(const auto& [where,predicate]:std::vector<std::pair<std::string,Filter>>{
+        {"g=-9223372036854775808",[](const Item&i){return i.g==INT64_MIN;}},
+        {"g=9223372036854775807",[](const Item&i){return i.g==INT64_MAX;}},
+        {"g=0",[](const Item&i){return i.g==0;}},{"g=3",[](const Item&i){return i.g==3;}},
+        {"g<0",[](const Item&i){return i.g<0;}},{"g<=0",[](const Item&i){return i.g<=0;}},
+        {"g>0",[](const Item&i){return i.g>0;}},{"g>=0",[](const Item&i){return i.g>=0;}},
+        {"g>=-1 AND g<2",[](const Item&i){return i.g>=-1&&i.g<2;}},
+        {"g=0 AND g=1",[](const Item&){return false;}},
+        {"g>=-9223372036854775808 AND g<=9223372036854775807",[](const Item&){return true;}}})
+          check_range(db,original,where,predicate,predicate,enabled);
+      check_range(db,original,"g>=0 AND h=1",[](const Item&i){return i.g>=0&&i.h==1;},
+                  [](const Item&i){return i.g>=0;},enabled);
+    }
+    // Predicates on a different column cannot narrow the physical range.
+    check_range(db,original,"h=1",[](const Item&i){return i.h==1;},{},enabled);
+    check_range(db,original,selected_sql,selected,selected,enabled);
+    CHECK(query(db,statement(q)).rows==oracle(original,q));
+    db.execute("BEGIN");auto changed=original;
+    changed.front().g=77;changed.front().label="q";changed.front().v=q;
+    db.execute("UPDATE t SET g=77,label='q',v='"+literal(q)+"' WHERE id="+std::to_string(changed.front().id));
+    CHECK(query(db,statement(q)).info.typed_rows_examined==0);
+    check_range(db,changed,text?"label='q'":"g=77",[&](const Item&i){return i.id==changed.front().id;},
+                [&](const Item&i){return i.id==changed.front().id;},enabled);
+    db.execute("DELETE FROM t WHERE id="+std::to_string(changed.back().id));changed.pop_back();
+    CHECK(query(db,statement(q)).info.typed_rows_examined==0);
+    check_range(db,changed,selected_sql,selected,selected,enabled);
+    db.execute("ROLLBACK");CHECK(query(db,statement(q)).info.typed_rows_examined==0);
+    check_range(db,original,selected_sql,selected,selected,enabled);
+    expect_error(ErrorCode::Constraint,[&]{db.execute("INSERT INTO t(v,g,label,h,id,tag) VALUES ('"+
+      literal(q)+"',0,'a',0,"+std::to_string(original.front().id)+",'z')");});
+    CHECK(query(db,statement(q)).info.typed_rows_examined==0);
+    check_range(db,original,selected_sql,selected,selected,enabled);
+    db.execute("BEGIN");committed.front().g=0;committed.front().label="a";
+    db.execute("UPDATE t SET g=0,label='a' WHERE id="+std::to_string(committed.front().id));db.execute("COMMIT");
+    check_range(db,committed,selected_sql,selected,selected,enabled);
+  }
+  Database reopened(path,options);check_range(reopened,committed,selected_sql,selected,selected,enabled);
+}
+
 }
 int main() {
   try {
@@ -530,7 +671,10 @@ int main() {
     std::filesystem::create_directories(parent);
     std::string pattern=(parent/"typed-scan-XXXXXX").string();
     CHECK(::mkdtemp(pattern.data()));const std::filesystem::path root(pattern);
-    cache_unit_contract();transposed_unit_contract();clustered_cache_contract();
+    cache_unit_contract();transposed_unit_contract();clustered_cache_contract();ordered_bounds_contract();
+    for(bool indexed:{false,true})for(bool transposed:{false,true})for(bool text:{false,true})
+      range_lifecycle(root/("range-"+std::to_string(indexed)+std::to_string(transposed)+std::to_string(text)),indexed,transposed,text,true);
+    range_lifecycle(root/"range-disabled",false,true,true,false);
     transposed_lifecycle(root/"transposed-unindexed",false);transposed_lifecycle(root/"transposed-indexed",true);
     basic(root/"unindexed.db",false);basic(root/"indexed.db",true);
     for(bool indexed:{false,true})for(bool selective:{false,true})

@@ -1,3 +1,4 @@
+#include "int8_bound.hpp"
 #include "minivectordb/exact.hpp"
 #include "validated.hpp"
 #include "batch_simd.hpp"
@@ -9,6 +10,7 @@
 #include <new>
 #include <stdexcept>
 #include <bit>
+#include <limits>
 namespace minivectordb {
 namespace {
 template<bool CheckComponents>
@@ -71,16 +73,74 @@ bool has_avx512() noexcept {
 #endif
 }
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
-    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide) {
+    std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide,
+    bool allow_lower_bound,BoundScreenStats* screen_stats,const Int8BoundCache* integer_cache) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
   if(k==0)return {};
   auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
   std::priority_queue<Neighbor,std::vector<Neighbor>,decltype(better)> heap(better);
   [[maybe_unused]] const bool wide=allow_wide && has_avx512();
+  if(screen_stats)*screen_stats={};
+  bool screen=false;
+#if defined(__x86_64__) && defined(__GNUC__)
+  // Require RN, gradual underflow and all exceptions masked. Do not change
+  // the caller's environment. Status bits are irrelevant to the proof.
+  screen=allow_lower_bound && (wide || (has_avx2()&&__builtin_cpu_supports("fma"))) &&
+         query.size()>=32 && query.size()<=4096 &&
+         ((_mm_getcsr()&0xffc0u)==0x1f80u);
+#else
+  (void)allow_lower_bound;
+#endif
+  Int8BoundCache::Query integer_query;
+  if(allow_lower_bound && allow_wide && integer_cache)try {integer_query=integer_cache->query(query);}catch(const std::bad_alloc&) {}
+  bool integer_screen=integer_query.valid;
+  if(screen_stats)screen_stats->environment_supported=screen||integer_screen;
+  unsigned trial_lanes=0,trial_rejected=0;
+  double rejection_bound=std::numeric_limits<double>::infinity();
+  // n<=4096. Wide: RZ estimate <= mathematical sum; factor covers the
+  // original double difference/product/sequential-add rounding. Narrow:
+  // cover RN32 difference, FMA/reduction and RN64 reference errors plus a
+  // deliberately loose absolute allowance for gradual float underflow.
+  const double error_factor=1+std::ldexp(static_cast<double>(query.size()+8),wide?-49:-20);
+  const double absolute_allowance=wide?0:static_cast<double>(query.size()+8)*std::numeric_limits<float>::min();
   source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
     if(!mask)return;
+    if(integer_screen && heap.size()==k && std::popcount(mask)>=8) {
+      const auto before=std::popcount(mask);
+      mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask);
+      const auto removed=before-std::popcount(mask);
+      trial_lanes+=static_cast<unsigned>(before);trial_rejected+=static_cast<unsigned>(removed);
+      if(screen_stats){screen_stats->integer_screened+=before;screen_stats->integer_rejected+=removed;}
+      if(trial_lanes>=128) {
+        if(trial_rejected*2<trial_lanes)integer_screen=false;
+        trial_lanes=trial_rejected=0;
+      }
+    } else if(screen && heap.size()==k && std::popcount(mask)>=8) {
+#if defined(__x86_64__) && defined(__GNUC__)
+      std::array<float,16> lower{};
+      if(wide)batch16_lower_bound_avx512(values.data(),query.data(),query.size(),lower.data());
+      else batch16_estimate_avx2(values.data(),query.data(),query.size(),lower.data());
+      const auto before=std::popcount(mask);
+      for(std::size_t lane=0;lane<keys.size();++lane)
+        if((mask&(1U<<lane)) && std::isfinite(lower[lane]) && static_cast<double>(lower[lane])>rejection_bound)
+          mask&=static_cast<std::uint16_t>(~(1U<<lane));
+      const auto removed=before-std::popcount(mask);
+      trial_lanes+=static_cast<unsigned>(before);trial_rejected+=static_cast<unsigned>(removed);
+      if(screen_stats){screen_stats->screened_lanes+=before;screen_stats->rejected_lanes+=removed;}
+      // Avoid paying a second full traversal on equal/near-equal or large-K
+      // workloads. This affects speed only, never the rejection criterion.
+      if(trial_lanes>=128) {
+        if(trial_rejected*2<trial_lanes) {
+          screen=false;if(screen_stats)screen_stats->adaptive_disabled=true;
+        }
+        trial_lanes=trial_rejected=0;
+      }
+#endif
+    }
+    if(!mask)return;
+    if(screen_stats)screen_stats->exact_lanes+=std::popcount(mask);
     std::array<double,16> sums{};
     {
       profile::detail::Scope timer(&profile::Snapshot::vector_distance);
@@ -103,6 +163,14 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
       if(heap.size()<k)heap.push(candidate);
       else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    }
+    if(screen && heap.size()==k) {
+      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
+      // Outward rounding of its square also protects sqrt-rounding ties.
+      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
     }
   });
   std::vector<Neighbor> result;result.reserve(heap.size());

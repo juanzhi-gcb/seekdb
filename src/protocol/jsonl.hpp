@@ -2,7 +2,10 @@
 #include "minivectordb/database.hpp"
 #include "minivectordb/value.hpp"
 #include <array>
+#include <algorithm>
 #include <charconv>
+#include <cerrno>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -13,7 +16,27 @@
 
 namespace minivectordb::jsonl {
 // Preserve raw validated JSON identifiers, avoiding any conversion through double.
-struct Value { char kind = 0; std::string text, raw; };
+// Raw lexemes borrow the immutable input frame until the response is finished.
+struct Value { char kind = 0; std::string text; std::string_view raw; };
+inline std::size_t plain_string_prefix(std::string_view input) noexcept {
+    constexpr std::uint64_t ones=0x0101010101010101ULL,high=0x8080808080808080ULL;
+    const auto zero=[](std::uint64_t x){return (x-ones)&~x&high;};
+    std::size_t size=0;
+    while(input.size()-size>=8) {
+        std::uint64_t word;std::memcpy(&word,input.data()+size,8);
+        // The subtraction tests can stop early on a neighbouring byte after
+        // a borrow, but never skip a quote, backslash or raw control byte.
+        if(zero(word^(ones*'"')) || zero(word^(ones*'\\')) ||
+           ((word-ones*32)&~word&high))break;
+        size+=8;
+    }
+    while(size<input.size()) {
+        const auto c=static_cast<unsigned char>(input[size]);
+        if(c<32 || c=='"' || c=='\\')break;
+        ++size;
+    }
+    return size;
+}
 class Parser {
     std::string_view input;
     std::size_t pos = 0;
@@ -43,6 +66,9 @@ class Parser {
         if(!take('"')) bad();
         std::string s;
         while(pos<input.size()) {
+            const auto count=plain_string_prefix(input.substr(pos));
+            s.append(input.substr(pos,count));pos+=count;
+            if(pos==input.size())bad();
             unsigned char c=static_cast<unsigned char>(input[pos++]);
             if(c=='"') { validate_text(s, s.size()); return s; }
             if(c<32) bad();
@@ -94,11 +120,11 @@ class Parser {
             }
             v.kind='0';
         }
-        v.raw=std::string(input.substr(start,pos-start));
+        v.raw=input.substr(start,pos-start);
         // Integer identifiers are arbitrary precision lexemes. JSON floating IDs
         // must remain finite for the official Python driver (C locale is unchanged).
         if(v.kind=='0' && v.raw.find_first_of(".eE")!=std::string::npos &&
-           !std::isfinite(std::strtod(v.raw.c_str(),nullptr))) bad();
+           !std::isfinite(std::strtod(std::string(v.raw).c_str(),nullptr))) bad();
         return v;
     }
     std::map<std::string,Value> object(unsigned depth) {
@@ -119,9 +145,12 @@ public:
     auto parse() { auto result=object(0);space();if(pos!=input.size()) bad();return result; }
 };
 inline std::string quote(std::string_view s) {
-    std::string out="\"";
+    std::string out;out.reserve(s.size()+2);out+='"';
     constexpr char hex[]="0123456789abcdef";
-    for(unsigned char c:s) {
+    while(!s.empty()) {
+        const auto count=plain_string_prefix(s);out.append(s.substr(0,count));s.remove_prefix(count);
+        if(s.empty())break;
+        const auto c=static_cast<unsigned char>(s.front());s.remove_prefix(1);
         if(c=='"'||c=='\\') {out+='\\';out+=char(c);}
         else if(c<32) {out+="\\u00";out+=hex[c>>4];out+=hex[c&15];}
         else out+=char(c);
@@ -138,6 +167,9 @@ public:
     explicit Response(std::filesystem::path dir):directory(std::move(dir)) {buffer.reserve(65536);}
     Response(const Response&)=delete;
     ~Response() {if(file) std::fclose(file);}
+    // Reuse only bounded response storage. Close/unlink spools and discard all
+    // previous payload bytes before accepting the next request.
+    void reset() noexcept {if(file){std::fclose(file);file=nullptr;}buffer.clear();}
     void append(std::string_view s) {
         if(!file && s.size()<=65536-buffer.size()) {buffer.append(s);return;}
         if(!file) {
@@ -191,24 +223,49 @@ inline const char* code(ErrorCode c) {
     case ErrorCode::Transaction:return "TRANSACTION";case ErrorCode::Corruption:return "CORRUPTION";
     } return "EXECUTION";
 }
+class LineReader {
+    std::array<char,65536> bytes;
+    std::size_t begin=0,end=0;
+    bool eof=false;
+public:
+    bool next(std::string& line,bool& oversized,std::size_t limit) {
+        line.clear();oversized=false;
+        for(;;) {
+            if(begin==end) {
+                if(eof)return !line.empty()||oversized;
+                ssize_t count;
+                do {count=::read(STDIN_FILENO,bytes.data(),bytes.size());} while(count<0&&errno==EINTR);
+                if(count<0)throw std::runtime_error("JSON input read failed");
+                if(count==0){eof=true;continue;}
+                begin=0;end=static_cast<std::size_t>(count);
+            }
+            const auto* newline=static_cast<const char*>(std::memchr(bytes.data()+begin,'\n',end-begin));
+            const auto count=newline?static_cast<std::size_t>(newline-(bytes.data()+begin)):end-begin;
+            const auto keep=std::min(limit-line.size(),count);
+            line.append(bytes.data()+begin,keep);oversized|=keep!=count;
+            begin+=count;
+            if(newline){++begin;return true;}
+        }
+    }
+};
 inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& directory) {
     std::cout<<"{\"type\":\"ready\"}\n"<<std::flush;
     constexpr std::size_t limit=16*1024*1024;
+    LineReader input;
+    Response response(directory);
     for(;;) {
-        std::string line; bool oversized=false; char c;
-        while(std::cin.get(c) && c!='\n') {if(line.size()<limit) line+=c;else oversized=true;}
-        if(std::cin.bad()) throw std::runtime_error("JSON input read failed");
-        if(line.empty() && !oversized && !std::cin) break;
+        std::string line;bool oversized=false;
+        if(!input.next(line,oversized,limit))break;
         std::string id="null";
         bool shutdown=false;
-        Response response(directory);
+        response.reset();
         try {
             if(oversized) throw std::invalid_argument("JSON request exceeds 16 MiB");
             auto request=Parser(line).parse();
             auto ident=request.find("id");
             if(ident==request.end()) throw std::invalid_argument("missing id");
             id=ident->second.raw;
-            auto field=[&](const char* name) -> std::string {
+            auto field=[&](const char* name) -> std::string_view {
                 auto it=request.find(name);
                 if(it==request.end() || it->second.kind!='"') throw std::invalid_argument(std::string("missing or invalid ")+name);
                 return it->second.text;

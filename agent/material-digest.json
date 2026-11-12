@@ -3,15 +3,15 @@
   "date": "2026-11-12",
   "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
   "base_commit": "aea69813bb6cfb1b0abea3d892db0d4c32517829",
-  "submission_state": "Candidate code has ARM and native x86 verification; hidden admission timeout report remains unbound to a commit. No new formal score; LTO rejected at build.",
+  "submission_state": "User reported formal result for ff117199f8077de7a6e3e1f91a611397bb6641a0: MySQL passed, E=2576.778405, Prompt still has the combined invalid/review/range/summary message. Subsequent modifications are not formally evaluated. Earlier timeout report remains unbound.",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 78337,
-      "sha256": "f98698b7a418293dda4f277ec2bc707ddd52b1bb67d31da9a23ab08da442962f"
+      "bytes": 118518,
+      "sha256": "7c4346cc8e2b23279ad1bc97c447b07b05a9a3e4942509437e5d949c8b42cfc0"
     },
     "conversation.json": {
-      "bytes": 78337,
-      "sha256": "f98698b7a418293dda4f277ec2bc707ddd52b1bb67d31da9a23ab08da442962f"
+      "bytes": 118518,
+      "sha256": "7c4346cc8e2b23279ad1bc97c447b07b05a9a3e4942509437e5d949c8b42cfc0"
     }
   },
   "before_material": {
@@ -27,9 +27,9 @@
     "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
   },
   "counts": {
-    "user_records": 54,
-    "experiments": 39,
-    "agent_observations": 5,
+    "user_records": 69,
+    "experiments": 61,
+    "agent_observations": 11,
     "retrospective_cases": 2
   },
   "original_records_preserved": true,
@@ -63,5 +63,20 @@
     "path": "bench/results/score-iteration-20261112/full-records-before-selection.json",
     "bytes": 146700,
     "sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233"
-  }
+  },
+  "latest_formal_feedback": {
+    "source": "user_supplied_platform_result",
+    "reported_commit": "ff117199f8077de7a6e3e1f91a611397bb6641a0",
+    "mysql_admission": "passed",
+    "performance_E_text": "2576.778405",
+    "prompt_result_text": "Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
+    "verification_scope": "Bound by the user conversation sequence; platform locked commit and internal grader report were not independently read. This integrity manifest is not the platform material summary."
+  },
+  "selection_supplements": [
+    {
+      "path": "bench/results/score-next-20261112/iteration-records-appendix.json",
+      "bytes": 23625,
+      "sha256": "dd7f612805f19095729485eb653293746de827032a7ae0e97cc129a7a6a9fc84"
+    }
+  ]
 }

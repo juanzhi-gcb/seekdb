@@ -2,6 +2,7 @@
 #include "sorter.hpp"
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
+#include "projection_cache.hpp"
 #include "snapshot_row.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
@@ -74,14 +75,16 @@ namespace minivectordb {
     };
     class SelectRow {
       Row eager_;
+      std::string_view validated_;
       std::optional<LazyRowView> lazy_;
     public:
-      SelectRow(const Schema& schema,std::int64_t key,std::string_view bytes,bool selective,ExecutionInfo& info) {
+      SelectRow(const Schema& schema,std::int64_t key,std::string_view bytes,bool selective,ExecutionInfo& info):validated_(bytes) {
         if(selective)lazy_.emplace(schema,bytes,info);
         else { eager_=decode_row(schema,bytes); count_decoded(eager_,info); }
         if(std::get<std::int64_t>((*this)[schema.primary])!=key)
           throw Error(ErrorCode::Corruption,"row primary key disagrees with index");
       }
+      std::string_view validated_bytes() const noexcept {return validated_;}
       const Cell& operator[](std::size_t index) const { return lazy_?(*lazy_)[index]:eager_[index]; }
       std::span<const float> vector_for_distance(std::size_t index,std::vector<float>& scratch) const {
         if(lazy_) {
@@ -145,8 +148,9 @@ namespace minivectordb {
     Options options;
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
+    sql::ProjectionCache projection_snapshot;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -195,14 +199,12 @@ namespace minivectordb {
             });
           } else {
             snapshot.start(s.id,0,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
-            if(snapshot.building()) {
-              store.scan_in(s.id,[&](auto key,auto bytes) {
-                callback(key,bytes);
-                // Retain every validated row, including rows rejected by this filter.
-                snapshot.append(key,bytes);
-              });
-              snapshot.finish();
-            } else store.scan_in(s.id,callback);
+            store.scan_in(s.id,[&](auto key,auto bytes) {
+              callback(key,bytes);
+              // Count every validated row during probation, including rejects.
+              snapshot.append(key,bytes);
+            });
+            snapshot.finish();
           }
         } catch(...) {
           snapshot.clear();throw;
@@ -290,6 +292,28 @@ namespace minivectordb {
       }
       return true;
     }
+    std::pair<std::size_t,std::size_t> typed_scan_range(const std::vector<CachedPredicate>& predicates,
+                                                     bool* certified=nullptr) const {
+      std::size_t begin=0,end=typed_snapshot.size();
+      if(certified)*certified=predicates.empty();
+      if(!options.clustered_range_scan)return {begin,end};
+      bool complete=true;
+      for(const auto& p:predicates) {
+        const auto bounds=p.text?typed_snapshot.ordered_bounds(p.value):
+            typed_snapshot.ordered_bounds(p.slot,p.number);
+        if(!bounds){complete=false;continue;}
+        const auto [lower,upper]=*bounds;
+        if(p.op=="=") {begin=std::max(begin,lower);end=std::min(end,upper);}
+        else if(p.op=="<")end=std::min(end,lower);
+        else if(p.op=="<=")end=std::min(end,upper);
+        else if(p.op==">")begin=std::max(begin,upper);
+        else if(p.op==">=")begin=std::max(begin,lower);
+        else complete=false;
+        if(begin>=end)return {0,0};
+      }
+      if(certified)*certified=complete;
+      return {begin,end};
+    }
     bool transpose_enabled() const noexcept {
       return options.transposed_scan_cache && options.validated_vector_kernel &&
           options.batched_vector_kernel && options.simd_vector_kernel && detail::has_avx2();
@@ -301,15 +325,29 @@ namespace minivectordb {
           !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
+      bool certified=false;
+      const auto [begin,end]=typed_scan_range(predicates,&certified);
+      const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
           std::array<std::int64_t,16> keys{};
           std::vector<float> tail;
-          for(std::size_t r=0;r<typed_snapshot.size();r+=16) {
+          // The stored transpose is aligned to physical cache blocks. Keep
+          // that alignment and mask the two interval boundaries explicitly.
+          for(std::size_t r=begin/16*16;r<end;r+=16) {
             const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
             std::uint16_t mask=0;
+            if(bulk) {
+              const auto lo=begin>r?begin-r:0,hi=std::min(count,end-r);
+              const auto selected=hi-lo;
+              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
+              info.rows_examined+=selected;info.typed_rows_examined+=selected;
+              info.distances_computed+=selected;++info.certified_blocks_examined;
+              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+            } else
             for(std::size_t lane=0;lane<count;++lane) {
+              if(r+lane<begin || r+lane>=end)continue;
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.rows_examined;++info.typed_rows_examined;
               keys[lane]=typed_snapshot.key(r+lane);
@@ -327,17 +365,18 @@ namespace minivectordb {
             } else block=typed_snapshot.block(r);
             visit({keys.data(),count},block,mask);
           }
-        },options.wide_simd_vector_kernel);
-        info.typed_cache_bytes=typed_snapshot.bytes();
+        },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
+          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
+        info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
         return result;
-      } catch(...) {typed_snapshot.clear();throw;}
+      } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
     }
     bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                       const std::optional<VectorIndex>& index,ExecutionInfo& info,
                       const VectorVisitor& visit,std::vector<float>& scratch) {
       const bool eligible=typed_eligible(s,b,index);
       const auto index_id=index?index->id:0;
-      if(!eligible) {typed_snapshot.clear();return false;}
+      if(!eligible) {typed_snapshot.clear();projection_snapshot.clear();return false;}
       // Two representations never own their bounded payloads simultaneously.
       snapshot.clear();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
@@ -346,24 +385,30 @@ namespace minivectordb {
         if(typed_snapshot.ready(s.id,index_id,e.column) &&
             text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
           const auto predicates=typed_predicates(s,b);
-          for(std::size_t r=0;r<typed_snapshot.size();++r) {
+          const auto [begin,end]=typed_scan_range(predicates);
+          for(std::size_t r=begin;r<end;++r) {
             profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
             ++info.rows_examined;++info.typed_rows_examined;
             if(typed_matches(r,predicates)) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
           }
         } else {
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer,text_column);
+          projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column);
+          if(typed_snapshot.refused())projection_snapshot.clear();
+          else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
-            typed_snapshot.clear();return false;
+            typed_snapshot.clear();projection_snapshot.clear();return false;
           }
           auto consume=[&](std::int64_t key,const SelectRow& row,std::span<const float> vector) {
+            projection_snapshot.append(s,key,row.validated_bytes());
             // Capture every row before applying this query's predicate. The cache
             // must also answer a different filter, including after a zero-match build.
             if(typed_snapshot.building()) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            }
+            } else typed_snapshot.observe_row(text_column?
+                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);
@@ -385,12 +430,13 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache);
+          projection_snapshot.finish();
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
         }
       } catch(const Store::KeySetMismatch& error) {
-        typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
-      } catch(...) {typed_snapshot.clear();throw;}
-      info.typed_cache_bytes=typed_snapshot.bytes();
+        typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
+      } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
+      info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
       return true;
     }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
@@ -406,7 +452,7 @@ namespace minivectordb {
         ++info.affected_rows;
       };
       if(b.order.empty()) {
-        typed_snapshot.clear();
+        typed_snapshot.clear();projection_snapshot.clear();
         try {
           scan_select(s,b,info,[&](auto,const SelectRow&r) {
             DistanceCache cache;
@@ -487,7 +533,28 @@ namespace minivectordb {
           } else scan_select(s,b,info,consume_row,true);
         },{});
         info.snapshot_bytes=snapshot.bytes();
+        bool cached_projection=s.columns.size()<=16 && typed_snapshot.ready(s.id,index?index->id:0,e.column) && projection_snapshot.ready(s.id,index?index->id:0);
+        for(const auto& p:b.projection)if(p.query?!(p.column==e.column&&p.query==e.query):s.columns[p.column].type==ColumnType::Vector)cached_projection=false;
         for(const auto&winner:winners) {
+          if(cached_projection)if(auto encoded=projection_snapshot.get(winner.key)) {
+            std::array<std::size_t,16> offsets{};binary::Reader in(*encoded);
+            for(std::size_t c=0;c<s.columns.size();++c) {
+              offsets[c]=encoded->size()-in.remaining();
+              if(s.columns[c].type==ColumnType::Bigint)in.take(8);
+              else if(s.columns[c].type==ColumnType::Varchar)in.text_view();
+            }
+            in.end();Row output;output.reserve(b.projection.size());
+            for(const auto& p:b.projection) {
+              if(p.query)output.emplace_back(winner.distance);
+              else {
+                binary::Reader value(std::string_view(*encoded).substr(offsets[p.column]));
+                if(s.columns[p.column].type==ColumnType::Bigint)output.emplace_back(std::bit_cast<std::int64_t>(value.get()));
+                else output.emplace_back(value.text());
+                ++info.cells_materialized;
+              }
+            }
+            if(sink.row)sink.row(output);++info.affected_rows;continue;
+          }
           fetch_select(s,winner.key,info,[&](const SelectRow& row) {
             DistanceCache cache;
             Row output;
@@ -503,7 +570,7 @@ namespace minivectordb {
         }
         return info;
       }
-      typed_snapshot.clear();
+      typed_snapshot.clear();projection_snapshot.clear();
       sql::Sorter sorter(options,b.order,info);
       scan_select(s,b,info,[&](auto key,const SelectRow&r) {
         DistanceCache cache;
@@ -540,9 +607,11 @@ namespace minivectordb {
         busy
       };
       auto statement=sql::parse(text);
+      store.set_write_cache_hint(statement.kind!=sql::Statement::Select);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {
+        projection_snapshot.clear();
         if(options.reuse_scan_snapshot_buffer) {snapshot.invalidate();typed_snapshot.invalidate();}
         else {snapshot.clear();typed_snapshot.clear();}
       }

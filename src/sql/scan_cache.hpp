@@ -4,6 +4,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <limits>
 #include <string_view>
 
 namespace minivectordb::sql {
@@ -18,9 +19,14 @@ class ScanSnapshot {
     enum class State { empty, probation, building, ready, refused } state_ = State::empty;
     std::uint64_t table_ = 0, index_ = 0;
     std::size_t capacity_ = 0, used_ = 0;
+    std::size_t probation_bytes_ = 0;
+    bool probation_complete_ = false;
     std::unique_ptr<char[]> data_;
 public:
-    void invalidate() noexcept { used_=0; table_=index_=0; state_=State::empty; }
+    void invalidate() noexcept {
+        used_=probation_bytes_=0;probation_complete_=false;
+        table_=index_=0;state_=State::empty;
+    }
     void clear() noexcept { data_.reset(); capacity_=0; invalidate(); }
     bool building() const noexcept { return state_==State::building; }
     // Keep one representation for this table/index until invalidation. A raw
@@ -41,7 +47,11 @@ public:
             return; // The first eligible scan never allocates a new arena.
         }
         if(state_!=State::probation)return;
-        if(!budget) {state_=State::refused;return;}
+        // An ordinary first scan already sees the exact encoded lengths. Only
+        // its successful completion permits rejecting a later arena build.
+        if(!budget || (probation_complete_ && probation_bytes_>budget)) {
+            data_.reset();capacity_=used_=0;state_=State::refused;return;
+        }
         if(!data_) {
             try { data_.reset(new char[budget]); }
             catch(const std::bad_alloc&) {state_=State::refused;return;}
@@ -50,8 +60,16 @@ public:
         used_=0;state_=State::building;
     }
     void append(std::int64_t key,std::string_view bytes) {
-        if(state_!=State::building)return;
         constexpr std::size_t header=sizeof(key)+sizeof(std::uint64_t);
+        if(state_==State::probation) {
+            // Saturate rather than wrapping even if a scan exceeds size_t.
+            constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+            if(probation_bytes_>maximum-header || bytes.size()>maximum-probation_bytes_-header)
+                probation_bytes_=maximum;
+            else probation_bytes_+=header+bytes.size();
+            return;
+        }
+        if(state_!=State::building)return;
         if(capacity_-used_<header || bytes.size()>capacity_-used_-header) {
             data_.reset();capacity_=used_=0;state_=State::refused;return;
         }
@@ -60,7 +78,10 @@ public:
         std::memcpy(data_.get()+used_,&size,sizeof(size));used_+=sizeof(size);
         std::memcpy(data_.get()+used_,bytes.data(),bytes.size());used_+=bytes.size();
     }
-    void finish() noexcept {if(state_==State::building)state_=State::ready;}
+    void finish() noexcept {
+        if(state_==State::probation)probation_complete_=true;
+        else if(state_==State::building)state_=State::ready;
+    }
     std::size_t bytes() const noexcept {return capacity_;}
     template<class F> void scan(F&& visit) const {
         std::size_t offset=0;
