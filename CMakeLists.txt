@@ -240,3 +240,8 @@ target_link_libraries(int8_bound_tests PRIVATE minivectordb_core)
 target_compile_options(int8_bound_tests PRIVATE -ffp-contract=off)
 add_test(NAME int8_bound_exactness COMMAND int8_bound_tests)
 set_tests_properties(int8_bound_exactness PROPERTIES TIMEOUT 180)
+
+add_executable(byteplane_tests tests/byteplane_tests.cpp)
+target_link_libraries(byteplane_tests PRIVATE minivectordb_core)
+add_test(NAME byteplane_lossless COMMAND byteplane_tests)
+set_tests_properties(byteplane_lossless PROPERTIES TIMEOUT 60)

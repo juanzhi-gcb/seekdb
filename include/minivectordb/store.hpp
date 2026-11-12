@@ -50,7 +50,7 @@ public:
                  std::size_t data_cache_bytes=0,
                  CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered,
                  bool compressed_paths=false, bool packed_branches=true,bool compact_values=false,
-                 bool discard_file_cache=false, bool compact_node_refs=false);
+                 bool discard_file_cache=false, bool compact_node_refs=false,bool byteplane_values=false);
   // Separate lazy four-way cache for validated packed and overflow pages. The budget
   // includes the entire set array (pages, IDs, ranks, padding); fixed object and
   // allocator overhead are excluded. A budget smaller than one set disables it.

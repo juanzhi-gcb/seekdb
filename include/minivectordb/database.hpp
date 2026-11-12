@@ -93,6 +93,7 @@ struct Options {
   // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
+  bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
