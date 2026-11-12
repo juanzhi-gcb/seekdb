@@ -71,6 +71,9 @@ struct Options {
   // Admit one validated VARCHAR predicate column alongside numeric vectors,
   // within the same snapshot budget; unsupported shapes use raw snapshots.
   bool text_scan_cache = true;
+  // Cluster a completed snapshot by a reusable ordinary column before SIMD
+  // transposition, making selective filters occupy dense candidate blocks.
+  bool clustered_scan_cache = true;
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;

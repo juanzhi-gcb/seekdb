@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <numeric>
 
 namespace minivectordb::sql {
 // Owned numeric columns and an optional text predicate column from one fully
@@ -32,6 +33,52 @@ class TypedScanCache {
         capacity_=count_=bytes_=0;transposed_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
+    void cluster() {
+        // Bounded preparation only: <=64 KiB row permutation and <=64 KiB
+        // single-row scratch. Allocate everything before changing any payload.
+        if(count_<2 || count_>16384)return;
+        if(dimension_*sizeof(float)+scalar_count_*sizeof(std::int64_t)+text_width_>65536)return;
+        std::size_t slot=0;
+        while(slot<scalar_count_ && slot==primary_slot_)++slot;
+        if(!text_column_ && slot==scalar_count_)return;
+        std::vector<std::uint32_t> order(count_);
+        std::iota(order.begin(),order.end(),0U);
+        std::vector<float> vector(dimension_);
+        std::vector<std::int64_t> scalars(scalar_count_);
+        std::vector<char> text_copy(text_width_);
+        std::sort(order.begin(),order.end(),[&](auto a,auto b) {
+            int cmp;
+            if(text_column_)cmp=text(a).compare(text(b));
+            else {const auto x=scalar(a,slot),y=scalar(b,slot);cmp=x<y?-1:(x>y?1:0);}
+            return cmp<0 || (cmp==0 && key(a)<key(b));
+        });
+        const auto move_row=[&](std::size_t to,std::size_t from) {
+            std::memcpy(vectors_.get()+to*dimension_,vectors_.get()+from*dimension_,dimension_*sizeof(float));
+            std::memcpy(scalars_.get()+to*scalar_count_,scalars_.get()+from*scalar_count_,scalar_count_*sizeof(std::int64_t));
+            if(text_column_) {
+                text_lengths_[to]=text_lengths_[from];
+                if(text_lengths_[to])std::memcpy(texts_.get()+to*text_width_,texts_.get()+from*text_width_,text_lengths_[to]);
+            }
+        };
+        for(std::size_t i=0;i<count_;++i)if(order[i]!=i) {
+            std::memcpy(vector.data(),vectors_.get()+i*dimension_,dimension_*sizeof(float));
+            std::memcpy(scalars.data(),scalars_.get()+i*scalar_count_,scalar_count_*sizeof(std::int64_t));
+            const auto length=text_column_?text_lengths_[i]:0;
+            if(length)std::memcpy(text_copy.data(),texts_.get()+i*text_width_,length);
+            auto row=i;
+            while(order[row]!=i) {
+                const auto next=order[row];move_row(row,next);
+                order[row]=static_cast<std::uint32_t>(row);row=next;
+            }
+            std::memcpy(vectors_.get()+row*dimension_,vector.data(),dimension_*sizeof(float));
+            std::memcpy(scalars_.get()+row*scalar_count_,scalars.data(),scalar_count_*sizeof(std::int64_t));
+            if(text_column_) {
+                text_lengths_[row]=length;
+                if(length)std::memcpy(texts_.get()+row*text_width_,text_copy.data(),length);
+            }
+            order[row]=static_cast<std::uint32_t>(row);
+        }
+    }
 public:
     void invalidate() noexcept {count_=0;table_=index_=0;state_=State::empty;transposed_=false;}
     void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=0;text_column_.reset();}
@@ -107,8 +154,9 @@ public:
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
     }
-    void finish(bool transpose=false) noexcept {
+    void finish(bool transpose=false,bool clustered=false) noexcept {
         if(!building())return;
+        if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
         if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {

@@ -1,0 +1,40 @@
+name: MiniVectorDB clustered snapshot experiment
+on:
+  push:
+    branches: ['codex/score-cluster-native-20261112']
+permissions:
+  contents: read
+concurrency:
+  group: mvdb-native-contract-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Fetch exact public source without stored credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/juanzhi-gcb/seekdb.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Validate and compare cache layouts
+        shell: bash
+        run: bash bench/run_cluster_native.sh
+      - name: Preserve full measurement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-cluster-${{ matrix.sample }}-${{ github.sha }}
+          path: cluster-results/
+          retention-days: 30
+      - name: Scope
+        if: always()
+        run: echo 'Native x86_64 JSONL T/B/M comparison. Local generated data and shared runner; no official E or Prompt score. Competition branch remains unchanged.' >> "$GITHUB_STEP_SUMMARY"

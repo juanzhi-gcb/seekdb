@@ -100,6 +100,7 @@ int main(int argc,char** argv) {
         options.batch_writes=batch!=0;
         options.transposed_scan_cache=std::getenv("MVDB_LAYOUT_OFF")==nullptr;
         options.text_scan_cache=std::getenv("MVDB_TEXT_CACHE_OFF")==nullptr;
+        options.clustered_scan_cache=std::getenv("MVDB_CLUSTER_OFF")==nullptr;
         double write_ms=0,all_ms=0,filtered_ms=0,write_cpu_ms=0,query_cpu_ms=0;
         const bool profiling=std::getenv("MVDB_PROFILE")!=nullptr;
         profile::Snapshot write_profile{},query_profile{};

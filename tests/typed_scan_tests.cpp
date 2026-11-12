@@ -493,6 +493,35 @@ void transposed_lifecycle(const std::filesystem::path& path,bool indexed) {
   warm(db,items,q,"",{},false);
 }
 
+void clustered_cache_contract() {
+  for(bool use_text:{false,true})for(std::size_t count:{2U,17U,33U,100U}) {
+    Schema schema{77,"t",{{"id",ColumnType::Bigint,0},{"g",ColumnType::Bigint,0},
+      {"v",ColumnType::Vector,128},{"label",ColumnType::Varchar,4}},0};
+    sql::TypedScanCache cache;std::optional<std::size_t> text_column=use_text?std::optional<std::size_t>(3):std::nullopt;
+    cache.start(schema,0,2,131072,true,text_column);cache.start(schema,0,2,131072,true,text_column);
+    const std::string labels[]{"z","中","a",""};
+    std::vector<float> v(128),scratch;
+    for(std::size_t row=0;row<count;++row) {
+      for(std::size_t d=0;d<128;++d)v[d]=float(row*512+d);
+      cache.append(v,[&](std::size_t c){return c==0?100-std::int64_t(row)*37:std::int64_t(row*7%11);},labels[row%4]);
+    }
+    cache.finish(true,true);CHECK(cache.ready(77,0,2));CHECK(cache.size()==count);CHECK(cache.bytes()<=131072);
+    std::vector<bool> seen(count,false);
+    for(std::size_t row=0;row<count;++row) {
+      auto original=std::size_t((100-cache.key(row))/37);CHECK(original<count&&!seen[original]);seen[original]=true;
+      auto values=cache.read_vector(row,scratch);
+      for(std::size_t d=0;d<128;++d)CHECK(values[d]==float(original*512+d));
+      CHECK(cache.scalar(row,1)==std::int64_t(original*7%11));
+      if(use_text)CHECK(cache.text(row)==labels[original%4]);
+      if(row) {
+        int cmp=use_text?cache.text(row-1).compare(cache.text(row)):
+          (cache.scalar(row-1,1)<cache.scalar(row,1)?-1:(cache.scalar(row-1,1)>cache.scalar(row,1)?1:0));
+        CHECK(cmp<=0);if(!cmp)CHECK(cache.key(row-1)<cache.key(row));
+      }
+    }
+  }
+}
+
 }
 int main() {
   try {
@@ -501,7 +530,7 @@ int main() {
     std::filesystem::create_directories(parent);
     std::string pattern=(parent/"typed-scan-XXXXXX").string();
     CHECK(::mkdtemp(pattern.data()));const std::filesystem::path root(pattern);
-    cache_unit_contract();transposed_unit_contract();
+    cache_unit_contract();transposed_unit_contract();clustered_cache_contract();
     transposed_lifecycle(root/"transposed-unindexed",false);transposed_lifecycle(root/"transposed-indexed",true);
     basic(root/"unindexed.db",false);basic(root/"indexed.db",true);
     for(bool indexed:{false,true})for(bool selective:{false,true})

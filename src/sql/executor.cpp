@@ -385,7 +385,7 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          typed_snapshot.finish(transpose_enabled());
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
