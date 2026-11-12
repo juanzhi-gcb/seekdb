@@ -94,6 +94,7 @@ struct Options {
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
+  std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -108,6 +109,7 @@ struct ExecutionInfo {
   std::uint64_t typed_rows_examined = 0;
   std::uint64_t certified_blocks_examined = 0;
   std::size_t typed_cache_bytes = 0;
+  std::size_t projection_cache_bytes = 0;
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;
