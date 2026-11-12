@@ -23,7 +23,6 @@ jobs:
         shell: bash
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      TMPDIR: ${{ runner.temp }}/mvdb-tmp
       OFFICIAL_PACKAGE: bench/vendor/seekdb-round2-f4d4e26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -34,6 +33,8 @@ jobs:
       - name: Record exact source and environment
         run: |
           set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP/mvdb-tmp"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
           mkdir -p ci-results "$TMPDIR" "$RUNNER_TEMP/mvdb-data"
           # The container drops DAC_OVERRIDE; make only its isolated scratch
           # directory writable, as the public protocol harness does.
