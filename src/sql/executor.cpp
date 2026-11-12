@@ -244,15 +244,51 @@ namespace minivectordb {
                         const std::optional<VectorIndex>& index) const {
       bool eligible=options.typed_scan_cache && options.scan_snapshot_bytes>0 && !b.primary_lookup &&
           (index?options.paired_index_scan:options.table_scan_snapshot);
-      for(const auto& p:b.predicates)
-        eligible=eligible && s.columns[p.column].type==ColumnType::Bigint &&
-            std::holds_alternative<std::int64_t>(p.value);
+      std::optional<std::size_t> text_column;
+      for(const auto& p:b.predicates) {
+        if(s.columns[p.column].type==ColumnType::Bigint)
+          eligible=eligible && std::holds_alternative<std::int64_t>(p.value);
+        else if(options.text_scan_cache && s.columns[p.column].type==ColumnType::Varchar &&
+                std::holds_alternative<std::string>(p.value)) {
+          if(text_column && *text_column!=p.column)eligible=false;
+          text_column=p.column;
+        } else eligible=false;
+      }
       const auto index_id=index?index->id:0;
       // A VARCHAR query may already have selected the raw representation for
       // this identity. Retain its probation/ready/refused state across numeric
       // queries, otherwise alternating filters continually reset both caches.
       if(eligible && snapshot.observed(s.id,index_id))eligible=false;
       return eligible;
+    }
+    std::optional<std::size_t> typed_text_column(const Schema& s,const sql::Bound& b,
+        const sql::BoundExpr& e,const std::optional<VectorIndex>& index) const {
+      auto column=typed_snapshot.text_column(s.id,index?index->id:0,e.column);
+      for(const auto& p:b.predicates)if(s.columns[p.column].type==ColumnType::Varchar)column=p.column;
+      return column;
+    }
+    struct CachedPredicate {
+      bool text;std::size_t slot;std::int64_t number;std::string_view value,op;
+    };
+    std::vector<CachedPredicate> typed_predicates(const Schema& s,const sql::Bound& b) const {
+      std::vector<CachedPredicate> result;result.reserve(b.predicates.size());
+      for(const auto& p:b.predicates) {
+        if(s.columns[p.column].type==ColumnType::Varchar)
+          result.push_back({true,0,0,std::get<std::string>(p.value),p.op});
+        else result.push_back({false,typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),{},p.op});
+      }
+      return result;
+    }
+    bool typed_matches(std::size_t row,const std::vector<CachedPredicate>& predicates) const {
+      for(const auto& p:predicates) {
+        profile::detail::Scope timer(&profile::Snapshot::predicate_evaluation);
+        int cmp;
+        if(p.text)cmp=typed_snapshot.text(row).compare(p.value);
+        else {const auto value=typed_snapshot.scalar(row,p.slot);cmp=value<p.number?-1:(value>p.number?1:0);}
+        if((p.op=="="&&cmp!=0)||(p.op=="<"&&cmp>=0)||(p.op=="<="&&cmp>0)||
+           (p.op==">"&&cmp<=0)||(p.op==">="&&cmp<0))return false;
+      }
+      return true;
     }
     bool transpose_enabled() const noexcept {
       return options.transposed_scan_cache && options.validated_vector_kernel &&
@@ -262,11 +298,9 @@ namespace minivectordb {
         const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
         const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
       if(!transpose_enabled() || !typed_eligible(s,b,index) ||
-          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed())return {};
-      struct Predicate {std::size_t slot;std::int64_t value;std::string_view op;};
-      std::vector<Predicate> predicates;
-      for(const auto& p:b.predicates)
-        predicates.push_back({typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),p.op});
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
+          typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
+      const auto predicates=typed_predicates(s,b);
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -279,15 +313,7 @@ namespace minivectordb {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.rows_examined;++info.typed_rows_examined;
               keys[lane]=typed_snapshot.key(r+lane);
-              bool matches=true;
-              for(const auto& p:predicates) {
-                profile::detail::Scope predicate_timer(&profile::Snapshot::predicate_evaluation);
-                const auto value=typed_snapshot.scalar(r+lane,p.slot);
-                if((p.op=="="&&value!=p.value)||(p.op=="<"&&value>=p.value)||
-                   (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
-                   (p.op==">="&&value<p.value)) {matches=false;break;}
-              }
-              if(matches){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
+              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
             }
             if(!mask)continue;
             std::span<const float> block;
@@ -316,33 +342,27 @@ namespace minivectordb {
       snapshot.clear();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
-        if(typed_snapshot.ready(s.id,index_id,e.column)) {
-          struct Predicate {std::size_t slot;std::int64_t value;std::string_view op;};
-          std::vector<Predicate> predicates;
-          predicates.reserve(b.predicates.size());
-          for(const auto& p:b.predicates)
-            predicates.push_back({typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),p.op});
+        const auto text_column=typed_text_column(s,b,e,index);
+        if(typed_snapshot.ready(s.id,index_id,e.column) &&
+            text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
+          const auto predicates=typed_predicates(s,b);
           for(std::size_t r=0;r<typed_snapshot.size();++r) {
             profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
             ++info.rows_examined;++info.typed_rows_examined;
-            bool matches=true;
-            for(const auto& p:predicates) {
-              profile::detail::Scope predicate_timer(&profile::Snapshot::predicate_evaluation);
-              const auto value=typed_snapshot.scalar(r,p.slot);
-              if((p.op=="="&&value!=p.value)||(p.op=="<"&&value>=p.value)||
-                 (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
-                 (p.op==">="&&value<p.value)) {matches=false;break;}
-            }
-            if(matches) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
+            if(typed_matches(r,predicates)) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
           }
         } else {
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer,text_column);
+          if(text_column && typed_snapshot.refused()) {
+            typed_snapshot.clear();return false;
+          }
           auto consume=[&](std::int64_t key,const SelectRow& row,std::span<const float> vector) {
             // Capture every row before applying this query's predicate. The cache
             // must also answer a different filter, including after a zero-match build.
             if(typed_snapshot.building()) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
-              typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);});
+              typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
+                  text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
             }
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);

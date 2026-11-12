@@ -73,9 +73,9 @@ void mixed_reads(Database& db,const std::vector<Item>& rows,bool filter_first,co
         if(step>=(filter_first?2:3)) {
             // Runtime RED on the previous selector: the two query shapes reset
             // each other's probation forever, so neither cache reaches ready.
-            CHECK(r.info.snapshot_rows_examined==rows.size());
-            CHECK(r.info.typed_rows_examined==0&&r.info.typed_cache_bytes==0);
-            CHECK(r.info.snapshot_bytes>0&&r.info.snapshot_bytes<=8U*1024U*1024U);
+            CHECK(r.info.typed_rows_examined==rows.size());
+            CHECK(r.info.snapshot_rows_examined==0&&r.info.snapshot_bytes==0);
+            CHECK(r.info.typed_cache_bytes>0&&r.info.typed_cache_bytes<=8U*1024U*1024U);
         }
     }
 }
