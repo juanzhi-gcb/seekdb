@@ -397,8 +397,29 @@ struct Store::Impl {
     }
     return id;
   }
+  Page mutation_branch(std::uint64_t id,unsigned& depth,std::uint64_t space,
+                       std::uint64_t first,std::uint64_t last) const {
+    if(!compressed_paths)return id?branch_at(id,depth,space,first):empty_page(branch,depth);
+    // The caller's ordered batch shares every prefix byte common to its first
+    // and last key. Missing subtrees need no virtual unary ancestors at all.
+    if(!id) {
+      while(depth<15 && key_index(space,first,depth)==key_index(space,last,depth))++depth;
+      return empty_page(branch,depth);
+    }
+    auto page=branch_at(id,depth,space,first,false);
+    const auto terminal=static_cast<unsigned>(decode(page,12,4));
+    // Existing nodes additionally constrain that common prefix. Stop at the
+    // first divergence, so branch_view retains the old subtree as a sibling;
+    // never skip the actual branching layer or a replacement's different byte.
+    while(depth<terminal) {
+      const auto index=key_index(space,first,depth);
+      if(index!=key_index(space,last,depth) || index!=page[prefix_offset+depth])break;
+      ++depth;
+    }
+    return branch_view(page,id,depth);
+  }
   std::uint64_t replace(std::uint64_t id,unsigned depth,std::uint64_t space,std::uint64_t key,std::uint64_t new_value,NodeBatch& nodes) {
-    auto p=id?branch_at(id,depth,space,key):empty_page(branch,depth);
+    auto p=mutation_branch(id,depth,space,key,key);
     auto offset=payload+key_index(space,key,depth)*8;
     auto child=depth==15?new_value:replace(decode(p,offset),depth+1,space,key,new_value,nodes);
     encode(p,offset,child);
@@ -407,7 +428,7 @@ struct Store::Impl {
   struct Replacement { std::uint64_t key, value; };
   std::uint64_t merge_batch(std::uint64_t id,unsigned depth,std::uint64_t space,
                             std::span<const Replacement> replacements,NodeBatch& nodes) {
-    auto page=id?branch_at(id,depth,space,replacements.front().key):empty_page(branch,depth);
+    auto page=mutation_branch(id,depth,space,replacements.front().key,replacements.back().key);
     bool changed=false;
     for(std::size_t first=0;first<replacements.size();) {
       const auto index=key_index(space,replacements[first].key,depth);
