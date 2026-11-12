@@ -124,6 +124,11 @@ target_link_libraries(row_allocation_tests PRIVATE minivectordb_core)
 add_test(NAME core_row_allocation COMMAND row_allocation_tests)
 set_tests_properties(core_row_allocation PROPERTIES TIMEOUT 30)
 
+add_executable(row_encoding_tests tests/row_encoding_tests.cpp)
+target_link_libraries(row_encoding_tests PRIVATE minivectordb_core)
+add_test(NAME core_row_encoding COMMAND row_encoding_tests)
+set_tests_properties(core_row_encoding PROPERTIES TIMEOUT 60)
+
 add_test(NAME protocol_adversarial COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/protocol_adversarial_tests.py $<TARGET_FILE:minivectordb>)
 set_tests_properties(protocol_adversarial PROPERTIES TIMEOUT 120)
 

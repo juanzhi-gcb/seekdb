@@ -39,35 +39,68 @@ namespace minivectordb {
   std::string encode_row(const Schema&s,const Row&r) {
     if(r.size()!=s.columns.size())throw Error(ErrorCode::Type,"row column count mismatch");
     std::string out;
-    binary::put(out,1,1);
-    binary::put(out,r.size(),4);
+    std::size_t bytes=5;
+    auto add_bytes=[&](std::size_t count) {
+      if(count>out.max_size()-bytes)throw std::length_error("encoded row exceeds string capacity");
+      bytes+=count;
+    };
+    // Validate in the original column/component order before reserving storage.
+    // The encoding pass only consumes this already validated, immutable row.
     for(std::size_t i=0;i<r.size();++i) {
       const auto&c=s.columns[i];
       const auto&v=r[i];
       try {
         switch(c.type) {
           case ColumnType::Bigint:if(!std::holds_alternative<std::int64_t>(v))throw Error(ErrorCode::Type,"expected BIGINT");
-          binary::put(out,std::bit_cast<std::uint64_t>(std::get<std::int64_t>(v)));
+          add_bytes(8);
           break;
           case ColumnType::Varchar:if(!std::holds_alternative<std::string>(v))throw Error(ErrorCode::Type,"expected VARCHAR");
           validate_text(std::get<std::string>(v),c.extent);
-          binary::text(out,std::get<std::string>(v));
+          if(std::get<std::string>(v).size()>UINT32_MAX)throw Error(ErrorCode::Type,"value too long");
+          add_bytes(4);
+          add_bytes(std::get<std::string>(v).size());
           break;
           case ColumnType::Vector: {
             if(!std::holds_alternative<std::vector<float>>(v))throw Error(ErrorCode::Type,"expected VECTOR");
             const auto&a=std::get<std::vector<float>>(v);
             if(a.size()!=c.extent)throw Error(ErrorCode::Type,"VECTOR dimension mismatch");
-            binary::put(out,a.size(),4);
             for(float f:a) {
               if(!std::isfinite(f))throw Error(ErrorCode::Type,"non-finite VECTOR component");
-              binary::put(out,std::bit_cast<std::uint32_t>(f),4);
             }
+            add_bytes(4);
+            if(a.size()>(out.max_size()-bytes)/sizeof(float))throw std::length_error("encoded row exceeds string capacity");
+            add_bytes(a.size()*sizeof(float));
             break;
           }
         }
       }
       catch(const std::invalid_argument&e) {
         throw Error(ErrorCode::Type,e.what());
+      }
+    }
+    out.reserve(bytes);
+    binary::put(out,1,1);
+    binary::put(out,r.size(),4);
+    for(std::size_t i=0;i<r.size();++i) {
+      const auto&v=r[i];
+      switch(s.columns[i].type) {
+        case ColumnType::Bigint:
+          binary::put(out,std::bit_cast<std::uint64_t>(std::get<std::int64_t>(v)));
+          break;
+        case ColumnType::Varchar:
+          binary::text(out,std::get<std::string>(v));
+          break;
+        case ColumnType::Vector: {
+          const auto&a=std::get<std::vector<float>>(v);
+          binary::put(out,a.size(),4);
+          if constexpr(std::endian::native==std::endian::little) {
+            static_assert(sizeof(float)==4);
+            if(!a.empty())out.append(reinterpret_cast<const char*>(a.data()),a.size()*sizeof(float));
+          } else {
+            for(float f:a)binary::put(out,std::bit_cast<std::uint32_t>(f),4);
+          }
+          break;
+        }
       }
     }
     return out;
