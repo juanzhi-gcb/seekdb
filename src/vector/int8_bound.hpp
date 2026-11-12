@@ -23,7 +23,15 @@ class Int8BoundCache {
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
   double scale_=1;
-  static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
+  static double up(double v) {
+    // Every bound operand is nonnegative and finite. The adjacent IEEE binary64
+    // bit pattern is exactly nextafter(+infinity), without a libm call per block.
+    // Keep the full standard fallback for exceptional or signed inputs.
+    static_assert(sizeof(double)==sizeof(std::uint64_t) && std::numeric_limits<double>::is_iec559);
+    const auto bits=std::bit_cast<std::uint64_t>(v);
+    if(bits<0x7ff0000000000000ULL)return std::bit_cast<double>(bits+1);
+    return std::nextafter(v,std::numeric_limits<double>::infinity());
+  }
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
   }
