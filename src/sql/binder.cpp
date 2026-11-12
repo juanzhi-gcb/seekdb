@@ -18,33 +18,6 @@ namespace minivectordb::sql {
     // Allocation-free recognition of the lexer's plain numeric-array subset.
     // Scan each number once. Callers defer numeric errors until the complete
     // grammar is accepted; comments/other spellings use the original lexer.
-    template<class F> bool plain_vector(std::string_view text,F&& consume) {
-      std::size_t i=0;
-      auto digit=[](char c){return c>='0'&&c<='9';};
-      auto skip=[&]{while(i<text.size()&&std::string_view(" \t\r\n\f").find(text[i])!=std::string_view::npos)++i;};
-      skip();if(i==text.size()||text[i++]!='[')return false;skip();
-      if(i<text.size()&&text[i]==']') {++i;skip();return i==text.size();}
-      for(;;) {
-        const auto begin=i;
-        if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
-        bool any=false;
-        while(i<text.size()&&digit(text[i])) {++i;any=true;}
-        if(i<text.size()&&text[i]=='.') {
-          ++i;while(i<text.size()&&digit(text[i])) {++i;any=true;}
-        }
-        if(!any)return false;
-        if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
-          ++i;if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
-          const auto digits=i;while(i<text.size()&&digit(text[i]))++i;
-          if(i==digits)return false;
-        }
-        consume(text.substr(begin,i-begin));skip();
-        if(i==text.size())return false;
-        if(text[i]==']') {++i;skip();return i==text.size();}
-        if(text[i++]!=',')return false;
-        skip();
-      }
-    }
     double real(std::string_view text) {
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
@@ -68,6 +41,29 @@ namespace minivectordb::sql {
       if(error!=std::errc{} ||end!=text.data()+text.size()||!std::isfinite(result))
         throw Error(ErrorCode::Type,"invalid finite VECTOR component");
       return result;
+    }
+    // Parse a numeric prefix once, using its returned endpoint as the grammar
+    // boundary. Defer numeric errors until the complete array is accepted, just
+    // as the reference lexer/real conversion does. Unsupported syntax falls back.
+    template<class F> bool plain_vector(std::string_view text,F&& consume) {
+      std::size_t i=0;
+      auto digit=[](char c){return c>='0'&&c<='9';};
+      auto skip=[&]{while(i<text.size()&&std::string_view(" \t\r\n\f").find(text[i])!=std::string_view::npos)++i;};
+      skip();if(i==text.size()||text[i++]!='[')return false;skip();
+      if(i<text.size()&&text[i]==']'){++i;skip();return i==text.size();}
+      for(;;){
+        const auto begin=i;
+        auto first=i;if(first<text.size()&&(text[first]=='+'||text[first]=='-'))++first;
+        if(first==text.size()||(!digit(text[first])&&text[first]!='.'))return false;
+        const auto numeric=begin+(text[begin]=='+');
+        double value=0;auto [end,error]=std::from_chars(text.data()+numeric,text.data()+text.size(),value);
+        if(error==std::errc::invalid_argument||end==text.data()+numeric)return false;
+        i=static_cast<std::size_t>(end-text.data());
+        consume(text.substr(begin,i-begin),value,error);skip();
+        if(i==text.size())return false;
+        if(text[i]==']'){++i;skip();return i==text.size();}
+        if(text[i++]!=',')return false;skip();
+      }
     }
     std::vector<std::string> vector_components(const Literal&v) {
       if(v.kind==Literal::Vector)return v.components;
@@ -131,9 +127,9 @@ namespace minivectordb::sql {
         std::vector<double> values;
         values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
         std::exception_ptr numeric_error;
-        const bool plain=plain_vector(v.text,[&](auto component){
+        const bool plain=plain_vector(v.text,[&](auto component,double parsed,std::errc error){
           if(numeric_error)return;
-          try {values.push_back(real(component));}
+          try {values.push_back(error==std::errc{}&&std::isfinite(parsed)?parsed:real(component));}
           catch(const Error&) {numeric_error=std::current_exception();}
         });
         if(plain) {
