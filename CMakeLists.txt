@@ -230,3 +230,8 @@ add_executable(packed_pointer_tests tests/packed_pointer_tests.cpp)
 target_link_libraries(packed_pointer_tests PRIVATE minivectordb_core)
 add_test(NAME packed_pointer_boundaries COMMAND packed_pointer_tests)
 set_tests_properties(packed_pointer_boundaries PROPERTIES TIMEOUT 90)
+
+add_executable(byteplane_tests tests/byteplane_tests.cpp)
+target_link_libraries(byteplane_tests PRIVATE minivectordb_core)
+add_test(NAME byteplane_lossless COMMAND byteplane_tests)
+set_tests_properties(byteplane_lossless PROPERTIES TIMEOUT 60)

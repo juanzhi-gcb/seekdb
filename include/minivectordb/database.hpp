@@ -32,6 +32,7 @@ struct Options {
   bool compressed_paths = true;
   bool packed_branches = true; // Format04 sparse nodes share immutable pages.
   bool compact_node_refs = true; // Format06 canonical compact node addresses.
+  bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   bool compact_values = true; // Format05 bounded lossless packed payloads.
   bool discard_file_cache = false; // Optional advisory release after owned copies/fsync.
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
