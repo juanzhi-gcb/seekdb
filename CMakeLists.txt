@@ -230,3 +230,8 @@ add_executable(packed_pointer_tests tests/packed_pointer_tests.cpp)
 target_link_libraries(packed_pointer_tests PRIVATE minivectordb_core)
 add_test(NAME packed_pointer_boundaries COMMAND packed_pointer_tests)
 set_tests_properties(packed_pointer_boundaries PROPERTIES TIMEOUT 90)
+
+add_executable(projection_cache_tests tests/projection_cache_tests.cpp)
+target_link_libraries(projection_cache_tests PRIVATE minivectordb_core)
+add_test(NAME projection_cache_equivalence COMMAND projection_cache_tests)
+set_tests_properties(projection_cache_equivalence PROPERTIES TIMEOUT 120)

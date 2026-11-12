@@ -124,6 +124,17 @@ public:
         std::size_t scalar_count=0;
         for(const auto& field:schema.columns)if(field.type==ColumnType::Bigint)++scalar_count;
         const auto text_width=text_column?std::size_t(schema.columns.at(*text_column).extent)*4:0;
+        // A companion projection can reserve its measured footprint after the
+        // same complete probation scan. Keep the row-count proof, but release
+        // any retained allocation before applying the smaller shared budget.
+        if(budget_!=budget && state_==State::probation && probation_complete_ &&
+           table_==schema.id && index_==index && column_==column &&
+           dimension_==dimension && scalar_count_==scalar_count &&
+           text_column_==text_column && text_schema_width_==text_width) {
+            const auto rows=probation_rows_,width=probation_text_width_;
+            release();probation_rows_=rows;probation_text_width_=width;
+            probation_complete_=true;budget_=budget;
+        }
         if(budget_!=budget || dimension_!=dimension || scalar_count_!=scalar_count ||
            text_column_!=text_column || text_schema_width_!=text_width)clear();
         if(state_==State::empty || table_!=schema.id || index_!=index || column_!=column) {

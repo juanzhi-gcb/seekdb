@@ -92,6 +92,7 @@ struct Options {
   // Competition recovery model: process SIGKILL, with final fsync before ACK.
   // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
+  std::size_t projection_cache_bytes = 8*1024*1024; // Shared with the snapshot budget.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
@@ -106,6 +107,7 @@ struct ExecutionInfo {
   std::uint64_t typed_rows_examined = 0;
   std::uint64_t certified_blocks_examined = 0;
   std::size_t typed_cache_bytes = 0;
+  std::uint64_t projection_cache_bytes=0; // Owned non-vector projection, separate from typed arrays.
   std::uint64_t vector_index_entries_examined = 0;
   // SELECT reports emitted rows; DML reports matching rows (including unchanged UPDATEs).
   std::uint64_t affected_rows = 0;
