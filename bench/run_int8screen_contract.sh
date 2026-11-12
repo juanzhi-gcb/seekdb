@@ -26,6 +26,18 @@ docker build -t mvdb:int8screen-previous "$scratch/previous" > "$result/build-pr
 docker build --target test -t mvdb:int8screen-test . > "$result/build-test.log" 2>&1
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --entrypoint ctest mvdb:int8screen-test --test-dir /build -V > "$result/ctest.log" 2>&1
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --entrypoint /build/bounded_screen_tests mvdb:int8screen-test > "$result/bounds.json" 2> "$result/bounds.stderr.log"
+mkdir "$scratch/probe"
+docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/int8_kernel_probe.cpp,dst=/probe.cpp,readonly" \
+  --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh mvdb:int8screen-test \
+  -c 'g++ -std=c++20 -O3 -ffp-contract=off -I/src/include -I/src/src /probe.cpp /build/libminivectordb_core.a -o /out/probe' > "$result/probe-build.log" 2>&1
+for round in 1 2 3; do
+  for mode in off on; do
+    extra=();[[ "$mode" != off ]] || extra=(-e MVDB_INT8_OFF=1)
+    docker run --rm "${limits[@]}" "${extra[@]}" --mount "type=bind,src=$scratch/probe,dst=/out,readonly" \
+      --mount "type=bind,src=$scratch/data,dst=/data" --entrypoint /out/probe mvdb:int8screen-test \
+      "/data/probe-$round-$mode.db" 10000 200 1 1 > "$result/probe-$round-$mode.json" 2> "$result/probe-$round-$mode.stderr.log"
+  done
+done
 docker build -t mvdb:int8screen-candidate . > "$result/build-runtime.log" 2>&1
 base=$(docker image inspect --format '{{.Id}}' mvdb:int8screen-base)
 previous_image=$(docker image inspect --format '{{.Id}}' mvdb:int8screen-previous)
