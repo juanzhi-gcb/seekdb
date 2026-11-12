@@ -137,10 +137,12 @@ void first_scan_failure(const std::filesystem::path& path,bool typed,bool indexe
     fail_read=false;failure_needle.clear();oversize(db,"t",rows);
 }
 void text_fallback(const std::filesystem::path& path,bool indexed) {
-    const auto rows=fixture(8);Database db(path,settings(true));seed(db,"t",rows);
+    auto rows=fixture(6);rows.back().label.clear();
+    for(unsigned i=0;i<975;++i)rows.back().label+="😀";
+    Database db(path,settings(true));seed(db,"t",rows);
     if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
-    // Fixed-width typed VARCHAR slots cannot hold this table, but the actual
-    // short UTF-8 encodings fit raw snapshots. Admission must not repeatedly
+    // One long UTF-8 value makes even measured equal-width slots too large,
+    // while the sum of encoded rows fits raw snapshots. Admission must not
     // allocate typed slots or let that refusal suppress the raw alternative.
     for(unsigned phase=0;phase<2;++phase) {
         const auto r=query(db,"t","label>=''");CHECK(r.rows==oracle(rows));CHECK(r.arrays==0);
@@ -149,6 +151,24 @@ void text_fallback(const std::filesystem::path& path,bool indexed) {
     const auto warm=query(db,"t");CHECK(warm.rows==oracle(rows));
     CHECK(warm.info.snapshot_rows_examined==rows.size()&&warm.info.typed_rows_examined==0);
     db.execute("UPDATE t SET g=0 WHERE id=999999");fits(db,"t",rows,true);
+}
+void measured_text(const std::filesystem::path& path) {
+    auto rows=fixture(8);Database db(path,settings(true));seed(db,"t",rows);
+    for(unsigned i=0;i<4;++i)CHECK(query(db,"t","label>=''").rows==oracle(rows));
+    auto warm=query(db,"t","label>=''");
+    CHECK(warm.info.typed_rows_examined==rows.size()&&warm.info.snapshot_rows_examined==0);
+    std::size_t width=0;for(const auto&r:rows)width=std::max(width,r.label.size());
+    CHECK(warm.info.typed_cache_bytes==16+rows.size()*(128*4+16+4+width));
+    // Both expansion and rollback must remeasure the actual maximum; retained
+    // arrays from the smaller width cannot be reused at a different stride.
+    db.execute("BEGIN");rows[0].label=std::string(300,'x');
+    db.execute("UPDATE t SET label='"+rows[0].label+"' WHERE id="+std::to_string(rows[0].id));
+    for(unsigned i=0;i<4;++i)CHECK(query(db,"t","label>=''").rows==oracle(rows));
+    warm=query(db,"t","label>=''");CHECK(warm.info.typed_rows_examined==rows.size());
+    CHECK(warm.info.typed_cache_bytes==16+rows.size()*(128*4+16+4+300));
+    db.execute("ROLLBACK");rows=fixture(8);
+    for(unsigned i=0;i<4;++i)CHECK(query(db,"t","label>=''").rows==oracle(rows));
+    warm=query(db,"t","label>=''");CHECK(warm.info.typed_cache_bytes==16+rows.size()*(128*4+16+4+width));
 }
 void actual_capacity() {
     const Schema schema{10,"growing",{{"id",ColumnType::Bigint,0},{"g",ColumnType::Bigint,0},{"v",ColumnType::Vector,128}},0};
@@ -236,6 +256,7 @@ int main() {
             first_scan_failure(dir/("fault-"+suffix),typed,indexed);
         }
         for(bool indexed:{false,true})text_fallback(dir/("text-"+std::to_string(indexed)),indexed);
+        measured_text(dir/"measured-text");
         std::filesystem::remove_all(dir);
         std::cout<<"PASS cache pre-admission: no rejected-arena allocation, full-scan oracle, encoded-byte boundaries, identity/transaction/failure invalidation\n";
     } catch(const std::exception& e){track_arrays=false;fail_read=false;std::cerr<<e.what()<<'\n';return 1;}

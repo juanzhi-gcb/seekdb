@@ -37,7 +37,7 @@ struct Options {
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
-  std::size_t data_cache_bytes = 4 * 1024 * 1024; // Bounded cross-query data pages; zero disables.
+  std::size_t data_cache_bytes = 524288; // Bounded cross-query data pages; zero disables.
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;

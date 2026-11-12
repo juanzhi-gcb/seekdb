@@ -10,7 +10,8 @@
 
 namespace minivectordb::sql {
 // Owned numeric columns and an optional text predicate column from one fully
-// validated table version. Text slots allow four UTF-8 bytes per schema scalar.
+// validated table version. A complete probation scan measures the largest
+// encoded text in this immutable identity; incomplete scans use schema bounds.
 // The executor invalidates before every non-SELECT and never retains the raw
 // snapshot beside this cache. Only finish() publishes a successful full scan.
 // All owned arrays, including the scalar-column map, share the bounded budget.
@@ -20,6 +21,7 @@ class TypedScanCache {
     std::size_t column_=0,dimension_=0,scalar_count_=0,primary_slot_=0;
     std::size_t budget_=0,capacity_=0,count_=0,bytes_=0;
     std::size_t probation_rows_=0;
+    std::size_t probation_text_width_=0;
     bool probation_complete_=false;
     std::unique_ptr<float[]> vectors_;
     std::unique_ptr<std::int64_t[]> scalars_;
@@ -27,6 +29,7 @@ class TypedScanCache {
     bool transposed_=false;
     std::optional<std::size_t> text_column_;
     std::size_t text_width_=0;
+    std::size_t text_schema_width_=0,allocated_text_width_=0;
     std::unique_ptr<char[]> texts_;
     std::unique_ptr<std::uint32_t[]> text_lengths_;
     std::optional<std::size_t> ordered_scalar_slot_;
@@ -35,7 +38,7 @@ class TypedScanCache {
     void release() noexcept {
         vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
-        probation_rows_=0;probation_complete_=false;
+        probation_rows_=probation_text_width_=allocated_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
@@ -105,10 +108,10 @@ class TypedScanCache {
 public:
     void invalidate() noexcept {
         count_=0;table_=index_=0;state_=State::empty;transposed_=false;
-        probation_rows_=0;probation_complete_=false;
+        probation_rows_=probation_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
-    void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=0;text_column_.reset();}
+    void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=text_schema_width_=0;text_column_.reset();}
     bool building() const noexcept {return state_==State::building;}
     bool refused() const noexcept {return state_==State::refused;}
     bool ready(std::uint64_t table,std::uint64_t index,std::size_t column) const noexcept {
@@ -122,15 +125,17 @@ public:
         for(const auto& field:schema.columns)if(field.type==ColumnType::Bigint)++scalar_count;
         const auto text_width=text_column?std::size_t(schema.columns.at(*text_column).extent)*4:0;
         if(budget_!=budget || dimension_!=dimension || scalar_count_!=scalar_count ||
-           text_column_!=text_column || text_width_!=text_width)clear();
+           text_column_!=text_column || text_schema_width_!=text_width)clear();
         if(state_==State::empty || table_!=schema.id || index_!=index || column_!=column) {
             if(reuse)invalidate();else clear();
             table_=schema.id;index_=index;column_=column;
             dimension_=dimension;scalar_count_=scalar_count;budget_=budget;
-            text_column_=text_column;text_width_=text_width;
+            text_column_=text_column;text_schema_width_=text_width;
             state_=State::probation;return;
         }
         if(state_!=State::probation)return;
+        text_width_=probation_complete_?probation_text_width_:text_schema_width_;
+        if(text_width_>text_schema_width_) {refuse();return;}
         // Check using division/subtraction before multiplication; a huge schema
         // or vector dimension must refuse caching, not wrap the allocation size.
         if(!dimension || !scalar_count || scalar_count>budget/sizeof(std::size_t)) {refuse();return;}
@@ -152,7 +157,7 @@ public:
         // Only a completed scan of this exact immutable identity proves the
         // needed row count. Keep the hard budget, but allocate for actual rows.
         if(probation_complete_)capacity=std::min(capacity,std::max(std::size_t(1),probation_rows_));
-        if(vectors_ && capacity_<capacity)release();
+        if(vectors_ && (capacity_<capacity || allocated_text_width_!=text_width_))release();
         if(!vectors_) {
             try {
                 vectors_.reset(new float[capacity*dimension]);
@@ -164,6 +169,7 @@ public:
                 }
             } catch(const std::bad_alloc&) {refuse();return;}
             capacity_=capacity;bytes_=metadata+capacity*row_bytes;
+            allocated_text_width_=text_width_;
         }
         std::size_t slot=0;
         for(std::size_t c=0;c<schema.columns.size();++c)if(schema.columns[c].type==ColumnType::Bigint) {
@@ -173,9 +179,11 @@ public:
         }
         count_=0;state_=State::building;
     }
-    void observe_row() noexcept {
-        if(state_==State::probation && probation_rows_!=std::numeric_limits<std::size_t>::max())
-            ++probation_rows_;
+    void observe_row(std::string_view text={}) noexcept {
+        if(state_==State::probation) {
+            if(probation_rows_!=std::numeric_limits<std::size_t>::max())++probation_rows_;
+            if(text_column_)probation_text_width_=std::max(probation_text_width_,text.size());
+        }
     }
     template<class ScalarGetter> void append(std::span<const float> vector,ScalarGetter&& scalar,
                                              std::string_view text={}) {

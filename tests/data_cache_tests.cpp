@@ -1,4 +1,5 @@
 #include "minivectordb/store.hpp"
+#include "minivectordb/database.hpp"
 #include "minivectordb/profile.hpp"
 #include <cstdlib>
 #include <filesystem>
@@ -154,11 +155,35 @@ void crash(const std::filesystem::path& path) {
  int status=0;CHECK(waitpid(pid,&status,0)==pid && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL);
  Store s(path,1048576,true,0,1048576);CHECK(s.data_cache_stats().capacity_bytes==0);CHECK(s.get(0)=="durable" && s.get(1)=="also durable");
 }
+void phase_growth(const std::filesystem::path& path) {
+ Store s(path,1048576,true,0,4*1048576,CommitSyncPolicy::ProcessCrash,true,true,true,false,true);
+ const Map original{{0,std::string(900,'a')},{1,std::string(900,'b')}};
+ s.begin();std::vector<Store::Mutation> changes;for(const auto&[k,v]:original)changes.push_back({k,v});
+ s.apply_batch_in(0,changes);CHECK(snapshot(s)==original);
+ CHECK(s.data_cache_stats().capacity_bytes>0&&s.data_cache_stats().capacity_bytes<=512*1024);
+ auto saved=s.savepoint();s.put(0,"changed");CHECK(s.get(0)=="changed");s.restore(saved);CHECK(snapshot(s)==original);
+ s.commit();CHECK(snapshot(s)==original);
+ CHECK(s.data_cache_stats().capacity_bytes>512*1024&&s.data_cache_stats().capacity_bytes<=4*1048576);
+ s.begin();s.put(1,"uncommitted");CHECK(s.get(1)=="uncommitted");s.rollback();CHECK(snapshot(s)==original);
+ s.reset_data_cache_stats();CHECK(snapshot(s)==original);CHECK(s.data_cache_stats().misses==0);
+}
+void sql_phase_growth(const std::filesystem::path& path) {
+ Options options;options.data_cache_bytes=4*1048576;Database db(path,options);
+ db.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(1000))");
+ for(int i=0;i<16;++i)db.execute("INSERT INTO t VALUES("+std::to_string(i)+",'"+std::string(900,'a'+i)+"')");
+ CHECK(db.data_cache_stats().capacity_bytes>0&&db.data_cache_stats().capacity_bytes<=512*1024);
+ std::vector<Row> rows;db.execute("SELECT id,s FROM t ORDER BY id",{{},[&](const Row&r){rows.push_back(r);}});
+ CHECK(rows.size()==16);
+ for(int i=0;i<16;++i)CHECK(rows[i]==Row({std::int64_t(i),std::string(900,'a'+i)}));
+ CHECK(db.data_cache_stats().capacity_bytes>512*1024&&db.data_cache_stats().capacity_bytes<=4*1048576);
+}
 int main(){try {
  const char* base=getenv("MVDB_TEST_DIR");CHECK(base);std::filesystem::create_directories(base);
  auto path=(std::filesystem::path(base)/"data-cache-XXXXXX").string();CHECK(mkdtemp(path.data()));const std::filesystem::path dir(path);
  budgets(dir);recency(dir/"recency");isolation(dir);corruption(dir);cached_bad_reference(dir);overflow_corruption(dir);
  for(auto pages:{0U,1U,8U})failed_write(dir,pages);
  crash(dir/"crash");
+ phase_growth(dir/"phase-growth");
+ sql_phase_growth(dir/"sql-phase-growth");
  std::filesystem::remove_all(dir);std::cout<<"data cache tests passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

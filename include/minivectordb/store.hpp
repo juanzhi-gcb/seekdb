@@ -60,6 +60,8 @@ public:
   // Reset event counters, retaining the cache and its capacity/residency.
   void reset_cache_stats() noexcept;
   ~Store();
+  // Memory-only hint for mutation binding/duplicate checks before begin().
+  void set_write_cache_hint(bool enabled) noexcept;
   Store(const Store&) = delete;
   Store& operator=(const Store&) = delete;
   void begin();

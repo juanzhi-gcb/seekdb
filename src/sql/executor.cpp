@@ -398,7 +398,8 @@ namespace minivectordb {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            } else typed_snapshot.observe_row();
+            } else typed_snapshot.observe_row(text_column?
+                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);
@@ -575,6 +576,7 @@ namespace minivectordb {
         busy
       };
       auto statement=sql::parse(text);
+      store.set_write_cache_hint(statement.kind!=sql::Statement::Select);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {

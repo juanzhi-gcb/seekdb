@@ -226,9 +226,9 @@ void compatibility(const std::filesystem::path& path) {
   CHECK(string_filter.rows==oracle(items,q,[](const Item& i){return i.label>="body20";}));
   CHECK(string_filter.info.typed_rows_examined==0);CHECK(string_filter.info.typed_cache_bytes==0);
   CHECK(validations(string_filter)==items.size()+string_filter.rows.size());
-  // The raw representation selected by a string filter stays usable for this
-  // table/index until invalidation, including subsequent numeric queries.
-  warm(db,items,q,"",{},false);
+  // A wide VARCHAR declaration with short actual values now fits the measured
+  // text arena; subsequent numeric queries retain that validated representation.
+  warm(db,items,q,"",{},true);
   db.execute("UPDATE t SET g=0 WHERE id=9223372036854775807");
   warm(db,items,q);
   const auto key=items.front().id;
@@ -493,7 +493,7 @@ void transposed_lifecycle(const std::filesystem::path& path,bool indexed) {
   db.execute("DELETE FROM t WHERE id="+std::to_string(changed.back().id));changed.pop_back();warm(db,changed,q);
   db.execute("ROLLBACK");CHECK(query(db,statement(q)).info.typed_rows_examined==0);warm(db,items,q);
   CHECK(query(db,statement(q,"label>='body20'")).rows==oracle(items,q,[](const Item& i){return i.label>="body20";}));
-  warm(db,items,q,"",{},false);
+  warm(db,items,q,"",{},true);
 }
 
 void clustered_cache_contract() {

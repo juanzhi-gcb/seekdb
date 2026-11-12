@@ -137,14 +137,25 @@ struct Store::Impl {
   struct DataSet {std::array<DataEntry,4> ways{};};
   mutable std::unique_ptr<DataSet[]> data_cache;
   std::size_t data_set_count=0;
+  mutable std::size_t allocated_data_sets=0;
+  bool write_cache_hint=false;
   mutable CacheStats data_stats;
   DataSet* data_set(std::uint64_t id) const {
     if(!data_set_count)return nullptr;
-    if(!data_cache) {
-      data_cache=std::make_unique<DataSet[]>(data_set_count);
-      data_stats.capacity_bytes=data_set_count*sizeof(DataSet);
+    // Write-heavy startup needs only a small working set of recently read
+    // metadata pages. Grow once for standalone reads; never exceed the caller's
+    // existing budget or retain old/new arenas together during that growth.
+    const bool writing=active||write_cache_hint;
+    const auto target=writing?std::min(data_set_count,std::size_t(512*1024)/sizeof(DataSet)):data_set_count;
+    if(!data_cache || (!writing && allocated_data_sets<target)) {
+      data_cache.reset();allocated_data_sets=0;
+      data_stats.evictions+=data_stats.resident_pages;
+      data_stats.resident_pages=data_stats.capacity_bytes=0;
+      data_cache=std::make_unique<DataSet[]>(target);
+      allocated_data_sets=target;
+      data_stats.capacity_bytes=allocated_data_sets*sizeof(DataSet);
     }
-    return &data_cache[id%data_set_count];
+    return &data_cache[id%allocated_data_sets];
   }
   // Ranks are a permutation of 0..resident-1, with 0 most recently used.
   // Updating only ranks younger than the selected entry avoids timestamp overflow.
@@ -245,7 +256,16 @@ struct Store::Impl {
     const auto physical_id=physical(id,false,type==branch);
     CacheEntry* slot=nullptr;
     if(type==branch && cache_count) {
-      slot=&cache[id%cache_count];
+      auto cache_key=id;
+      if(id&branch_tag) {
+        // Packed addresses combine page<<9 with a slot. Direct modulo aliases
+        // neighbouring page/slot ranges after denser packing. Mix those bits
+        // before choosing a cache entry; full immutable IDs still guard hits.
+        cache_key^=cache_key>>30;cache_key*=UINT64_C(0xbf58476d1ce4e5b9);
+        cache_key^=cache_key>>27;cache_key*=UINT64_C(0x94d049bb133111eb);
+        cache_key^=cache_key>>31;
+      }
+      slot=&cache[cache_key%cache_count];
       if(slot->id==id) {
         // Range was checked above; a validated page is only reusable at its depth/type.
         if((compressed_paths?slot->depth<depth:slot->depth!=depth) || decode(slot->page,8,4)!=type) corrupt();
@@ -577,6 +597,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.initialize_cache(index_cache_bytes);
 }
 Store::~Store()=default;
+void Store::set_write_cache_hint(bool enabled) noexcept {impl_->write_cache_hint=enabled;}
 CacheStats Store::data_cache_stats() const noexcept {return impl_->data_stats;}
 void Store::reset_data_cache_stats() noexcept {
   impl_->data_stats.hits=impl_->data_stats.misses=impl_->data_stats.evictions=0;
