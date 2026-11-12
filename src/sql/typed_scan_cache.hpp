@@ -1,6 +1,7 @@
 #pragma once
 #include "minivectordb/row_codec.hpp"
 #include "../vector/int8_bound.hpp"
+#include "../vector/fixed16.hpp"
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -25,6 +26,7 @@ class TypedScanCache {
     std::size_t probation_text_width_=0;
     bool probation_complete_=false;
     detail::Int8BoundCache integer_cache_;
+    detail::Fixed16Cache fixed_cache_;
     std::unique_ptr<float[]> vectors_;
     std::unique_ptr<std::int64_t[]> scalars_;
     std::unique_ptr<std::size_t[]> columns_;
@@ -38,7 +40,7 @@ class TypedScanCache {
     bool ordered_text_=false;
 
     void release() noexcept {
-        integer_cache_.clear();
+        integer_cache_.clear();fixed_cache_.clear();
         vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
         probation_rows_=probation_text_width_=allocated_text_width_=0;probation_complete_=false;
@@ -110,7 +112,7 @@ class TypedScanCache {
     }
 public:
     void invalidate() noexcept {
-        integer_cache_.clear();
+        integer_cache_.clear();fixed_cache_.clear();
         count_=0;table_=index_=0;state_=State::empty;transposed_=false;
         probation_rows_=probation_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
@@ -215,12 +217,13 @@ public:
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
     }
-    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false) noexcept {
+    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false,bool fixed=false) noexcept {
         if(state_==State::probation) {probation_complete_=true;return;}
         if(!building())return;
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
+        if(fixed && transpose && budget_>bytes_)fixed_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_);
         if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
@@ -234,7 +237,7 @@ public:
                 transposed_=true;
             } catch(const std::bad_alloc&) {} // No block changed before allocation.
         }
-        if(integer_screen && transposed_ && budget_>bytes_)
+        if(!fixed_cache_.ready() && integer_screen && transposed_ && budget_>bytes_)
             integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_);
         state_=State::ready;
     }
@@ -269,7 +272,8 @@ public:
     }
     std::size_t size() const noexcept {return count_;}
     const detail::Int8BoundCache* integer_cache() const noexcept {return integer_cache_.ready()?&integer_cache_:nullptr;}
-    std::size_t bytes() const noexcept {return bytes_+integer_cache_.bytes();}
+    const detail::Fixed16Cache* fixed_cache() const noexcept {return fixed_cache_.ready()?&fixed_cache_:nullptr;}
+    std::size_t bytes() const noexcept {return bytes_+integer_cache_.bytes()+fixed_cache_.bytes();}
     std::size_t scalar_slot(std::size_t column) const {
         for(std::size_t slot=0;slot<scalar_count_;++slot)if(columns_[slot]==column)return slot;
         throw Error(ErrorCode::Schema,"typed cache requires BIGINT predicate");

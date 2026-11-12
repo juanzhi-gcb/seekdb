@@ -99,7 +99,7 @@ int main(int argc,char** argv) {
         options.selective_decode=selective!=0;
         options.batched_vector_kernel=std::getenv("MVDB_SCALAR_KERNEL")==nullptr;
         options.batch_writes=batch!=0;
-        if(std::getenv("MVDB_PROJECTION_OFF"))options.projection_cache_bytes=0;
+        options.fixed_point_scan_cache=std::getenv("MVDB_FIXED16_OFF")==nullptr;
         options.transposed_scan_cache=std::getenv("MVDB_LAYOUT_OFF")==nullptr;
         options.text_scan_cache=std::getenv("MVDB_TEXT_CACHE_OFF")==nullptr;
         options.clustered_scan_cache=std::getenv("MVDB_CLUSTER_OFF")==nullptr;
@@ -109,6 +109,7 @@ int main(int argc,char** argv) {
         profile::Snapshot write_profile{},query_profile{};
         CacheStats branch_stats{},value_stats{};std::size_t typed_bytes=0,projection_bytes=0;
         profile::set_enabled(profiling);
+        std::uint64_t fixed_rows=0;
         std::uint64_t vector_cells=0,filtered_vectors=0,unfiltered_vectors=0,cells=0,examined=0,distances=0;
         std::vector<std::vector<Hit>> results(query_count);
         std::uintmax_t empty_bytes=0,database_bytes=0;
@@ -154,7 +155,7 @@ int main(int argc,char** argv) {
                 (queries[i].filtered?filtered_vectors:unfiltered_vectors)+=info.vector_values_materialized;
                 cells+=info.cells_materialized;
                 examined+=info.rows_examined;
-                distances+=info.distances_computed;typed_bytes=info.typed_cache_bytes;projection_bytes=info.projection_cache_bytes;
+                fixed_rows+=info.fixed_point_rows;distances+=info.distances_computed;typed_bytes=info.typed_cache_bytes;projection_bytes=info.projection_cache_bytes;
             }
             query_profile=profile::snapshot();branch_stats=db.cache_stats();value_stats=db.data_cache_stats();
             profile::set_enabled(false);
@@ -224,7 +225,7 @@ int main(int argc,char** argv) {
             <<",\"write_ms\":"<<write_ms<<",\"query_unfiltered_ms\":"<<all_ms
             <<",\"query_filtered_ms\":"<<filtered_ms<<",\"query_total_ms\":"<<all_ms+filtered_ms
             <<",\"database_bytes\":"<<database_bytes<<",\"insert_file_growth_bytes\":"<<database_bytes-empty_bytes
-            <<",\"rows_examined\":"<<examined<<",\"distances_computed\":"<<distances
+            <<",\"fixed_rows\":"<<fixed_rows<<",\"rows_examined\":"<<examined<<",\"distances_computed\":"<<distances
             <<",\"vector_values_filtered\":"<<filtered_vectors<<",\"vector_values_unfiltered\":"<<unfiltered_vectors
             <<",\"vector_values_materialized\":"<<vector_cells<<",\"cells_materialized\":"<<cells
             <<",\"process_maxrss_kib\":"<<usage.ru_maxrss<<",\"local_cgroup_peak_bytes\":"<<local_peak

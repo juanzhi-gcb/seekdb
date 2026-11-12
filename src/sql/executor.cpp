@@ -1,3 +1,4 @@
+#include <queue>
 #include "sql.hpp"
 #include "sorter.hpp"
 #include "scan_cache.hpp"
@@ -328,6 +329,31 @@ namespace minivectordb {
       bool certified=false;
       const auto [begin,end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
+      if(const auto* fixed=typed_snapshot.fixed_cache();fixed && !profile::enabled()) {
+        auto query=fixed->query(*e.query);
+        if(query.valid) {
+          // Integer squared sums <2^44 have distinct rounded sqrt values.
+          // Rank before sqrt; compute the reference sqrt only for the winners.
+          using Hit=std::pair<std::uint64_t,std::int64_t>;
+          std::priority_queue<Hit> heap;
+          if(k)for(std::size_t r=begin/16*16;r<end;r+=16) {
+            std::array<std::uint64_t,16> squares{};fixed->squares(query,r,squares);
+            for(std::size_t lane=0;lane<16 && r+lane<end;++lane) {
+              if(r+lane<begin)continue;
+              ++info.rows_examined;++info.typed_rows_examined;
+              if(!certified && !typed_matches(r+lane,predicates))continue;
+              ++info.distances_computed;++info.fixed_point_rows;
+              Hit hit{squares[lane],typed_snapshot.key(r+lane)};
+              if(heap.size()<k)heap.push(hit);else if(hit<heap.top()){heap.pop();heap.push(hit);}
+            }
+          }
+          std::vector<Neighbor> result;result.reserve(heap.size());
+          while(!heap.empty()){auto [square,key]=heap.top();heap.pop();result.push_back({key,fixed->distance(square)});}
+          std::reverse(result.begin(),result.end());
+          info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
+          return result;
+        }
+      }
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -431,7 +457,7 @@ namespace minivectordb {
             });
           }
           projection_snapshot.finish();
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.fixed_point_scan_cache);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
