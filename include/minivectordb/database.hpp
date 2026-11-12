@@ -54,9 +54,31 @@ struct Options {
   // Reuse validation proofs of a complete owned raw snapshot. False retains
   // full per-query row validation for controlled comparisons.
   bool validated_snapshot_replay = true;
+  // Compile required field traversal once for zero/one-predicate raw replays.
+  bool projected_snapshot_replay = true;
   // Internal SQL candidates have decoder/cache finiteness proofs. Keep the
   // checked public vector API unchanged; false is the measured reference.
   bool validated_vector_kernel = true;
+  // Interleave independent exact distances, with at most 64 KiB query scratch.
+  // False retains the scalar validated kernel for measured comparisons.
+  bool batched_vector_kernel = true;
+  // AVX2 executes only after CPU capability detection; portable batching remains
+  // the fallback. Independent candidate lanes keep scalar double result bits.
+  bool simd_vector_kernel = true;
+  // Optional wider exact lanes on CPUs/OSes with AVX-512F support.
+  bool wide_simd_vector_kernel = true;
+  // Transpose completed numeric snapshots once, within the existing arena.
+  // AVX2 queries can then read candidate blocks without per-query repacking.
+  bool transposed_scan_cache = true;
+  // Admit one validated VARCHAR predicate column alongside numeric vectors,
+  // within the same snapshot budget; unsupported shapes use raw snapshots.
+  bool text_scan_cache = true;
+  // Cluster a completed snapshot by a reusable ordinary column before SIMD
+  // transposition, making selective filters occupy dense candidate blocks.
+  bool clustered_scan_cache = true;
+  // New flat vector indexes keep validated table/key references instead of a
+  // second persistent vector payload. Existing version1 indexes retain copies.
+  bool referenced_vector_index = true;
   // Competition recovery model: process SIGKILL, with final fsync before ACK.
   // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;

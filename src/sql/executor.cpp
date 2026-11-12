@@ -30,6 +30,15 @@ namespace minivectordb {
       }
       return result;
     }
+    std::string index_entry(const Schema& schema,const VectorIndex& index,std::int64_t key,const Row& row) {
+      if(!index.referenced)return index_vector(row[index.column]);
+      std::string bytes="MVIR";
+      binary::put(bytes,schema.id);
+      binary::put(bytes,index.column,4);
+      binary::put(bytes,schema.columns[index.column].extent,4);
+      binary::put(bytes,std::bit_cast<std::uint64_t>(key));
+      return bytes;
+    }
     struct StopScan {
     };
     void count_decoded(const Row& row,ExecutionInfo& info) {
@@ -91,6 +100,23 @@ namespace minivectordb {
         return true;
       }
     };
+    std::span<const float> index_candidate(std::string_view bytes,const Schema& schema,
+        const VectorIndex& index,std::int64_t key,const SelectRow& row,std::vector<float>& scratch) {
+      if(index.referenced) {
+        binary::Reader in(bytes);
+        if(in.take(4)!="MVIR" || in.get()!=schema.id || in.get(4)!=index.column ||
+           in.get(4)!=schema.columns[index.column].extent || in.get()!=std::bit_cast<std::uint64_t>(key))
+          throw Error(ErrorCode::Corruption,"invalid vector index reference");
+        in.end();
+        // The current transactional base row owns the vector. A complete paired
+        // traversal checks key-set equality before publishing a reusable cache.
+        return row.vector_for_distance(index.column,scratch);
+      }
+      scratch=read_index_vector(bytes,schema.columns[index.column].extent);
+      if(scratch!=std::get<std::vector<float>>(row[index.column]))
+        throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+      return scratch;
+    }
     struct DistanceCache {
       std::vector<std::pair<const sql::BoundExpr*,double>> values;
       bool same(const sql::BoundExpr&a,const sql::BoundExpr&b)const {
@@ -197,10 +223,15 @@ namespace minivectordb {
     void replay_snapshot(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                          ExecutionInfo& info,const VectorVisitor& visit,std::vector<float>& scratch) {
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      const sql::SnapshotProjection projection(s,e.column,b.predicates);
       try {
         snapshot.scan([&](auto key,auto bytes) {
           profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
           ++info.rows_examined;++info.snapshot_rows_examined;++info.validated_snapshot_rows_examined;
+          if(options.projected_snapshot_replay&&projection.usable()) {
+            if(projection.matches_and_copy(bytes,scratch)) {++info.distances_computed;visit(key,scratch);}
+            return;
+          }
           sql::SnapshotRow row(s,key,bytes);
           if(row.matches(b.predicates)) {
             row.copy_vector(e.column,scratch);
@@ -209,51 +240,129 @@ namespace minivectordb {
         });
       } catch(...) {snapshot.clear();throw;}
     }
-    bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
-                      const std::optional<VectorIndex>& index,ExecutionInfo& info,
-                      const VectorVisitor& visit,std::vector<float>& scratch) {
+    bool typed_eligible(const Schema& s,const sql::Bound& b,
+                        const std::optional<VectorIndex>& index) const {
       bool eligible=options.typed_scan_cache && options.scan_snapshot_bytes>0 && !b.primary_lookup &&
           (index?options.paired_index_scan:options.table_scan_snapshot);
-      for(const auto& p:b.predicates)
-        eligible=eligible && s.columns[p.column].type==ColumnType::Bigint &&
-            std::holds_alternative<std::int64_t>(p.value);
+      std::optional<std::size_t> text_column;
+      for(const auto& p:b.predicates) {
+        if(s.columns[p.column].type==ColumnType::Bigint)
+          eligible=eligible && std::holds_alternative<std::int64_t>(p.value);
+        else if(options.text_scan_cache && s.columns[p.column].type==ColumnType::Varchar &&
+                std::holds_alternative<std::string>(p.value)) {
+          if(text_column && *text_column!=p.column)eligible=false;
+          text_column=p.column;
+        } else eligible=false;
+      }
       const auto index_id=index?index->id:0;
       // A VARCHAR query may already have selected the raw representation for
       // this identity. Retain its probation/ready/refused state across numeric
       // queries, otherwise alternating filters continually reset both caches.
       if(eligible && snapshot.observed(s.id,index_id))eligible=false;
+      return eligible;
+    }
+    std::optional<std::size_t> typed_text_column(const Schema& s,const sql::Bound& b,
+        const sql::BoundExpr& e,const std::optional<VectorIndex>& index) const {
+      auto column=typed_snapshot.text_column(s.id,index?index->id:0,e.column);
+      for(const auto& p:b.predicates)if(s.columns[p.column].type==ColumnType::Varchar)column=p.column;
+      return column;
+    }
+    struct CachedPredicate {
+      bool text;std::size_t slot;std::int64_t number;std::string_view value,op;
+    };
+    std::vector<CachedPredicate> typed_predicates(const Schema& s,const sql::Bound& b) const {
+      std::vector<CachedPredicate> result;result.reserve(b.predicates.size());
+      for(const auto& p:b.predicates) {
+        if(s.columns[p.column].type==ColumnType::Varchar)
+          result.push_back({true,0,0,std::get<std::string>(p.value),p.op});
+        else result.push_back({false,typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),{},p.op});
+      }
+      return result;
+    }
+    bool typed_matches(std::size_t row,const std::vector<CachedPredicate>& predicates) const {
+      for(const auto& p:predicates) {
+        profile::detail::Scope timer(&profile::Snapshot::predicate_evaluation);
+        int cmp;
+        if(p.text)cmp=typed_snapshot.text(row).compare(p.value);
+        else {const auto value=typed_snapshot.scalar(row,p.slot);cmp=value<p.number?-1:(value>p.number?1:0);}
+        if((p.op=="="&&cmp!=0)||(p.op=="<"&&cmp>=0)||(p.op=="<="&&cmp>0)||
+           (p.op==">"&&cmp<=0)||(p.op==">="&&cmp<0))return false;
+      }
+      return true;
+    }
+    bool transpose_enabled() const noexcept {
+      return options.transposed_scan_cache && options.validated_vector_kernel &&
+          options.batched_vector_kernel && options.simd_vector_kernel && detail::has_avx2();
+    }
+    std::optional<std::vector<Neighbor>> typed_block_top_k(
+        const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+        const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
+      if(!transpose_enabled() || !typed_eligible(s,b,index) ||
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
+          typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
+      const auto predicates=typed_predicates(s,b);
+      profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
+      try {
+        auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
+          std::array<std::int64_t,16> keys{};
+          std::vector<float> tail;
+          for(std::size_t r=0;r<typed_snapshot.size();r+=16) {
+            const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
+            std::uint16_t mask=0;
+            for(std::size_t lane=0;lane<count;++lane) {
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.rows_examined;++info.typed_rows_examined;
+              keys[lane]=typed_snapshot.key(r+lane);
+              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
+            }
+            if(!mask)continue;
+            std::span<const float> block;
+            if(count<16) {
+              tail.assign(16*e.query->size(),0);
+              for(std::size_t lane=0;lane<count;++lane) {
+                const auto vector=typed_snapshot.vector(r+lane);
+                for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
+              }
+              block=tail;
+            } else block=typed_snapshot.block(r);
+            visit({keys.data(),count},block,mask);
+          }
+        },options.wide_simd_vector_kernel);
+        info.typed_cache_bytes=typed_snapshot.bytes();
+        return result;
+      } catch(...) {typed_snapshot.clear();throw;}
+    }
+    bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                      const std::optional<VectorIndex>& index,ExecutionInfo& info,
+                      const VectorVisitor& visit,std::vector<float>& scratch) {
+      const bool eligible=typed_eligible(s,b,index);
+      const auto index_id=index?index->id:0;
       if(!eligible) {typed_snapshot.clear();return false;}
       // Two representations never own their bounded payloads simultaneously.
       snapshot.clear();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
-        if(typed_snapshot.ready(s.id,index_id,e.column)) {
-          struct Predicate {std::size_t slot;std::int64_t value;std::string_view op;};
-          std::vector<Predicate> predicates;
-          predicates.reserve(b.predicates.size());
-          for(const auto& p:b.predicates)
-            predicates.push_back({typed_snapshot.scalar_slot(p.column),std::get<std::int64_t>(p.value),p.op});
+        const auto text_column=typed_text_column(s,b,e,index);
+        if(typed_snapshot.ready(s.id,index_id,e.column) &&
+            text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
+          const auto predicates=typed_predicates(s,b);
           for(std::size_t r=0;r<typed_snapshot.size();++r) {
             profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
             ++info.rows_examined;++info.typed_rows_examined;
-            bool matches=true;
-            for(const auto& p:predicates) {
-              profile::detail::Scope predicate_timer(&profile::Snapshot::predicate_evaluation);
-              const auto value=typed_snapshot.scalar(r,p.slot);
-              if((p.op=="="&&value!=p.value)||(p.op=="<"&&value>=p.value)||
-                 (p.op=="<="&&value>p.value)||(p.op==">"&&value<=p.value)||
-                 (p.op==">="&&value<p.value)) {matches=false;break;}
-            }
-            if(matches) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.vector(r));}
+            if(typed_matches(r,predicates)) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
           }
         } else {
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer,text_column);
+          if(text_column && typed_snapshot.refused()) {
+            typed_snapshot.clear();return false;
+          }
           auto consume=[&](std::int64_t key,const SelectRow& row,std::span<const float> vector) {
             // Capture every row before applying this query's predicate. The cache
             // must also answer a different filter, including after a zero-match build.
             if(typed_snapshot.building()) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
-              typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);});
+              typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
+                  text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
             }
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
@@ -264,10 +373,8 @@ namespace minivectordb {
             store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.vector_index_entries_examined;++info.rows_examined;
-              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
               SelectRow row(s,key,base,options.selective_decode,info);
-              if(vector!=std::get<std::vector<float>>(row[e.column]))
-                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+              auto vector=index_candidate(bytes,s,*index,key,row,scratch);
               consume(key,row,vector);
             });
           } else {
@@ -278,7 +385,7 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          typed_snapshot.finish();
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
@@ -317,23 +424,26 @@ namespace minivectordb {
         std::vector<float> vector_scratch;
         // Every source below validates the candidate through SelectRow/index
         // decoding, or reuses owned typed columns from a complete validated scan.
-        const auto top_k=options.validated_vector_kernel?detail::exact_top_k_validated_candidates:exact_top_k;
-        auto winners=top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
+        const auto top_k=!options.validated_vector_kernel?exact_top_k:
+            !options.batched_vector_kernel?detail::exact_top_k_validated_candidates:
+            options.simd_vector_kernel?(options.wide_simd_vector_kernel?detail::exact_top_k_wide_validated_candidates:
+                                                                        detail::exact_top_k_simd_validated_candidates):
+                                       detail::exact_top_k_batched_validated_candidates;
+        std::optional<VectorIndex> index;
+        if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
+          if(candidate.column==e.column) { index=candidate; break; }
+        auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
+        auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;
             if(options.reuse_vector_scratch)visit(key,row.vector_for_distance(e.column,vector_scratch));
             else visit(key,std::get<std::vector<float>>(row[e.column]));
           };
-          std::optional<VectorIndex> index;
-          if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
-            if(candidate.column==e.column) { index=candidate; break; }
           if(typed_source(s,b,e,index,info,visit,vector_scratch))return;
           if(index) {
             // Exhaustive flat index: exact and ANN mode share recall 1. Read and
             // validate every base row, retaining the established corruption contract.
-            auto consume=[&](auto key,const std::vector<float>& vector,const SelectRow& row) {
-              if(vector!=std::get<std::vector<float>>(row[e.column]))
-                throw Error(ErrorCode::Corruption,"vector index disagrees with row");
+            auto consume=[&](auto key,std::span<const float> vector,const SelectRow& row) {
               if(row.matches(b.predicates)) { ++info.distances_computed; visit(key,vector); }
             };
             if(options.paired_index_scan && snapshot.ready(s.id,index->id)) {
@@ -350,9 +460,9 @@ namespace minivectordb {
               try {
                 store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
                   ++info.vector_index_entries_examined;
-                  auto vector=read_index_vector(bytes,s.columns[e.column].extent);
                   ++info.rows_examined;
                   SelectRow row(s,key,base,options.selective_decode,info);
+                  auto vector=index_candidate(bytes,s,*index,key,row,vector_scratch);
                   consume(key,vector,row);
                   snapshot.append(key,base);
                 });
@@ -365,9 +475,11 @@ namespace minivectordb {
               }
             } else store.scan_in(index->id,[&](auto key,auto bytes) {
               ++info.vector_index_entries_examined;
-              auto vector=read_index_vector(bytes,s.columns[e.column].extent);
               ++info.rows_examined;
-              fetch_select(s,key,info,[&](const SelectRow& row) {consume(key,vector,row);});
+              fetch_select(s,key,info,[&](const SelectRow& row) {
+                auto vector=index_candidate(bytes,s,*index,key,row,vector_scratch);
+                consume(key,vector,row);
+              });
             });
           } else if(options.validated_snapshot_replay && options.reuse_vector_scratch && !b.primary_lookup &&
                     options.table_scan_snapshot && snapshot.ready(s.id,0)) {
@@ -485,16 +597,17 @@ namespace minivectordb {
         }
         auto maintain=[&](std::int64_t key,const Row* row) {
           for(std::size_t i=0;i<indexes.size();++i)
-            index_batches[i]->add(key,row?std::optional<std::string>(index_vector((*row)[indexes[i].column])):std::nullopt);
+            index_batches[i]->add(key,row?std::optional<std::string>(index_entry(schema,indexes[i],key,*row)):std::nullopt);
         };
         if(statement.kind==sql::Statement::Create)create_table(store,statement.schema);
         else if(statement.kind==sql::Statement::CreateIndex) {
           auto column=sql::column_index(schema,statement.index_column);
-          auto index=create_vector_index(store,schema,column,statement.index_name);
+          auto index=create_vector_index(store,schema,column,statement.index_name,
+              options.referenced_vector_index&&schema.columns[column].extent>7);
           MutationBatch entries(store,index.id,options.batch_writes);
           store.scan_in(schema.id,[&](auto key,auto bytes) {
             auto row=decode(schema,key,bytes);
-            entries.add(key,index_vector(row[column]));
+            entries.add(key,index_entry(schema,index,key,row));
           });
           entries.flush();
         }

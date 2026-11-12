@@ -68,6 +68,24 @@ def preserve_prefix(current, previous, label):
         require(current[field][:len(old)] == old, label + ' changed historical ' + field)
 
 
+def verify_selection(current, archive):
+    """A shorter submission may select records, but may not rewrite their source."""
+    for field in ['conversations', 'experiments', 'agent_observations']:
+        require(isinstance(current[field], list) and isinstance(archive[field], list),
+                'Expected record arrays: ' + field)
+        original = {row['id']: row for row in archive[field]}
+        require(len(original) == len(archive[field]), 'Duplicate archived record IDs: ' + field)
+        seen = set()
+        for row in current[field]:
+            identity = row['id']
+            require(identity not in seen, 'Duplicate selected record ID: ' + identity)
+            seen.add(identity)
+            require(identity in original and row == original[identity],
+                    'Selected record changed or invented: ' + identity)
+    require(current['conversations'] == archive['conversations'],
+            'Curated material must preserve every recorded user statement')
+
+
 def resolve_pointer(document, pointer):
     require(isinstance(pointer, str) and pointer.startswith('/'), 'Invalid JSON pointer')
     target, parent = document, None
@@ -138,11 +156,19 @@ def main():
         require(path.stat().st_size == expected['bytes'] and sha(path) == expected['sha256'], name + ' digest')
     current = read_json(path_in_repo('conversation.json'))
     require(isinstance(current, dict), 'Material must be a JSON object')
+    history_records = current
+    if current.get('schema_version') == 'minivectordb-learning-evidence-curated-v1':
+        selection = binding['selection_archive']
+        archive_path = path_in_repo(selection['path'])
+        require(archive_path.stat().st_size == selection['bytes'] and
+                sha(archive_path) == selection['sha256'], 'Selection archive digest')
+        history_records = read_json(archive_path)
+        verify_selection(current, history_records)
     history = binding['before_material']
     previous_path = path_in_repo(history['path'])
     require(sha(previous_path) == history['sha256'] and previous_path.stat().st_size == history['bytes'], 'History digest')
     previous = read_json(previous_path)
-    preserve_prefix(current, previous, 'Original measurement material')
+    preserve_prefix(history_records, previous, 'Original measurement material')
     revision = binding['revision_baseline']
     revision_path = path_in_repo(revision['path'])
     require(revision_path.stat().st_size == revision['bytes'] and
@@ -150,7 +176,29 @@ def main():
     require(revision_path.read_bytes() == git_file(revision['commit'], 'agent/conversation.json'),
             'Revision baseline differs from its published commit')
     previous_revision = read_json(revision_path)
-    preserve_prefix(current, previous_revision, 'Published revision material')
+    preserve_prefix(history_records, previous_revision, 'Published revision material')
+    if 'previous_formal_material' in binding:
+        formal = binding['previous_formal_material']
+        formal_path = path_in_repo(formal['path'])
+        require(formal_path.stat().st_size == formal['bytes'] and
+                sha(formal_path) == formal['sha256'], 'Formal baseline material digest')
+        # The API-authored public commit and the local commit share an exact
+        # tree. A fresh public clone need not contain the local commit object.
+        verified = False
+        for commit in [formal['commit'], formal['local_equivalent_commit']]:
+            require(re.fullmatch(r'[0-9a-f]{40}', commit) is not None, 'Invalid formal source commit')
+            tree = subprocess.run(['git', 'rev-parse', '--verify', commit + '^{tree}'],
+                                  cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=30)
+            if tree.returncode != 0:
+                continue
+            require(tree.stdout.decode('ascii').strip() == formal['shared_tree'], 'Formal source tree differs')
+            require(formal_path.read_bytes() == git_file(commit, 'agent/conversation.json'),
+                    'Formal baseline differs from its published tree')
+            verified = True
+            break
+        require(verified, 'Formal baseline Git tree unavailable')
+        preserve_prefix(history_records, read_json(formal_path), 'Latest formal material')
     count = len(previous_revision['conversations'])
     for field in ['conversations', 'experiments', 'agent_observations']:
         ids = [row['id'] for row in current[field]]
@@ -190,7 +238,7 @@ def main():
         path = manifest_path.parent / name
         require(is_within(path.resolve(), manifest_path.parent.resolve()), 'Invalid evidence path')
         require(sha(path) == expected, 'Historical evidence changed: ' + name)
-    for content in [material_bytes.decode('utf-8'), previous_path.read_text(encoding='utf-8'),
+    for content in [material_bytes.decode('utf-8'), json.dumps(history_records, ensure_ascii=False), previous_path.read_text(encoding='utf-8'),
                     revision_path.read_text(encoding='utf-8')]:
         require('github_pat_' not in content and 'ghp_' not in content, 'Credential marker in material')
         require(re.search(r'https?://[^/\s:]+:[^/\s@]+@', content) is None, 'Credential URL in material')

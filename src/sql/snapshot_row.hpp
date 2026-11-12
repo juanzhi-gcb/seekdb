@@ -7,6 +7,80 @@
 #include <cstring>
 
 namespace minivectordb::sql {
+// Compile the needed prefix of a fully admitted snapshot row once per query.
+// Never apply this projection to unvalidated Store bytes. A rejecting predicate
+// can stop early because the complete row was validated when the cache was built.
+class SnapshotProjection {
+    enum class Kind { Skip, SkipText, Vector, IntegerPredicate, TextPredicate };
+    struct Step {Kind kind;std::size_t bytes;};
+    std::vector<Step> steps_;
+    const BoundPredicate* predicate_=nullptr;
+    std::size_t dimension_=0;
+    bool usable_=false;
+    bool accepts(int comparison) const {
+        const auto& op=predicate_->op;
+        return !((op=="="&&comparison!=0)||(op=="<"&&comparison>=0)||
+                 (op=="<="&&comparison>0)||(op==">"&&comparison<=0)||
+                 (op==">="&&comparison<0));
+    }
+public:
+    SnapshotProjection(const Schema& schema,std::size_t vector_column,
+                       const std::vector<BoundPredicate>& predicates) {
+        if(predicates.size()>1)return; // Preserve the general multi-predicate path.
+        if(!predicates.empty())predicate_=&predicates.front();
+        dimension_=schema.columns.at(vector_column).extent;
+        const auto last=predicate_?std::max(vector_column,predicate_->column):vector_column;
+        steps_.push_back({Kind::Skip,5});
+        for(std::size_t column=0;column<=last;++column) {
+            const auto& field=schema.columns[column];
+            if(column==vector_column)steps_.push_back({Kind::Vector,dimension_});
+            else if(predicate_&&column==predicate_->column)
+                steps_.push_back({field.type==ColumnType::Bigint?Kind::IntegerPredicate:Kind::TextPredicate,0});
+            else if(field.type==ColumnType::Varchar)steps_.push_back({Kind::SkipText,0});
+            else {
+                const auto bytes=field.type==ColumnType::Bigint?std::size_t(8):4+std::size_t(field.extent)*4;
+                if(steps_.back().kind==Kind::Skip)steps_.back().bytes+=bytes;
+                else steps_.push_back({Kind::Skip,bytes});
+            }
+        }
+        usable_=true;
+    }
+    bool usable() const noexcept {return usable_;}
+    bool matches_and_copy(std::string_view bytes,std::vector<float>& scratch) const {
+        binary::Reader in(bytes);
+        std::string_view vector_bytes;
+        for(const auto& step:steps_)switch(step.kind) {
+            case Kind::Skip:(void)in.take(step.bytes);break;
+            case Kind::SkipText:(void)in.text_view();break;
+            case Kind::Vector: {
+                const auto n=in.get(4);
+                if(n!=dimension_||n>in.remaining()/sizeof(float))
+                    throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
+                vector_bytes=in.take(std::size_t(n)*sizeof(float));break;
+            }
+            case Kind::IntegerPredicate: {
+                profile::detail::Scope timer(&profile::Snapshot::predicate_evaluation);
+                const auto a=std::bit_cast<std::int64_t>(in.get()),b=std::get<std::int64_t>(predicate_->value);
+                if(!accepts(a<b?-1:(a>b?1:0)))return false;
+                break;
+            }
+            case Kind::TextPredicate: {
+                profile::detail::Scope timer(&profile::Snapshot::predicate_evaluation);
+                if(!accepts(in.text_view().compare(std::get<std::string>(predicate_->value))))return false;
+                break;
+            }
+        }
+        profile::detail::Scope timer(&profile::Snapshot::vector_scratch_copy);
+        scratch.resize(dimension_);
+        if constexpr(std::endian::native==std::endian::little) {
+            if(!vector_bytes.empty())std::memcpy(scratch.data(),vector_bytes.data(),vector_bytes.size());
+        } else {
+            binary::Reader components(vector_bytes);
+            for(auto& value:scratch)value=std::bit_cast<float>(static_cast<std::uint32_t>(components.get(4)));
+        }
+        timer.bytes(vector_bytes.size());return true;
+    }
+};
 // Internal view of bytes owned by a READY ScanSnapshot only. Admission has
 // validated every field (including rejected rows) and index/base consistency.
 // The executor invalidates that proof before every non-SELECT. Never use this

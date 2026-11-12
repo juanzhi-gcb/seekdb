@@ -39,20 +39,18 @@ namespace minivectordb::sql {
         std::string value;
         bool closed=false;
         while(i<s.size()) {
-          char c=s[i++];
-          if(c==quote) {
-            if(i<s.size()&&s[i]==quote) {
-              value.push_back(quote);
-              ++i;
-            }
-            else {
-              closed=true;
-              break;
-            }
+          const auto end=s.find(quote,i);
+          if(end==std::string_view::npos)break;
+          value.append(s.substr(i,end-i));
+          i=end+1;
+          if(i<s.size()&&s[i]==quote) {
+            value.push_back(quote);
+            ++i;
           }
-          else value.push_back(quote=='`'?lower(c):c);
+          else {closed=true;break;}
         }
         if(!closed)throw Error(ErrorCode::Syntax,"unterminated quoted token");
+        if(quote=='`')for(auto& c:value)c=lower(c);
         out.push_back( {
           quote=='\''?TokenKind::String:TokenKind::Identifier,std::move(value)
         });

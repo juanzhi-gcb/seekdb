@@ -10,3 +10,6 @@
 *.i filter=codeformat
 *.ic filter=codeformat
 *.js filter=codeformat
+
+# Keep raw test output byte-for-byte, including trailing spaces emitted by tools.
+bench/results/**/*.log -whitespace

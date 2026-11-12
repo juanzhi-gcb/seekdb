@@ -109,6 +109,7 @@ void sql_case(const std::filesystem::path& path,std::size_t dimensions,
   const auto items=fixture(dimensions);
   const std::vector<float> q(dimensions,0.0f),other(dimensions,0.5f);
   Options options;options.typed_scan_cache=false; // Exercise the vector-copy reference path.
+  options.referenced_vector_index=false; // Keep legacy index/base copy-count assertions.
   options.packed_values=packed;options.selective_decode=lazy;
   options.reuse_vector_scratch=reuse;options.scan_snapshot_bytes=8192;
   Database db(path,options);

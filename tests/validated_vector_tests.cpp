@@ -1,5 +1,6 @@
 #include "minivectordb/exact.hpp"
 #include "../src/vector/validated.hpp"
+#include "minivectordb/profile.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -16,7 +17,10 @@ using namespace minivectordb;
 namespace {
 struct Item {std::int64_t key;std::vector<float> value;};
 using Kernel=std::vector<Neighbor>(*)(std::span<const float>,std::size_t,const VectorSource&,const KeyPredicate&);
-constexpr Kernel kernels[]{exact_top_k,detail::exact_top_k_validated_candidates};
+constexpr Kernel kernels[]{exact_top_k,detail::exact_top_k_validated_candidates,
+                          detail::exact_top_k_batched_validated_candidates,
+                          detail::exact_top_k_simd_validated_candidates,
+                          detail::exact_top_k_wide_validated_candidates};
 std::uint64_t cases=0;
 void same(const std::vector<Neighbor>& actual,const std::vector<Neighbor>& expected) {
     CHECK(actual.size()==expected.size());
@@ -50,7 +54,25 @@ void compare(const std::vector<Item>& data,const std::vector<float>& query,std::
     const VectorSource source=[&](const VectorVisitor& visit) {for(const auto& row:data)visit(row.key,row.value);};
     const auto reference=exact_top_k(query,k,source,predicate);
     const auto validated=detail::exact_top_k_validated_candidates(query,k,source,predicate);
-    same(reference,expected);same(validated,reference);++cases;
+    const auto batched=detail::exact_top_k_batched_validated_candidates(query,k,source,predicate);
+    const auto simd=detail::exact_top_k_simd_validated_candidates(query,k,source,predicate);
+    const auto wide=detail::exact_top_k_wide_validated_candidates(query,k,source,predicate);
+    const detail::BlockVectorSource blocks=[&](const detail::BlockVectorVisitor& visit) {
+        std::vector<float> block(16*query.size());
+        std::vector<std::int64_t> keys;
+        for(std::size_t start=0;start<data.size();start+=16) {
+            keys.clear();std::fill(block.begin(),block.end(),0);std::uint16_t mask=0;
+            for(std::size_t lane=0;lane<16&&start+lane<data.size();++lane) {
+                const auto& item=data[start+lane];keys.push_back(item.key);
+                if(!predicate||predicate(item.key))mask|=std::uint16_t(1U<<lane);
+                for(std::size_t d=0;d<query.size();++d)block[d*16+lane]=item.value[d];
+            }
+            visit(keys,block,mask);
+        }
+    };
+    const auto blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks);
+    const auto narrow_blocked=detail::exact_top_k_transposed_validated_candidates(query,k,blocks,false);
+    same(reference,expected);same(validated,reference);same(batched,reference);same(simd,reference);same(blocked,reference);same(narrow_blocked,reference);same(wide,reference);++cases;
 }
 float arbitrary_finite(std::mt19937& random) {
     auto bits=static_cast<std::uint32_t>(random());
@@ -60,7 +82,7 @@ float arbitrary_finite(std::mt19937& random) {
 }
 void random_matrix() {
     std::mt19937 random(0x735a29u);
-    for(std::size_t dimension:{0U,1U,2U,3U,7U,8U,15U,16U,31U,32U,64U,127U,128U,129U,768U}) {
+    for(std::size_t dimension:{0U,1U,2U,3U,7U,8U,15U,16U,31U,32U,64U,127U,128U,129U,768U,1024U,1025U}) {
         for(unsigned round=0;round<5;++round) {
             const auto next=[&]() {
                 if(round==4) {
@@ -134,9 +156,45 @@ void validation_boundaries() {
     }
     invalid([&]{l2_distance(finite,short_value);});
 }
+void batch_lifetimes_and_tails() {
+    for(const auto kernel:{detail::exact_top_k_batched_validated_candidates,
+                           detail::exact_top_k_simd_validated_candidates,
+                           detail::exact_top_k_wide_validated_candidates})
+    for(std::size_t count=0;count<=65;++count) {
+        std::vector<Item> data;
+        const std::vector<float> query(128,0.125f);
+        for(std::size_t row=0;row<count;++row) {
+            std::vector<float> value(query.size());
+            for(std::size_t d=0;d<value.size();++d)value[d]=float(int((row*7+d)%23)-11)/8;
+            data.push_back({std::int64_t(count-row)-33,std::move(value)});
+        }
+        std::vector<float> reused(query.size());
+        const VectorSource source=[&](const VectorVisitor& visit) {
+            for(const auto& item:data) {
+                reused=item.value;visit(item.key,reused);
+                std::fill(reused.begin(),reused.end(),std::numeric_limits<float>::quiet_NaN());
+            }
+        };
+        profile::set_enabled(true);profile::reset();
+        const auto result=kernel(query,7,source,{});
+        const auto measured=profile::snapshot();profile::set_enabled(false);
+        same(result,oracle(data,query,7,{}));
+        CHECK(measured.vector_distance.calls==count);++cases;
+    }
+    const std::vector<float> query(128,0),wrong(127,0),value(128,1);
+    invalid([&]{detail::exact_top_k_batched_validated_candidates(query,3,[&](const VectorVisitor& visit){visit(1,wrong);});});
+    bool propagated=false;
+    try {
+        detail::exact_top_k_batched_validated_candidates(query,3,[&](const VectorVisitor& visit) {
+            for(int i=0;i<5;++i)visit(i,value);
+            throw std::runtime_error("partial batch source failed");
+        });
+    } catch(const std::runtime_error& error){propagated=std::string(error.what())=="partial batch source failed";}
+    CHECK(propagated);
+}
 }
 int main() {
-    try {random_matrix();extremes_and_rounding();validation_boundaries();
+    try {random_matrix();extremes_and_rounding();validation_boundaries();batch_lifetimes_and_tails();
         std::cout<<"validated vector kernel: "<<cases<<" bitwise cases and validation boundaries passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

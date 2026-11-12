@@ -450,6 +450,78 @@ void cache_unit_contract() {
   cache.append(v,[](std::size_t c){return std::int64_t(c==2?900:70);});cache.finish();
   CHECK(cache.ready(a.id,0,0));CHECK(cache.size()==1);CHECK(cache.key(0)==900);
 }
+void transposed_unit_contract() {
+  for(std::size_t dimension:{16U,127U,128U,1024U})for(std::size_t count:{1U,15U,16U,17U,31U,32U,33U}) {
+    Schema schema;schema.id=812;schema.primary=0;
+    schema.columns={{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,static_cast<std::uint32_t>(dimension)}};
+    sql::TypedScanCache cache;
+    const auto budget=count*(dimension*4+8)+sizeof(std::size_t);
+    cache.start(schema,0,1,budget);cache.start(schema,0,1,budget);
+    std::vector<float> vector(dimension),scratch;
+    for(std::size_t row=0;row<count;++row) {
+      for(std::size_t d=0;d<dimension;++d)vector[d]=float(row*1024+d);
+      cache.append(vector,[&](auto){return std::int64_t(row)-50;});
+    }
+    cache.finish(true);CHECK(cache.ready(schema.id,0,1));CHECK(cache.size()==count);
+    CHECK(cache.bytes()<=budget);CHECK(cache.transposed()==(count>=16));
+    for(std::size_t row=0;row<count;++row) {
+      CHECK(cache.key(row)==std::int64_t(row)-50);
+      auto value=cache.read_vector(row,scratch);
+      for(std::size_t d=0;d<dimension;++d)CHECK(value[d]==float(row*1024+d));
+    }
+    cache.invalidate();CHECK(!cache.transposed());CHECK(!cache.ready(schema.id,0,1));
+    cache.start(schema,0,1,budget);cache.start(schema,0,1,budget);
+    std::fill(vector.begin(),vector.end(),-2);cache.append(vector,[](auto){return 5;});cache.finish(true);
+    CHECK(cache.size()==1);CHECK(!cache.transposed());CHECK(cache.key(0)==5);
+    CHECK(cache.read_vector(0,scratch)[0]==-2);
+  }
+}
+void transposed_lifecycle(const std::filesystem::path& path,bool indexed) {
+  Database db(path,settings());auto items=fixture(128);const std::vector<float> q(128,0);
+  seed(db,items);if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
+  warm(db,items,q,"g=99",[](const Item&){return false;});
+  CHECK(query(db,statement(q)).rows==oracle(items,q));
+  CHECK(query(db,statement(q,"g=2")).rows==oracle(items,q,[](const Item& i){return i.g==2;}));
+  CHECK(query(db,statement(q,"h>=-1 AND g<3",30)).rows==oracle(items,q,[](const Item& i){return i.h>=-1&&i.g<3;},30));
+  db.execute("BEGIN");
+  auto changed=items;changed.front().v=q;changed.front().g=99;
+  db.execute("UPDATE t SET v='"+literal(q)+"',g=99 WHERE id="+std::to_string(changed.front().id));
+  CHECK(query(db,statement(q)).info.typed_rows_examined==0);warm(db,changed,q);
+  db.execute("DELETE FROM t WHERE id="+std::to_string(changed.back().id));changed.pop_back();warm(db,changed,q);
+  db.execute("ROLLBACK");CHECK(query(db,statement(q)).info.typed_rows_examined==0);warm(db,items,q);
+  CHECK(query(db,statement(q,"label>='body20'")).rows==oracle(items,q,[](const Item& i){return i.label>="body20";}));
+  warm(db,items,q,"",{},false);
+}
+
+void clustered_cache_contract() {
+  for(bool use_text:{false,true})for(std::size_t count:{2U,17U,33U,100U}) {
+    Schema schema{77,"t",{{"id",ColumnType::Bigint,0},{"g",ColumnType::Bigint,0},
+      {"v",ColumnType::Vector,128},{"label",ColumnType::Varchar,4}},0};
+    sql::TypedScanCache cache;std::optional<std::size_t> text_column=use_text?std::optional<std::size_t>(3):std::nullopt;
+    cache.start(schema,0,2,131072,true,text_column);cache.start(schema,0,2,131072,true,text_column);
+    const std::string labels[]{"z","中","a",""};
+    std::vector<float> v(128),scratch;
+    for(std::size_t row=0;row<count;++row) {
+      for(std::size_t d=0;d<128;++d)v[d]=float(row*512+d);
+      cache.append(v,[&](std::size_t c){return c==0?100-std::int64_t(row)*37:std::int64_t(row*7%11);},labels[row%4]);
+    }
+    cache.finish(true,true);CHECK(cache.ready(77,0,2));CHECK(cache.size()==count);CHECK(cache.bytes()<=131072);
+    std::vector<bool> seen(count,false);
+    for(std::size_t row=0;row<count;++row) {
+      auto original=std::size_t((100-cache.key(row))/37);CHECK(original<count&&!seen[original]);seen[original]=true;
+      auto values=cache.read_vector(row,scratch);
+      for(std::size_t d=0;d<128;++d)CHECK(values[d]==float(original*512+d));
+      CHECK(cache.scalar(row,1)==std::int64_t(original*7%11));
+      if(use_text)CHECK(cache.text(row)==labels[original%4]);
+      if(row) {
+        int cmp=use_text?cache.text(row-1).compare(cache.text(row)):
+          (cache.scalar(row-1,1)<cache.scalar(row,1)?-1:(cache.scalar(row-1,1)>cache.scalar(row,1)?1:0));
+        CHECK(cmp<=0);if(!cmp)CHECK(cache.key(row-1)<cache.key(row));
+      }
+    }
+  }
+}
+
 }
 int main() {
   try {
@@ -458,7 +530,8 @@ int main() {
     std::filesystem::create_directories(parent);
     std::string pattern=(parent/"typed-scan-XXXXXX").string();
     CHECK(::mkdtemp(pattern.data()));const std::filesystem::path root(pattern);
-    cache_unit_contract();
+    cache_unit_contract();transposed_unit_contract();clustered_cache_contract();
+    transposed_lifecycle(root/"transposed-unindexed",false);transposed_lifecycle(root/"transposed-indexed",true);
     basic(root/"unindexed.db",false);basic(root/"indexed.db",true);
     for(bool indexed:{false,true})for(bool selective:{false,true})
       predicate_matrix(root/("predicates-"+std::to_string(indexed)+std::to_string(selective)),indexed,selective);
