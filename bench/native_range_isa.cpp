@@ -33,9 +33,11 @@ void range_isa(const std::filesystem::path& root,bool wide) {
       {"label='absent'",[](const Item&i){return i.label=="absent";}},
       {"label>='a' AND label<'😀'",[](const Item&i){return i.label>="a"&&i.label<"😀";}},
       {"label>'中' AND label<'a'",[](const Item&){return false;}}})
-        check_range(db,items,where,predicate,predicate);
+      {std::cerr<<"range-check: "<<where<<'\n';check_range(db,items,where,predicate,predicate);}
+    // A numeric query retains the already selected VARCHAR cache. It is
+    // ordered by label here, so g cannot narrow its physical scan interval.
     check_range(db,items,"g>=0 AND h=1",[](const Item&i){return i.g>=0&&i.h==1;},
-                [](const Item&i){return i.g>=0;});
+                {});
     check_range(db,items,"label>='a' AND h=1",[](const Item&i){return i.label>="a"&&i.h==1;},
                 [](const Item&i){return i.label>="a";});
   }
