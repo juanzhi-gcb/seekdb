@@ -2,6 +2,7 @@
 #include "page_checksum.hpp"
 #include "packed_codec.hpp"
 #include "packed_pointer.hpp"
+#include "journal_store.hpp"
 #include <array>
 #include <algorithm>
 #include <vector>
@@ -115,6 +116,7 @@ unsigned key_index(std::uint64_t space,std::uint64_t key,unsigned depth) {return
 }
 
 struct Store::Impl {
+  std::unique_ptr<detail::JournalStore> journal;
   struct CacheEntry {
     Page page{};
     std::uint64_t id=0;
@@ -546,7 +548,7 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format):impl_(std::make_unique<Impl>()) {
   if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
     throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
@@ -568,6 +570,12 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.packing=packed_values; s.format3=packed_values||compressed_paths; s.scan_budget=packed_scan_cache_bytes;
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
+  if(created && journal_format) {
+    s.journal=std::make_unique<detail::JournalStore>(s.fd,true,data_cache_bytes,commit_sync_policy);
+    auto parent=path.parent_path();if(parent.empty())parent=".";
+    int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);if(directory<0)io_error("open database directory");
+    try{sync_fd(directory);}catch(...){::close(directory);throw;}::close(directory);return;
+  }
   if(created) {
     write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3,s.compressed_paths,s.compact_values,s.compact_node_refs,s.byteplane_values),0); sync_fd(s.fd);
     auto parent=path.parent_path(); if(parent.empty()) parent=".";
@@ -580,6 +588,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   if(info.st_size<static_cast<off_t>(2*page_size)) corrupt();
   auto bytes=static_cast<std::uint64_t>(info.st_size), complete=bytes/page_size;
   auto a=read_raw(s.fd,0), b=read_raw(s.fd,1);
+  if(detail::JournalStore::magic(a.data())||detail::JournalStore::magic(b.data())){s.journal=std::make_unique<detail::JournalStore>(s.fd,false,data_cache_bytes,commit_sync_policy);return;}
   if(std::memcmp(a.data(),"MVDBRT01",8)==0 || std::memcmp(b.data(),"MVDBRT01",8)==0) throw std::runtime_error("unsupported MiniVectorDB format 01; format 02 required");
   bool av=valid_root(a,complete), bv=valid_root(b,complete);
   if(!av && !bv) corrupt();
@@ -611,18 +620,19 @@ void Store::reset_cache_stats() noexcept {
 void Store::begin() {
   auto& s=*impl_; s.usable(); if(s.active) throw std::logic_error("transaction already active");
   if(s.epoch==UINT64_MAX) throw std::overflow_error("transaction epoch exhausted");
-  ++s.epoch; s.root=s.durable_root; s.active=true;
+  ++s.epoch; s.root=s.durable_root; s.active=true;if(s.journal)s.journal->begin();
 }
 std::optional<std::string> Store::get(std::int64_t key) const {return get_in(0,key);}
 void Store::put(std::int64_t key,std::string_view value) {put_in(0,key,value);}
 bool Store::erase(std::int64_t key) {return erase_in(0,key);}
 std::optional<std::string> Store::get_in(std::uint64_t space,std::int64_t key) const {
-  auto& s=*impl_; s.usable(); auto id=s.find(space,ordered_key(key));
+  auto& s=*impl_; s.usable();if(s.journal)return s.journal->value(space,key); auto id=s.find(space,ordered_key(key));
   if(!id) return std::nullopt;
   return s.value(id);
 }
 void Store::put_in(std::uint64_t space,std::int64_t key,std::string_view value) {
   auto& s=*impl_; s.transaction();
+  if(s.journal){Mutation change{key,std::string(value)};s.journal->apply(space,{&change,1});return;}
   const auto data=s.write_value(value);
   Impl::NodeBatch nodes(s);
   const auto next=s.replace(s.root,0,space,ordered_key(key),data,nodes);
@@ -630,13 +640,14 @@ void Store::put_in(std::uint64_t space,std::int64_t key,std::string_view value) 
   s.root=next;
 }
 bool Store::erase_in(std::uint64_t space,std::int64_t key) {
-  auto& s=*impl_; s.transaction(); auto ordered=ordered_key(key);
+  auto& s=*impl_; s.transaction();if(s.journal){if(!s.journal->value(space,key))return false;Mutation change{key,std::nullopt};s.journal->apply(space,{&change,1});return true;} auto ordered=ordered_key(key);
   if(!s.find(space,ordered)) return false;
   Impl::NodeBatch nodes(s);
   const auto next=s.replace(s.root,0,space,ordered,0,nodes);nodes.flush();s.root=next;return true;
 }
 void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutations) {
   auto& state=*impl_; state.transaction();
+  if(state.journal){state.journal->apply(space,mutations);return;}
   if(mutations.size()>max_batch_mutations)throw std::length_error("too many batch mutations");
   std::vector<const Mutation*> sorted;
   sorted.reserve(mutations.size());
@@ -702,6 +713,7 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
 }
 void Store::commit() {
   auto& s=*impl_; s.transaction();
+  if(s.journal){try{s.journal->commit();}catch(...){s.poisoned=true;throw;}s.active=false;return;}
   if(s.generation==UINT64_MAX) throw std::overflow_error("generation exhausted");
   auto next=s.generation+1;
   try {
@@ -715,27 +727,30 @@ void Store::commit() {
   } catch(...) {s.poisoned=true; throw;}
   s.generation=next; s.durable_root=s.root; s.active=false;
 }
-void Store::rollback() {auto& s=*impl_; s.transaction(); s.root=s.durable_root; s.active=false;}
+void Store::rollback() {auto& s=*impl_; s.transaction(); if(s.journal)s.journal->rollback();s.root=s.durable_root; s.active=false;}
 Store::Savepoint Store::savepoint() const {
   auto& s=*impl_; s.transaction(); Savepoint point;
-  point.root_=s.root; point.epoch_=s.epoch; point.owner_=s.owner; return point;
+  point.root_=s.journal?s.journal->head():s.root; point.epoch_=s.epoch; point.owner_=s.owner; return point;
 }
 void Store::restore(const Savepoint& point) {
   auto& s=*impl_; s.transaction();
   if(point.owner_!=s.owner || point.epoch_!=s.epoch) throw std::invalid_argument("savepoint belongs to another transaction");
+  if(s.journal){s.journal->restore(point.root_);return;}
   s.root=point.root_;
 }
 void Store::scan(const std::function<void(std::int64_t,std::string_view)>& visitor) const {
   scan_in(0,visitor);
 }
 void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
-  auto& s=*impl_; s.usable(); auto id=s.locate_namespace(s.root,space);
+  auto& s=*impl_; s.usable();if(s.journal){const auto rows=s.journal->snapshot(space);for(auto [key,at]:rows){auto value=s.journal->value_at(space,key,at);visitor(key,value);}return;} auto id=s.locate_namespace(s.root,space);
   Impl::ScanCache memo(s.scan_budget);
   s.walk(id,8,0,space,visitor,memo);
 }
 void Store::scan_equal_in(std::uint64_t left_space,std::uint64_t right_space,
                           const std::function<void(std::int64_t,std::string_view,std::string_view)>& visitor) const {
-  auto& s=*impl_; s.usable(); const auto root=s.root;
+  auto& s=*impl_; s.usable();
+  if(s.journal){const auto left=s.journal->snapshot(left_space),right=s.journal->snapshot(right_space);if(left.size()!=right.size())throw KeySetMismatch();for(std::size_t i=0;i<left.size();++i){if(left[i].first!=right[i].first)throw KeySetMismatch();auto a=s.journal->value_at(left_space,left[i].first,left[i].second),b=s.journal->value_at(right_space,right[i].first,right[i].second);visitor(left[i].first,a,b);}return;}
+  const auto root=s.root;
   const auto locate=[&](std::uint64_t space) {
     return s.locate_namespace(root,space);
   };

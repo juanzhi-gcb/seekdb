@@ -99,7 +99,7 @@ int main(int argc,char** argv) {
         options.selective_decode=selective!=0;
         options.batched_vector_kernel=std::getenv("MVDB_SCALAR_KERNEL")==nullptr;
         options.batch_writes=batch!=0;
-        if(std::getenv("MVDB_PROJECTION_OFF"))options.projection_cache_bytes=0;
+        options.journal_store=std::getenv("MVDB_JOURNAL_OFF")==nullptr;
         options.transposed_scan_cache=std::getenv("MVDB_LAYOUT_OFF")==nullptr;
         options.text_scan_cache=std::getenv("MVDB_TEXT_CACHE_OFF")==nullptr;
         options.clustered_scan_cache=std::getenv("MVDB_CLUSTER_OFF")==nullptr;
@@ -229,7 +229,7 @@ int main(int argc,char** argv) {
             <<",\"vector_values_materialized\":"<<vector_cells<<",\"cells_materialized\":"<<cells
             <<",\"process_maxrss_kib\":"<<usage.ru_maxrss<<",\"local_cgroup_peak_bytes\":"<<local_peak
             <<",\"native_vnni\":"<<(detail::Int8BoundCache::native_vnni()?"true":"false")<<",\"int8_enabled\":"<<(options.bounded_int8_screen?"true":"false")<<",\"typed_bytes\":"<<typed_bytes
-            <<",\"projection_enabled\":"<<(options.projection_cache_bytes?"true":"false")<<",\"projection_bytes\":"<<projection_bytes
+            <<",\"journal_enabled\":"<<(options.journal_store?"true":"false")<<",\"projection_enabled\":"<<(options.projection_cache_bytes?"true":"false")<<",\"projection_bytes\":"<<projection_bytes
             <<",\"branch_hits\":"<<branch_stats.hits<<",\"branch_misses\":"<<branch_stats.misses<<",\"branch_evictions\":"<<branch_stats.evictions
             <<",\"value_hits\":"<<value_stats.hits<<",\"value_misses\":"<<value_stats.misses
             <<",\"validated_queries\":"<<query_count<<",\"recovered_rows\":"<<recovered

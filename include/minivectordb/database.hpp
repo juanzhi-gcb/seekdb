@@ -95,6 +95,7 @@ struct Options {
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
+  bool journal_store=false; // New-file backend; existing formats autodetected.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
