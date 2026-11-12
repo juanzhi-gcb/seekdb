@@ -59,6 +59,24 @@ void write_page(int fd,const Page& p,std::uint64_t id) {
     done+=static_cast<std::size_t>(n);
   }
 }
+// Contiguous immutable value pages only. A short write or EINTR must finish
+// the entire extent before references to it can become reachable.
+void write_pages(int fd,std::span<const Page> pages,std::uint64_t id) {
+  if(pages.empty())return;
+  const auto start=byte_offset(id);
+  (void)byte_offset(id+pages.size());
+  const auto* bytes=reinterpret_cast<const unsigned char*>(pages.data());
+  const auto size=pages.size()*page_size;std::size_t done=0;
+  while(done<size) {
+    ssize_t n;
+    {profile::detail::Scope timer(&profile::Snapshot::pwrite);
+      n=::pwrite(fd,bytes+done,size-done,start+static_cast<off_t>(done));
+      if(n>0)timer.bytes(static_cast<std::uint64_t>(n));}
+    if(n<0){if(errno==EINTR)continue;io_error("pwrite batch pages");}
+    if(!n)throw std::runtime_error("zero-length batch pwrite");
+    done+=static_cast<std::size_t>(n);
+  }
+}
 void discard_clean_pages(int fd,off_t offset,off_t length) noexcept {
 #if defined(POSIX_FADV_DONTNEED)
   // Advisory: failure/ignore changes only performance. Owned page copies and
@@ -659,17 +677,28 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   std::vector<std::size_t> pending;
   pending.reserve(sorted.size());
   std::string compressed;
+  std::vector<Page> value_pages;
+  // At most 64 KiB; no background writes and no change to commit/fsync order.
+  value_pages.reserve(16);
+  auto flush_pages=[&] {
+    write_pages(state.fd,value_pages,state.next_page);
+    state.next_page+=value_pages.size();value_pages.clear();
+  };
   auto flush=[&] {
     if(!slot_count)return;
     if(slot_count==1 && !(decode(packed_page,payload+4,4)&compressed_slot)) {
       // Packing one record saves no pages; retain the simpler ordinary read path.
       const std::string_view contents(reinterpret_cast<const char*>(packed_page.data()+payload_start),
                                       page_size-payload_start);
-      replacements[pending.front()].value=state.write_value(contents);
+      flush_pages();replacements[pending.front()].value=state.write_value(contents);
     } else {
       if(state.next_page>((packed_tag-1)>>9))throw std::length_error("packed page address exhausted");
       encode(packed_page,12,slot_count,4);
-      const auto id=state.append(packed_page);
+      const auto id=state.next_page+value_pages.size();
+      if(id>((packed_tag-1)>>9))throw std::length_error("packed page address exhausted");
+      encode(packed_page,24,page_checksum(packed_page,24),4);
+      value_pages.push_back(packed_page);
+      if(value_pages.size()==16)flush_pages();
       for(std::size_t slot=0;slot<pending.size();++slot)
         replacements[pending[slot]].value=packed_tag|(id<<9)|slot;
     }
@@ -680,7 +709,7 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
     if(!mutation->value)continue;
     std::string_view contents=*mutation->value;
     if(!state.format3 || !state.packing || contents.size()>chunk_size-8) {
-      replacements.back().value=state.write_value(contents); continue;
+      flush_pages();replacements.back().value=state.write_value(contents); continue;
     }
     const bool encoded=state.compact_values && detail::pack_bytes(contents,compressed,state.byteplane_values);
     if(encoded)contents=compressed;
@@ -693,6 +722,7 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
     pending.push_back(replacements.size()-1); ++slot_count;
   }
   flush();
+  flush_pages();
   // Values and every changed child precede their immutable parent. The working root
   // is assigned only when the whole merge succeeds; failed appends are unreachable.
   Impl::NodeBatch nodes(state);
