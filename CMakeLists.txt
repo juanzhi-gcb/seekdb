@@ -7,6 +7,8 @@ add_library(minivectordb_core src/types/value.cpp src/vector/exact.cpp src/stora
 # The portable reference must use distinct multiply/add too, including AArch64.
 # Explicit SIMD screening intrinsics retain their intentional bounded FMAs.
 set_source_files_properties(src/vector/exact.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+find_package(Threads REQUIRED)
+target_link_libraries(minivectordb_core PUBLIC Threads::Threads)
 target_include_directories(minivectordb_core PUBLIC include)
 target_compile_options(minivectordb_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 add_executable(core_tests tests/core_tests.cpp)
@@ -245,3 +247,8 @@ add_executable(byteplane_tests tests/byteplane_tests.cpp)
 target_link_libraries(byteplane_tests PRIVATE minivectordb_core)
 add_test(NAME byteplane_lossless COMMAND byteplane_tests)
 set_tests_properties(byteplane_lossless PROPERTIES TIMEOUT 60)
+
+add_executable(parallel_query_tests tests/parallel_query_tests.cpp)
+target_link_libraries(parallel_query_tests PRIVATE minivectordb_core)
+add_test(NAME parallel_query_exactness COMMAND parallel_query_tests)
+set_tests_properties(parallel_query_exactness PROPERTIES TIMEOUT 180)
