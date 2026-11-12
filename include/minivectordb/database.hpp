@@ -67,7 +67,7 @@ struct Options {
   bool simd_vector_kernel = true;
   // Optional wider exact lanes on CPUs/OSes with AVX-512F support.
   bool wide_simd_vector_kernel = true;
-  // Experimental exact rejection by a downward-rounded FP32 lower bound.
+  // Experimental exact rejection by a conservatively bounded FP32 estimate.
   // Remaining candidates always use the original double distance kernel.
   bool bounded_fp32_screen = false;
   // Transpose completed numeric snapshots once, within the existing arena.

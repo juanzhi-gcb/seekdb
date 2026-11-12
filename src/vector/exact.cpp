@@ -84,7 +84,8 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
 #if defined(__x86_64__) && defined(__GNUC__)
   // Require RN, gradual underflow and all exceptions masked. Do not change
   // the caller's environment. Status bits are irrelevant to the proof.
-  screen=allow_lower_bound && wide && query.size()>=32 &&
+  screen=allow_lower_bound && (wide || (has_avx2()&&__builtin_cpu_supports("fma"))) &&
+         query.size()>=32 && query.size()<=4096 &&
          ((_mm_getcsr()&0xffc0u)==0x1f80u);
 #else
   (void)allow_lower_bound;
@@ -92,6 +93,12 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
   if(screen_stats)screen_stats->environment_supported=screen;
   unsigned trial_lanes=0,trial_rejected=0;
   double rejection_bound=std::numeric_limits<double>::infinity();
+  // n<=4096. Wide: RZ estimate <= mathematical sum; factor covers the
+  // original double difference/product/sequential-add rounding. Narrow:
+  // cover RN32 difference, FMA/reduction and RN64 reference errors plus a
+  // deliberately loose absolute allowance for gradual float underflow.
+  const double error_factor=1+std::ldexp(static_cast<double>(query.size()+8),wide?-49:-20);
+  const double absolute_allowance=wide?0:static_cast<double>(query.size()+8)*std::numeric_limits<float>::min();
   source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
@@ -99,10 +106,11 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     if(screen && heap.size()==k && std::popcount(mask)>=8) {
 #if defined(__x86_64__) && defined(__GNUC__)
       std::array<float,16> lower{};
-      batch16_lower_bound_avx512(values.data(),query.data(),query.size(),lower.data());
+      if(wide)batch16_lower_bound_avx512(values.data(),query.data(),query.size(),lower.data());
+      else batch16_estimate_avx2(values.data(),query.data(),query.size(),lower.data());
       const auto before=std::popcount(mask);
       for(std::size_t lane=0;lane<keys.size();++lane)
-        if((mask&(1U<<lane)) && static_cast<double>(lower[lane])>rejection_bound)
+        if((mask&(1U<<lane)) && std::isfinite(lower[lane]) && static_cast<double>(lower[lane])>rejection_bound)
           mask&=static_cast<std::uint16_t>(~(1U<<lane));
       const auto removed=before-std::popcount(mask);
       trial_lanes+=static_cast<unsigned>(before);trial_rejected+=static_cast<unsigned>(removed);
@@ -147,6 +155,8 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       // Outward rounding of its square also protects sqrt-rounding ties.
       const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
       rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
     }
   });
   std::vector<Neighbor> result;result.reserve(heap.size());

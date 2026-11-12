@@ -37,10 +37,10 @@ text=open(sys.argv[1]).read()
 match=re.search(r'<minivectordb::detail::batch16_lower_bound_avx512\([^\n]*\)>:\n(.*?)(?=\n\n)',text,re.S)
 assert match, 'missing lower-bound kernel disassembly'
 body=match.group(1)
-for op in ['vsubps','vmulps','vaddps']:
+for op in ['vsubps','vfmadd','vaddps']:
     assert re.search(op+r'[^\n]*\{rz-sae\}',body), (op,body)
-assert not re.search(r'v[f]?madd|vfmadd|vfmsub',body)
-print('Verified separate AVX512 sub/mul/add with embedded RZ and SAE')
+assert re.search(r'vfmadd[^\n]*\{rz-sae\}',body)
+print('Verified explicit AVX512 RZ subtraction/FMA/reduction; strict returned-distance kernel unchanged')
 PY
 sha256sum bench/rz_screen_diagnostic.cpp bench/score_kernel_diagnostic.cpp > "$result/probe-source.sha256"
 for kind in base rz; do sudo sha256sum "$scratch/bin/$kind/probe" >> "$result/probe-binaries.sha256"; done

@@ -22,7 +22,7 @@ detail::BlockVectorSource source_for(const std::vector<Item>& data,const std::ve
     }
   };
 }
-void dataset(bool equal,std::size_t k,unsigned seed) {
+void dataset(bool equal,std::size_t k,unsigned seed,bool wide) {
   std::mt19937 random(seed);std::vector<float> q(128,0);
   std::vector<Item> data;
   for(int i=0;i<1027;++i) {
@@ -33,7 +33,7 @@ void dataset(bool equal,std::size_t k,unsigned seed) {
   const auto blocks=source_for(data,q);
   detail::BoundScreenStats stats;
   const auto expected=oracle(data,q,k,{});
-  same(detail::exact_top_k_transposed_validated_candidates(q,k,blocks,true,true,&stats),expected);
+  same(detail::exact_top_k_transposed_validated_candidates(q,k,blocks,wide,true,&stats),expected);
   rejected+=stats.rejected_lanes;screened_count+=stats.screened_lanes;
   if(stats.environment_supported && k==10) {
     CHECK(stats.screened_lanes>0);
@@ -43,7 +43,7 @@ void dataset(bool equal,std::size_t k,unsigned seed) {
 }
 void direct_lower_bounds() {
 #if defined(__x86_64__) && defined(__GNUC__)
-  if(!detail::has_avx512())return;
+  if(!detail::has_avx2()||!__builtin_cpu_supports("fma"))return;
   std::mt19937 random(0xb017d5u);
   for(std::size_t n:{1u,2u,31u,32u,127u,128u,129u,1024u}) {
     for(unsigned mode=0;mode<6;++mode)for(unsigned trial=0;trial<24;++trial) {
@@ -58,11 +58,23 @@ void direct_lower_bounds() {
       std::vector<float> q(n),block(n*16);
       for(auto& x:q)x=next();for(auto& x:block)x=next();
       std::array<float,16> lower{};
-      detail::batch16_lower_bound_avx512(block.data(),q.data(),n,lower.data());
+      for(bool wide:{false,true}) {
+      if(wide&&!detail::has_avx512())continue;
+      if(wide)detail::batch16_lower_bound_avx512(block.data(),q.data(),n,lower.data());
+      else detail::batch16_estimate_avx2(block.data(),q.data(),n,lower.data());
       for(unsigned lane=0;lane<16;++lane) {
         double exact=0;
         for(std::size_t d=0;d<n;++d){const double delta=double(q[d])-double(block[d*16+lane]);exact+=delta*delta;}
-        CHECK(std::isfinite(lower[lane]));CHECK(lower[lane]>=0);CHECK(double(lower[lane])<=exact);++lower_checks;
+        CHECK(!std::isnan(lower[lane]));CHECK(lower[lane]>=0);
+        // A nonfinite RN32 estimate must be retained for exact evaluation.
+        if(std::isfinite(lower[lane])) {
+          const double factor=1+std::ldexp(double(n+8),wide?-49:-20);
+          const double allowance=wide?0:double(n+8)*std::numeric_limits<float>::min();
+          const double upper=std::nextafter(std::nextafter(exact*factor,INFINITY)+allowance,INFINITY);
+          CHECK(double(lower[lane])<=upper);
+        }
+        ++lower_checks;
+      }
       }
     }
   }
@@ -89,12 +101,12 @@ void environment_fallback() {
 int main() {
   try {
     direct_lower_bounds();
-    for(auto k:{0u,1u,10u,128u,1027u,2048u})for(bool equal:{false,true})dataset(equal,k,0x5ba13u+k);
+    for(bool wide:{false,true})for(auto k:{0u,1u,10u,128u,1027u,2048u})for(bool equal:{false,true})dataset(equal,k,0x5ba13u+k,wide);
     // Adjacent sqrt outputs/ties, tails, mixed masks and all exponent classes
     // also run the independent full-sort comparison in the shared fixture.
     extremes_and_rounding();
     environment_fallback();
-    std::cout<<"{\"avx512_supported\":"<<(detail::has_avx512()?"true":"false")
+    std::cout<<"{\"avx2_supported\":"<<(detail::has_avx2()?"true":"false")<<",\"avx512_supported\":"<<(detail::has_avx512()?"true":"false")
       <<",\"lower_bound_lane_checks\":"<<lower_checks<<",\"screened_lanes\":"<<screened_count
       <<",\"rejected_lanes\":"<<rejected<<"}\n";
     return 0;

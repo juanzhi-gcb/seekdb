@@ -1,7 +1,7 @@
-name: Experimental exact lower-bound screen
+name: Experimental pipelined exact screen
 "on":
   push:
-    branches: ['codex/score-rz-screen-20261112']
+    branches: ['codex/score-screen2-20261112']
 permissions:
   contents: read
 jobs:
