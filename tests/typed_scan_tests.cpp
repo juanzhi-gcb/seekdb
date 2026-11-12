@@ -453,7 +453,7 @@ void cache_unit_contract() {
 void transposed_unit_contract() {
   for(std::size_t dimension:{16U,127U,128U,1024U})for(std::size_t count:{1U,15U,16U,17U,31U,32U,33U}) {
     Schema schema;schema.id=812;schema.primary=0;
-    schema.columns={{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,dimension}};
+    schema.columns={{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,static_cast<std::uint32_t>(dimension)}};
     sql::TypedScanCache cache;
     const auto budget=count*(dimension*4+8)+sizeof(std::size_t);
     cache.start(schema,0,1,budget);cache.start(schema,0,1,budget);

@@ -8,7 +8,8 @@
 #include <span>
 
 namespace minivectordb::sql {
-// Owned, aligned numeric columns from one completely validated table version.
+// Owned numeric columns and an optional text predicate column from one fully
+// validated table version. Text slots allow four UTF-8 bytes per schema scalar.
 // The executor invalidates before every non-SELECT and never retains the raw
 // snapshot beside this cache. Only finish() publishes a successful full scan.
 // All owned arrays, including the scalar-column map, share the bounded budget.

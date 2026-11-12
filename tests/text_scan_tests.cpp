@@ -5,7 +5,7 @@
 
 namespace {
 std::vector<Item> text_items() {
-  const std::string labels[]{"","a","中","😀","é","aa","ä","🀄"};
+  const std::string labels[]{"","a","中","😀","é","aa","ä",std::string("a\0b",3)};
   std::vector<Item> items;
   for(int i=0;i<51;++i) {
     std::vector<float> v(128);
@@ -35,6 +35,7 @@ void text_lifecycle(const std::filesystem::path& path,bool indexed,bool selectiv
     for(const auto& [sql,predicate]:std::vector<std::pair<std::string,Filter>>{
       {"label=''",[](const Item&i){return i.label.empty();}},
       {"label='😀'",[](const Item&i){return i.label=="😀";}},
+      {"label='"+std::string("a\0b",3)+"'",[](const Item&i){return i.label==std::string("a\0b",3);}},
       {"label<'中'",[](const Item&i){return i.label<"中";}},
       {"label<='中'",[](const Item&i){return i.label<="中";}},
       {"label>'a'",[](const Item&i){return i.label>"a";}},

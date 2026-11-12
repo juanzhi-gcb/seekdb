@@ -1,0 +1,42 @@
+name: MiniVectorDB stage8 complete comparison
+on:
+  push:
+    branches: ['codex/score-stage8-contract-20261112']
+permissions:
+  contents: read
+concurrency:
+  group: mvdb-native-contract-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {sample: 1, os: ubuntu-24.04}
+          - {sample: 2, os: ubuntu-22.04}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Fetch exact public source without stored credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/juanzhi-gcb/seekdb.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Validate and compare against formal 1630 baseline
+        shell: bash
+        run: bash bench/run_stage8_contract.sh
+      - name: Preserve full measurement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-stage8-${{ matrix.sample }}-${{ github.sha }}
+          path: stage8-results/
+          retention-days: 30
+      - name: Scope
+        if: always()
+        run: echo 'Native x86_64 JSONL T/B/M comparison. Local generated data and shared runner; no official E or Prompt score. Competition branch remains unchanged.' >> "$GITHUB_STEP_SUMMARY"
