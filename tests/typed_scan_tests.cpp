@@ -528,7 +528,7 @@ void clustered_cache_contract() {
 void ordered_bounds_contract() {
   const Schema schema{71,"t",{{"id",ColumnType::Bigint,0},{"g",ColumnType::Bigint,0},
     {"v",ColumnType::Vector,1}},0};
-  for(std::size_t count:{0U,1U,2U,15U,16U,17U,33U,16384U,16385U})for(bool clustered:{false,true}) {
+  for(std::size_t count:{0U,1U,2U,15U,16U,17U,33U,16384U,16385U,131072U,131073U})for(bool clustered:{false,true}) {
     sql::TypedScanCache cache;const std::size_t budget=2*sizeof(std::size_t)+count*20+64;
     cache.start(schema,0,2,budget);cache.start(schema,0,2,budget);
     const std::vector<float> v{0};
@@ -540,7 +540,7 @@ void ordered_bounds_contract() {
     CHECK(!cache.ordered_bounds(std::string_view("")));
     for(std::int64_t value:std::vector<std::int64_t>{INT64_MIN,-4,-3,0,3,4,INT64_MAX}) {
       const auto bounds=cache.ordered_bounds(1,value);
-      if(!clustered||count<2||count>16384)CHECK(!bounds);
+      if(!clustered||count<2||count>131072)CHECK(!bounds);
       else {
         CHECK(bounds);std::size_t lower=0,upper=0;
         for(std::size_t i=0;i<count;++i) {

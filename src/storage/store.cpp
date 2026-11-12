@@ -1,5 +1,6 @@
 #include "minivectordb/store.hpp"
 #include "page_checksum.hpp"
+#include "packed_codec.hpp"
 #include <array>
 #include <algorithm>
 #include <vector>
@@ -22,9 +23,10 @@ using Page=std::array<unsigned char,page_size>;
 constexpr std::uint64_t packed_tag=1ULL<<63;
 constexpr std::uint64_t branch_tag=1ULL<<62;
 constexpr std::size_t max_slots=508;
+constexpr std::uint64_t compressed_slot=1ULL<<31;
 constexpr std::size_t prefix_offset=payload+256*8;
-const char* page_magic(bool v3,bool v4=false) {return v4?"MVDBPG04":v3?"MVDBPG03":"MVDBPG02";}
-const char* root_magic(bool v3,bool v4=false) {return v4?"MVDBRT04":v3?"MVDBRT03":"MVDBRT02";}
+const char* page_magic(bool v3,bool v4=false,bool v5=false) {return v5?"MVDBPG05":v4?"MVDBPG04":v3?"MVDBPG03":"MVDBPG02";}
+const char* root_magic(bool v3,bool v4=false,bool v5=false) {return v5?"MVDBRT05":v4?"MVDBRT04":v3?"MVDBRT03":"MVDBRT02";}
 enum : std::uint32_t { branch=1, overflow=2, packed=3 };
 std::atomic<std::uint64_t> next_owner{1};
 [[noreturn]] void io_error(const char* action) {throw std::system_error(errno,std::generic_category(),action);}
@@ -56,7 +58,16 @@ void write_page(int fd,const Page& p,std::uint64_t id) {
     done+=static_cast<std::size_t>(n);
   }
 }
-Page read_raw(int fd,std::uint64_t id) {
+void discard_clean_pages(int fd,off_t offset,off_t length) noexcept {
+#if defined(POSIX_FADV_DONTNEED)
+  // Advisory: failure/ignore changes only performance. Owned page copies and
+  // CRC checks remain authoritative; dirty pages are never relied on as freed.
+  (void)::posix_fadvise(fd,offset,length,POSIX_FADV_DONTNEED);
+#else
+  (void)fd;(void)offset;(void)length;
+#endif
+}
+Page read_raw(int fd,std::uint64_t id,bool discard=false) {
   Page p{}; std::size_t done=0; auto start=byte_offset(id);
   while(done<p.size()) {
     ssize_t n;
@@ -69,6 +80,7 @@ Page read_raw(int fd,std::uint64_t id) {
     if(n==0) corrupt();
     done+=static_cast<std::size_t>(n);
   }
+  if(discard)discard_clean_pages(fd,start,page_size);
   return p;
 }
 void sync_fd(int fd) {
@@ -82,16 +94,16 @@ void sync_fd(int fd) {
     if(errno!=EINTR) io_error("fsync");
   }
 }
-Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent,bool v3,bool v4=false) {
-  Page p{}; std::memcpy(p.data(),root_magic(v3,v4),8);
+Page make_root(std::uint64_t generation,std::uint64_t root,std::uint64_t extent,bool v3,bool v4=false,bool v5=false) {
+  Page p{}; std::memcpy(p.data(),root_magic(v3,v4,v5),8);
   encode(p,8,generation); encode(p,16,root); encode(p,24,extent);
   encode(p,32,page_checksum(p,32),4); return p;
 }
 bool valid_root(const Page& p,std::uint64_t complete_pages) {
-  if((std::memcmp(p.data(),root_magic(false),8)!=0 && std::memcmp(p.data(),root_magic(true),8)!=0 && std::memcmp(p.data(),root_magic(true,true),8)!=0) || decode(p,32,4)!=page_checksum(p,32)) return false;
+  if((std::memcmp(p.data(),root_magic(false),8)!=0 && std::memcmp(p.data(),root_magic(true),8)!=0 && std::memcmp(p.data(),root_magic(true,true),8)!=0 && std::memcmp(p.data(),root_magic(true,true,true),8)!=0) || decode(p,32,4)!=page_checksum(p,32)) return false;
   auto root=decode(p,16), extent=decode(p,24);
   if((root&branch_tag) && !(root&packed_tag)) {
-    if(p[7]!='4' || (root&511)>=max_slots)return false;
+    if((p[7]!='4' && p[7]!='5') || (root&511)>=max_slots)return false;
     root=(root&~branch_tag)>>9;
   }
   return extent>=2 && extent<=complete_pages && (root==0 || (root>=2 && root<extent));
@@ -144,7 +156,8 @@ struct Store::Impl {
   int fd=-1;
   std::uint64_t durable_root=0, root=0, generation=0, next_page=2, epoch=0;
   const std::uint64_t owner=next_owner.fetch_add(1);
-  bool active=false, poisoned=false, format3=false, packing=false, compressed_paths=false, packed_branches=true;
+  bool active=false, poisoned=false, format3=false, packing=false, compressed_paths=false, packed_branches=true, compact_values=false;
+  bool discard_file_cache=false;
   CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered;
   std::size_t scan_budget=0;
   // Only the entry array is allocated, lazily on the first packed reference.
@@ -197,9 +210,16 @@ struct Store::Impl {
     const auto page=read(physical(ref,false,true),packed);
     const auto slot=ref&511;
     if(slot>=decode(page,12,4))corrupt();
-    const auto start=decode(page,payload+slot*8,4),length=decode(page,payload+slot*8+4,4);
-    if(length<50 || page[static_cast<std::size_t>(start)]!=1)corrupt();
-    const auto* bytes=page.data()+start;
+    const auto start=decode(page,payload+slot*8,4),encoded_length=decode(page,payload+slot*8+4,4);
+    const auto stored_length=encoded_length&~compressed_slot;
+    std::string decoded;
+    const unsigned char* bytes=page.data()+start;std::size_t length=stored_length;
+    if(encoded_length&compressed_slot) {
+      if(!compact_values)corrupt();
+      decoded=detail::unpack_bytes({reinterpret_cast<const char*>(bytes),length},2098);
+      bytes=reinterpret_cast<const unsigned char*>(decoded.data());length=decoded.size();
+    }
+    if(length<50 || bytes[0]!=1)corrupt();
     const auto depth=bytes[1];if(depth>15)corrupt();
     auto result=empty_page(branch,depth);
     std::copy_n(bytes+2,16,result.data()+prefix_offset);
@@ -246,8 +266,8 @@ struct Store::Impl {
       }
     }
     const bool packed_node=type==branch && (id&branch_tag)!=0;
-    auto p=packed_node?unpack_branch(id):read_raw(fd,id);
-    if(std::memcmp(p.data(),page_magic(format3,compressed_paths),8)!=0 || (!packed_node && decode(p,24,4)!=page_checksum(p,24)) || decode(p,8,4)!=type) corrupt();
+    auto p=packed_node?unpack_branch(id):read_raw(fd,id,discard_file_cache);
+    if(std::memcmp(p.data(),page_magic(format3,compressed_paths,compact_values),8)!=0 || (!packed_node && decode(p,24,4)!=page_checksum(p,24)) || decode(p,8,4)!=type) corrupt();
     if(type==branch) {
       const auto stored_depth=decode(p,12,4);
       if(stored_depth>15 || (compressed_paths?stored_depth<depth:stored_depth!=depth)) corrupt();
@@ -272,7 +292,9 @@ struct Store::Impl {
       auto end=page_size;
       const auto directory_end=payload+count*8;
       for(std::size_t i=0;i<count;++i) {
-        const auto offset=decode(p,payload+i*8,4), length=decode(p,payload+i*8+4,4);
+        const auto offset=decode(p,payload+i*8,4), encoded_length=decode(p,payload+i*8+4,4);
+        if((encoded_length&compressed_slot) && !compact_values)corrupt();
+        const auto length=encoded_length&~compressed_slot;
         // Canonical tightly packed reverse payload: validates every slot before admission.
         if(offset<directory_end || offset>end || length!=end-offset)corrupt();
         end=offset;
@@ -296,12 +318,13 @@ struct Store::Impl {
     auto id=next_page; if(id&(packed_tag|branch_tag))throw std::length_error("database page address exhausted"); encode(p,24,page_checksum(p,24),4); write_page(fd,p,id); ++next_page; return id;
   }
   Page empty_page(std::uint32_t type,unsigned used) const {
-    Page p{}; std::memcpy(p.data(),page_magic(format3,compressed_paths),8); encode(p,8,type,4); encode(p,12,used,4); return p;
+    Page p{}; std::memcpy(p.data(),page_magic(format3,compressed_paths,compact_values),8); encode(p,8,type,4); encode(p,12,used,4); return p;
   }
   struct NodeBatch {
     Impl& store;
     Page page;
     std::size_t slots=0,end=page_size;
+    std::string compressed;
     explicit NodeBatch(Impl& owner):store(owner),page(owner.empty_page(packed,0)) {}
     bool enabled() const {return store.compressed_paths && store.packed_branches;}
     void flush() {
@@ -319,11 +342,15 @@ struct Store::Impl {
         for(unsigned n=0;n<8;++n)bytes[length+n]=static_cast<unsigned char>(child>>(8*n));
         length+=8;
       }
+      std::string_view contents(reinterpret_cast<const char*>(bytes.data()),length);
+      const bool encoded=store.compact_values && detail::pack_bytes(contents,compressed);
+      if(encoded)contents=compressed;
+      length=contents.size();
       if(slots==max_slots || end<payload+(slots+1)*8+length)flush();
       if(store.next_page>((branch_tag-1)>>9))throw std::length_error("node page address exhausted");
       const auto reference=branch_tag|(store.next_page<<9)|slots;
-      end-=length;std::copy_n(bytes.data(),length,page.data()+end);
-      encode(page,payload+slots*8,end,4);encode(page,payload+slots*8+4,length,4);++slots;
+      end-=length;std::memcpy(page.data()+end,contents.data(),length);
+      encode(page,payload+slots*8,end,4);encode(page,payload+slots*8+4,length|(encoded?compressed_slot:0),4);++slots;
       return reference;
     }
   };
@@ -358,8 +385,14 @@ struct Store::Impl {
       auto contents=[&](const Page& page) {
         if(index>=decode(page,12,4))corrupt();
         // Return an owned string before the visitor can mutate or recursively scan.
-        return std::string(reinterpret_cast<const char*>(page.data()+decode(page,payload+index*8,4)),
-                           static_cast<std::size_t>(decode(page,payload+index*8+4,4)));
+        const auto length=decode(page,payload+index*8+4,4);
+        const std::string_view encoded(reinterpret_cast<const char*>(page.data()+decode(page,payload+index*8,4)),
+                                       static_cast<std::size_t>(length&~compressed_slot));
+        if(length&compressed_slot) {
+          if(!compact_values)corrupt();
+          return detail::unpack_bytes(encoded);
+        }
+        return std::string(encoded);
       };
       if(slot && slot->id==page_id) {
         profile::detail::count(&profile::Snapshot::page_read_packed);
@@ -480,7 +513,7 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache):impl_(std::make_unique<Impl>()) {
   if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
     throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
@@ -495,11 +528,13 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.commit_sync_policy=commit_sync_policy;
   s.compressed_paths=compressed_paths;
   s.packed_branches=packed_branches;
+  s.compact_values=compact_values && compressed_paths && packed_values;
+  s.discard_file_cache=discard_file_cache;
   s.packing=packed_values; s.format3=packed_values||compressed_paths; s.scan_budget=packed_scan_cache_bytes;
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created) {
-    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3,s.compressed_paths),0); sync_fd(s.fd);
+    write_page(s.fd,Page{},1); write_page(s.fd,make_root(0,0,2,s.format3,s.compressed_paths,s.compact_values),0); sync_fd(s.fd);
     auto parent=path.parent_path(); if(parent.empty()) parent=".";
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
     if(directory<0) io_error("open database directory");
@@ -515,7 +550,8 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   if(!av && !bv) corrupt();
   if(av && bv && a[7]!=b[7])corrupt();
   const auto& selected=(!av || (bv && decode(b,8)>decode(a,8)))?b:a;
-  s.compressed_paths=selected[7]=='4';
+  s.compact_values=selected[7]=='5';
+  s.compressed_paths=selected[7]=='4'||s.compact_values;
   s.format3=selected[7]=='3'||s.compressed_paths;
   s.generation=decode(selected,8); s.root=s.durable_root=decode(selected,16);
   // Validate the published root against its durable extent. Trailing uncommitted pages are ignored.
@@ -584,9 +620,10 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   std::size_t slot_count=0, payload_start=page_size;
   std::vector<std::size_t> pending;
   pending.reserve(sorted.size());
+  std::string compressed;
   auto flush=[&] {
     if(!slot_count)return;
-    if(slot_count==1) {
+    if(slot_count==1 && !(decode(packed_page,payload+4,4)&compressed_slot)) {
       // Packing one record saves no pages; retain the simpler ordinary read path.
       const std::string_view contents(reinterpret_cast<const char*>(packed_page.data()+payload_start),
                                       page_size-payload_start);
@@ -603,15 +640,17 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   for(const auto* mutation:sorted) {
     replacements.push_back({ordered_key(mutation->key),0});
     if(!mutation->value)continue;
-    const auto& contents=*mutation->value;
+    std::string_view contents=*mutation->value;
     if(!state.format3 || !state.packing || contents.size()>chunk_size-8) {
       replacements.back().value=state.write_value(contents); continue;
     }
+    const bool encoded=state.compact_values && detail::pack_bytes(contents,compressed);
+    if(encoded)contents=compressed;
     const auto directory_end=payload+(slot_count+1)*8;
     if(slot_count==max_slots || payload_start<directory_end || contents.size()>payload_start-directory_end)flush();
     payload_start-=contents.size();
     encode(packed_page,payload+slot_count*8,payload_start,4);
-    encode(packed_page,payload+slot_count*8+4,contents.size(),4);
+    encode(packed_page,payload+slot_count*8+4,contents.size()|(encoded?compressed_slot:0),4);
     if(!contents.empty())std::memcpy(packed_page.data()+payload_start,contents.data(),contents.size());
     pending.push_back(replacements.size()-1); ++slot_count;
   }
@@ -631,9 +670,10 @@ void Store::commit() {
     // Every reachable COW page has already completed its write loop. Ordered
     // additionally persists these dependencies before publishing the root.
     if(s.commit_sync_policy==CommitSyncPolicy::Ordered)sync_fd(s.fd);
-    write_page(s.fd,make_root(next,s.root,s.next_page,s.format3,s.compressed_paths),next%2);
+    write_page(s.fd,make_root(next,s.root,s.next_page,s.format3,s.compressed_paths,s.compact_values),next%2);
     // Both modes acknowledge only after the root AND its data have been synced.
     sync_fd(s.fd);
+    if(s.discard_file_cache)discard_clean_pages(s.fd,0,0);
   } catch(...) {s.poisoned=true; throw;}
   s.generation=next; s.durable_root=s.root; s.active=false;
 }

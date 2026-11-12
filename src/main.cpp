@@ -166,6 +166,8 @@ int serve(minivectordb::Database& db) {
 }
 } // namespace
 int main(int argc, char** argv) {
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
     try {
         const auto args = arguments(argc, argv);
         std::filesystem::create_directories(args.directory);

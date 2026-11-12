@@ -93,17 +93,17 @@ void prefix_edges(Store& store) {
   // The next trace opens this committed empty root, then reinserts rows.
   store.commit();verify(store,model);
 }
-void trace(const fs::path& path,bool packed,bool compressed,bool packed_nodes) {
+void trace(const fs::path& path,bool packed,bool compressed,bool packed_nodes,bool compact_values=false) {
   const std::array<std::uint64_t,8> spaces{0,1,255,256,UINT64_C(1)<<24,UINT64_C(1)<<40,UINT64_C(1)<<56,UINT64_MAX};
   const std::array<std::int64_t,8> boundaries{INT64_MIN,INT64_MAX,-1,0,1,256,65536,INT64_C(1)<<40};
   std::mt19937_64 rng(0xd531e78);
   Model committed;for(auto space:spaces)committed[space]={};
   {
-    Store store(path,0,packed,0,0,CommitSyncPolicy::ProcessCrash,compressed,packed_nodes);
+    Store store(path,0,packed,0,0,CommitSyncPolicy::ProcessCrash,compressed,packed_nodes,compact_values);
     prefix_edges(store);
   }
   for(unsigned round=0;round<6;++round) {
-    Store store(path,round%2?65536:0,packed,0,round%2?65536:0,CommitSyncPolicy::ProcessCrash,compressed,packed_nodes);
+    Store store(path,round%2?65536:0,packed,0,round%2?65536:0,CommitSyncPolicy::ProcessCrash,compressed,packed_nodes,compact_values);
     verify(store,committed);store.begin();const auto saved=store.savepoint();auto working=committed;
     for(auto space:spaces) {
       // replace() must split old prefixes at namespace bytes and at either sign,
@@ -155,6 +155,7 @@ int main(int argc,char** argv) {
     trace(dir/"format03.db",true,false,false);
     trace(dir/"format04-unpacked.db",true,true,false);
     trace(dir/"format04-packed.db",true,true,true);
+    trace(dir/"format05-packed.db",true,true,true,true);
     std::cout<<"PASS mutation-prefix model: four formats/layouts, all 16 first-fork bytes, empty/delete/reinsert, prefix replacement/restore, single and reversed batch writes, sign/namespace boundaries, restore/rollback/reopen\n";
     // An optional fresh directory preserves deterministic database bytes so the
     // same probe can be linked against the old core and compared with cmp.

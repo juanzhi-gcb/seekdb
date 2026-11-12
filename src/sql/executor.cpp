@@ -146,7 +146,7 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     bool active=false,poisoned=false,busy=false;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches),options(std::move(settings)) {
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -195,14 +195,12 @@ namespace minivectordb {
             });
           } else {
             snapshot.start(s.id,0,options.scan_snapshot_bytes,options.reuse_scan_snapshot_buffer);
-            if(snapshot.building()) {
-              store.scan_in(s.id,[&](auto key,auto bytes) {
-                callback(key,bytes);
-                // Retain every validated row, including rows rejected by this filter.
-                snapshot.append(key,bytes);
-              });
-              snapshot.finish();
-            } else store.scan_in(s.id,callback);
+            store.scan_in(s.id,[&](auto key,auto bytes) {
+              callback(key,bytes);
+              // Count every validated row during probation, including rejects.
+              snapshot.append(key,bytes);
+            });
+            snapshot.finish();
           }
         } catch(...) {
           snapshot.clear();throw;
@@ -400,7 +398,7 @@ namespace minivectordb {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            }
+            } else typed_snapshot.observe_row();
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);

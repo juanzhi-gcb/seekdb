@@ -31,6 +31,8 @@ struct Options {
   // Format04 omits unary radix pages; existing format02/03 files stay unchanged.
   bool compressed_paths = true;
   bool packed_branches = true; // Format04 sparse nodes share immutable pages.
+  bool compact_values = true; // Format05 bounded lossless packed payloads.
+  bool discard_file_cache = false; // Optional advisory release after owned copies/fsync.
   std::size_t index_cache_bytes = 1024 * 1024; // Bounded validated INDEX pages; zero disables.
   bool packed_values = true; // Format03 for new files; existing format is preserved.
   std::size_t packed_scan_cache_bytes = 0; // Optional per-scan packed memo; data buffer is the default.
@@ -38,10 +40,10 @@ struct Options {
   // Bounded paired traversal; false retains the reference index/get path.
   // True also detects missing index entries that the reference scan cannot see.
   bool paired_index_scan = true;
-  // Owned raw rows from one fully validated scan; capped at 8MiB. Indexed and
-  // unindexed scans share this arena. Zero disables both; object/allocator overhead
-  // is outside the arena budget.
-  std::size_t scan_snapshot_bytes = 8 * 1024 * 1024;
+  // Shared validated-snapshot budget: numeric columns cap at 64 MiB, raw rows
+  // at 8 MiB. Complete probation scans size numeric arrays to actual rows.
+  // Zero disables both; allocator and bounded preparation scratch are separate.
+  std::size_t scan_snapshot_bytes = 64 * 1024 * 1024;
   // Allow unindexed exact TopK scans to use the shared snapshot.
   bool table_scan_snapshot = true;
   // Retain the arena across invalidation; every rebuild still validates all rows.
@@ -69,7 +71,7 @@ struct Options {
   bool wide_simd_vector_kernel = true;
   // Experimental exact rejection by a conservatively bounded FP32 estimate.
   // Remaining candidates always use the original double distance kernel.
-  bool bounded_fp32_screen = false;
+  bool bounded_fp32_screen = true;
   bool certified_block_scan = true; // Skip redundant predicates only with an exact interval proof.
   // Transpose completed numeric snapshots once, within the existing arena.
   // AVX2 queries can then read candidate blocks without per-query repacking.

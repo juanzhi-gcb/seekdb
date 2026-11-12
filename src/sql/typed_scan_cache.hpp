@@ -19,6 +19,8 @@ class TypedScanCache {
     std::uint64_t table_=0,index_=0;
     std::size_t column_=0,dimension_=0,scalar_count_=0,primary_slot_=0;
     std::size_t budget_=0,capacity_=0,count_=0,bytes_=0;
+    std::size_t probation_rows_=0;
+    bool probation_complete_=false;
     std::unique_ptr<float[]> vectors_;
     std::unique_ptr<std::int64_t[]> scalars_;
     std::unique_ptr<std::size_t[]> columns_;
@@ -33,13 +35,14 @@ class TypedScanCache {
     void release() noexcept {
         vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
+        probation_rows_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
     void cluster() {
-        // Bounded preparation only: <=64 KiB row permutation and <=64 KiB
+        // Bounded preparation only: <=512 KiB row permutation and <=64 KiB
         // single-row scratch. Allocate everything before changing any payload.
-        if(count_<2 || count_>16384)return;
+        if(count_<2 || count_>131072)return;
         if(dimension_*sizeof(float)+scalar_count_*sizeof(std::int64_t)+text_width_>65536)return;
         std::size_t slot=0;
         while(slot<scalar_count_ && slot==primary_slot_)++slot;
@@ -102,6 +105,7 @@ class TypedScanCache {
 public:
     void invalidate() noexcept {
         count_=0;table_=index_=0;state_=State::empty;transposed_=false;
+        probation_rows_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=0;text_column_.reset();}
@@ -112,7 +116,7 @@ public:
     }
     void start(const Schema& schema,std::uint64_t index,std::size_t column,
                std::size_t budget,bool reuse=true,std::optional<std::size_t> text_column={}) {
-        budget=std::min(budget,std::size_t(8*1024*1024));
+        budget=std::min(budget,std::size_t(64*1024*1024));
         const std::size_t dimension=schema.columns.at(column).extent;
         std::size_t scalar_count=0;
         for(const auto& field:schema.columns)if(field.type==ColumnType::Bigint)++scalar_count;
@@ -140,8 +144,15 @@ public:
                sizeof(std::uint32_t)>budget-metadata-row_bytes-text_width_) {refuse();return;}
             row_bytes+=text_width_+sizeof(std::uint32_t);
         }
-        const auto capacity=(budget-metadata)/row_bytes;
+        auto capacity=(budget-metadata)/row_bytes;
         if(!capacity) {refuse();return;}
+        // Reuse the existing, overflow-checked layout calculation. Counting
+        // the complete probation scan needs no vector/text materialization.
+        if(probation_complete_ && probation_rows_>capacity) {refuse();return;}
+        // Only a completed scan of this exact immutable identity proves the
+        // needed row count. Keep the hard budget, but allocate for actual rows.
+        if(probation_complete_)capacity=std::min(capacity,std::max(std::size_t(1),probation_rows_));
+        if(vectors_ && capacity_<capacity)release();
         if(!vectors_) {
             try {
                 vectors_.reset(new float[capacity*dimension]);
@@ -162,6 +173,10 @@ public:
         }
         count_=0;state_=State::building;
     }
+    void observe_row() noexcept {
+        if(state_==State::probation && probation_rows_!=std::numeric_limits<std::size_t>::max())
+            ++probation_rows_;
+    }
     template<class ScalarGetter> void append(std::span<const float> vector,ScalarGetter&& scalar,
                                              std::string_view text={}) {
         if(!building())return;
@@ -178,6 +193,7 @@ public:
         ++count_;
     }
     void finish(bool transpose=false,bool clustered=false) noexcept {
+        if(state_==State::probation) {probation_complete_=true;return;}
         if(!building())return;
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains

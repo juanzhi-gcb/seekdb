@@ -15,6 +15,7 @@ bool compressed_paths=false;
 #define CHECK(x) do { if(!(x)) throw std::runtime_error(std::string(#x)+" line "+std::to_string(__LINE__)); } while(false)
 Options options(const fs::path& dir,bool selective=true,bool batch=true,bool packed=true,std::size_t cache=262144) {
   Options o; o.sort_directory=dir/"sort"; o.memory_budget_bytes=4096; o.compressed_paths=compressed_paths;
+  o.compact_values=false; // This suite explicitly verifies format03/04 compatibility.
   o.selective_decode=selective; o.batch_writes=batch; o.packed_values=packed; o.packed_scan_cache_bytes=cache; return o;
 }
 std::vector<Row> query(Database& db,const std::string& sql) {
