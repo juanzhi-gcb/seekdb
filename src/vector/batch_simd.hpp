@@ -3,9 +3,17 @@
 #if defined(__x86_64__) && defined(__GNUC__)
 #include <immintrin.h>
 namespace minivectordb::detail {
-__attribute__((target("avx512f,no-fma")))
+// AVX-512F itself admits 512-bit FMA: disabling the separate FMA target bit
+// does not prohibit contraction. Keep an independently compiled strict body.
+#if !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+__attribute__((target("avx512f,no-fma"),noinline))
 inline void batch16_transposed_avx512(const float* batch,const float* query,
                                     std::size_t n,double* out) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
     auto s0=_mm512_setzero_pd(),s1=s0;
     for(std::size_t d=0;d<n;++d) {
         const auto q=_mm512_set1_pd(static_cast<double>(query[d]));
