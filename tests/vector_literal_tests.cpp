@@ -1,4 +1,5 @@
 #include "../src/sql/sql.hpp"
+#include <cfenv>
 #include <bit>
 #include <iostream>
 #include <optional>
@@ -14,7 +15,10 @@ Outcome bind(const std::string& text,std::uint32_t dimension,bool fast) {
   return out;
 }
 void same(const std::string& text,std::uint32_t dimension) {
-  const auto a=bind(text,dimension,false),b=bind(text,dimension,true);
+  const auto a=bind(text,dimension,false);
+  const auto b=bind(text,dimension,true),again=bind(text,dimension,true);
+  CHECK(b.error==again.error&&b.message==again.message&&b.values.size()==again.values.size());
+  for(std::size_t i=0;i<b.values.size();++i)CHECK(std::bit_cast<std::uint32_t>(b.values[i])==std::bit_cast<std::uint32_t>(again.values[i]));
   CHECK(a.error==b.error);CHECK(a.message==b.message);CHECK(a.values.size()==b.values.size());
   for(std::size_t i=0;i<a.values.size();++i)
     CHECK(std::bit_cast<std::uint32_t>(a.values[i])==std::bit_cast<std::uint32_t>(b.values[i]));
@@ -78,6 +82,12 @@ int main() {
       const std::string replacements="[],+-.eE/ *@0129\t\n";
       text[rng()%text.size()]=replacements[rng()%replacements.size()];same(text,count);
     }
-    std::cout<<"PASS vector literal differential: 6150 cases, bitwise values and identical errors; 256 quoted-token round trips and 256 unterminated checks\n";return 0;
+    for(int mode:{FE_TONEAREST,FE_UPWARD,FE_DOWNWARD,FE_TOWARDZERO}) {
+      const auto old=std::fegetround();CHECK(std::fesetround(mode)==0);
+      for(const auto& text:cases)for(auto dimension:{1u,2u,5u})same(text,dimension);
+      CHECK(std::fesetround(old)==0);
+    }
+    for(unsigned i=0;i<20000;++i){const auto token=std::to_string(double(int(rng()%8193)-4096)/128);same("["+token+",-0]",2);}
+    std::cout<<"PASS short decimals, repeated values and four rounding modes; vector literal differential: 6150 cases, bitwise values and identical errors; 256 quoted-token round trips and 256 unterminated checks\n";return 0;
   }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
