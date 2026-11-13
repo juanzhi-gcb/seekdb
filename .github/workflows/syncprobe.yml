@@ -1,7 +1,7 @@
 name: Native durable sync screen
 on:
   push:
-    branches: ['codex/syncprobe-6000-20261113']
+    branches: ['codex/reserveprobe-6000-20261113']
 permissions:
   contents: read
 jobs:
