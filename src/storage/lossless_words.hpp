@@ -42,18 +42,19 @@ inline std::string inverse_half(std::string_view s,std::size_t expected){
 }
 struct FixedPlan {unsigned width=0;int power=0;};
 inline FixedPlan plan(const std::array<std::uint16_t,32>& values,unsigned count) {
- int power=100;
- for(unsigned i=0;i<count;++i){const auto h=values[i];if(h==0x8000U)return {};unsigned m=h&1023,e=(h>>10)&31;if(e)m|=1024;if(!m)continue;const auto zeros=std::countr_zero(m);power=std::min(power,(e?int(e)-25:-24)+int(zeros));}
- if(power==100)return {1,0};
- unsigned width=1;
- for(unsigned i=0;i<count;++i){const auto h=values[i];unsigned m=h&1023,e=(h>>10)&31;if(e)m|=1024;if(!m)continue;const int shift=(e?int(e)-25:-24)-power;
-  std::uint64_t magnitude;
-  if(shift>=0){if(shift>15)return {};magnitude=std::uint64_t(m)<<shift;}
-  else {if(-shift>31||(m&((1U<<(-shift))-1)))return {};magnitude=m>>(-shift);}
-  if(magnitude>16384)return {};
-  const auto significant=(h&0x8000U)?magnitude-1:magnitude;
-  width=std::max(width,unsigned(std::bit_width(significant))+1);
+ int power=100,high=-100;
+ for(unsigned i=0;i<count;++i){
+  const auto h=values[i];if(h==0x8000U)return {};
+  unsigned m=h&1023,e=(h>>10)&31;if(e)m|=1024;if(!m)continue;
+  const int base=e?int(e)-25:-24;
+  power=std::min(power,base+int(std::countr_zero(m)));
+  // A signed negative power of two needs one fewer magnitude bit. This
+  // exponent comparison is exact and avoids a second block conversion pass.
+  const int top=base+int(std::bit_width(m))-1;
+  high=std::max(high,top-((h&0x8000U)&&std::has_single_bit(m)?1:0));
  }
+ if(power==100)return {1,0};
+ const unsigned width=unsigned(std::max(1,high-power+2));
  if(width>15 || 2+(width*count+7)/8>=2*count)return {};
  return {width,power};
 }
