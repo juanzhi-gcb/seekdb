@@ -14,7 +14,7 @@ inline int choose_alignment(std::string_view s){
  for(unsigned a=0;a<4&&a<=s.size();++a){
   std::size_t count=0;int balance=0;std::uint32_t tag=0;
   const auto words=(s.size()-a)/4,samples=std::min(words,std::size_t(16));
-  for(std::size_t i=0;i<samples;++i){const auto p=a+4*(i*words/samples);const float value=word(s.data()+p);
+  for(std::size_t i=0;i<samples;++i){const auto p=a+4*(words>=16?(i*words)>>4:i);const float value=word(s.data()+p);
    if(minivectordb::detail::half_exact(value)){
     ++count;const auto bits=std::bit_cast<std::uint32_t>(value);
     if(!balance){tag=bits;balance=1;}else balance+=bits==tag?1:-1;
@@ -60,7 +60,7 @@ inline FixedPlan plan(const std::array<std::uint16_t,32>& values,unsigned count)
 }
 // Compact layout version 1: per-32-word bitmap, optional exact shared binary
 // scale, then unchanged raw escapes. No approximation and no row dependencies.
-inline bool transform(std::string_view s,std::string& out) {
+template<class Output> inline bool transform_to(std::string_view s,Output& out,std::string& fallback,bool& used_fallback) {
  const int chosen=choose_alignment(s);if(chosen<0)return false;const unsigned align=unsigned(chosen);std::size_t half_size=1+align+(s.size()-align)%4;
  out.clear();out.reserve(s.size());out+=char(align|4);out.append(s.substr(0,align));std::size_t p=align;
  while(p+4<=s.size()){
@@ -76,7 +76,24 @@ inline bool transform(std::string_view s,std::string& out) {
   }
   for(unsigned i=0;i<n;++i)if(!(mask&(1U<<i)))out.append(s.substr(p+i*4,4));p+=n*4;
  }
- out.append(s.substr(p));if(out.size()>=half_size)return transform_half(s,out);return out.size()+8<s.size();
+ out.append(s.substr(p));if(out.size()>=half_size){used_fallback=true;return transform_half(s,fallback);}return out.size()+8<s.size();
+}
+// At most 4064 raw bytes + 32 blocks * 6 control bytes + 4 alignment
+// bytes. Writes are checked against the fixed bound before touching memory.
+struct CompactWriter {
+ std::array<char,4260> bytes;std::size_t used=0;
+ void clear(){used=0;}void reserve(std::size_t){}
+ std::size_t size()const{return used;}
+ void append(const char* p,std::size_t n){if(n>bytes.size()-used)throw std::length_error("compact writer bound");std::memcpy(bytes.data()+used,p,n);used+=n;}
+ void append(std::string_view s){append(s.data(),s.size());}
+ void operator+=(char c){if(used==bytes.size())throw std::length_error("compact writer bound");bytes[used++]=c;}
+};
+inline bool transform(std::string_view s,std::string& out) {
+ bool fallback=false;
+ if(s.size()>4064)return transform_to(s,out,out,fallback);
+ CompactWriter buffer;const auto ok=transform_to(s,buffer,out,fallback);
+ if(!fallback)out.assign(buffer.bytes.data(),buffer.size());
+ return ok;
 }
 inline std::string inverse(std::string_view s,std::size_t expected) {
  if(s.empty()||static_cast<unsigned char>(s[0])<4)return inverse_half(s,expected);
