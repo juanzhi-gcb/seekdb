@@ -23,7 +23,7 @@ class Int8BoundCache {
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
   double scale_=1,max_error_=0;
-  bool uniform_=false,row_major_=false;
+  bool uniform_=false,row_major_=false,clipped_=false;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -203,7 +203,7 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();origins_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;
+    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;clipped_=false;
   }
   std::size_t bytes() const noexcept {return rows_*(padded_+16)+(origins_?dimension_*sizeof(double):0);}
   bool uniform() const noexcept {return uniform_;}
@@ -224,7 +224,7 @@ public:
     // of 17 spread-out rows avoids making one exceptional row the origin.
     // This only chooses a code origin; every row is still validated and its
     // full representation error is bounded, including subtraction rounding.
-    double sampled_maximum=0;
+    double sampled_maximum=0,origin_square=0,spread_square=0;
     for(std::size_t d=0;d<dimension;++d) {
       std::array<double,17> sample{};
       for(std::size_t i=0;i<sample.size();++i) {
@@ -235,6 +235,18 @@ public:
       for(double& x:sample)x=std::abs(x-origins_[d]);
       std::nth_element(sample.begin(),sample.begin()+15,sample.end());
       sampled_maximum=std::max(sampled_maximum,sample[15]);
+      origin_square+=origins_[d]*origins_[d];spread_square+=sample[15]*sample[15];
+    }
+    // Translate only when the sampled common component dominates variation.
+    // The choice changes acceleration only; all rows retain rigorous errors.
+    if(!(origin_square>4*spread_square)) {
+      std::fill_n(origins_.get(),dimension,0.0);sampled_maximum=0;
+      for(std::size_t d=0;d<dimension;++d) {
+        std::array<double,17> sample{};
+        for(std::size_t i=0;i<sample.size();++i)sample[i]=std::abs(double(get(i*(count-1)/(sample.size()-1),d)));
+        std::nth_element(sample.begin(),sample.begin()+15,sample.end());
+        sampled_maximum=std::max(sampled_maximum,sample[15]);
+      }
     }
     double maximum=0;
     for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
@@ -244,7 +256,9 @@ public:
     }
     // Saturation is allowed only in auxiliary codes: the complete error of
     // every row, including clipped components, is retained in its bound.
-    const double scale=sampled_maximum>0?sampled_maximum/127:1;
+    clipped_=maximum>4*sampled_maximum;
+    const double selected_maximum=clipped_?sampled_maximum:maximum;
+    const double scale=selected_maximum>0?selected_maximum/127:1;
     (void)maximum; // All rows were still scanned for finite input validation.
     try {
       codes_=std::make_unique<std::int8_t[]>(count*padded);
@@ -322,6 +336,7 @@ public:
   // Downward margins dominate binary64 sqrt/add/multiply rounding. Bounds
   // remain advisory: only a strict separation from the exact radius prunes.
   bool certified_lower_scores(const Query& query,std::size_t row,std::array<double,16>& scores) const {
+    if(!clipped_)return lower_scores(query,row,scores);
     if(!lower_scores(query,row,scores))return false;
     for(std::size_t lane=0;lane<16;++lane) {
       const double root=std::sqrt(std::max(0.0,scores[lane]))*(1-0x1p-45);
@@ -332,6 +347,7 @@ public:
     return true;
   }
   double certified_exclusion_upper(const Query& query,double radius) const {
+    if(!clipped_)return exclusion_upper(query,radius);
     if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();
     const double upper=up(up(radius)*(1+double(dimension_+8)*0x1p-48));
     return up(upper*upper*(1+0x1p-45));
