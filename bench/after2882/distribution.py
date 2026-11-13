@@ -5,8 +5,9 @@ import run_general_contract as general
 linux=general.linux
 continuous=general.continuous
 def generate(rows,queries,seed,filter_type):
-    w=continuous(rows,queries,seed,filter_type)
     shape=os.environ['MVDB_SCREEN_SHAPE']
+    if shape=='grid':return general.original(rows,queries,seed,filter_type)
+    w=continuous(rows,queries,seed,filter_type)
     rng=random.Random(seed^0x61e5)
     def f32(x): return struct.unpack('<f',struct.pack('<f',x))[0]
     if shape=='positive':
