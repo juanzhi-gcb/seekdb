@@ -20,7 +20,7 @@ uname -a > "$result/kernel.txt"
 limits=(--network none --cpus 2 --memory 2g --memory-swap 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges)
 docker build --target test -t mvdb:certified-base-test "$scratch/baseline" > "$result/build-base-test.log" 2>&1
 docker build --target test -t mvdb:certified-test . > "$result/build-test.log" 2>&1
-docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:certified-test > "$result/ctest.log" 2>&1
+if ! docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:certified-test > "$result/ctest.log" 2>&1; then cat "$result/ctest.log"; exit 1; fi
 docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/certified_kernel_probe.cpp,dst=/probe.cpp,readonly" --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh mvdb:certified-test -c 'g++ -std=c++20 -O3 -ffp-contract=off -I/src/include -I/src/src /probe.cpp /build/libminivectordb_core.a -o /out/kernel' > "$result/kernel-build.log" 2>&1
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/probe,dst=/out,readonly" --entrypoint /out/kernel mvdb:certified-test > "$result/kernel.jsonl" 2> "$result/kernel.stderr.log"
 

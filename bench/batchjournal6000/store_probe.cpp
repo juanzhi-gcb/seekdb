@@ -20,6 +20,12 @@ int main(int argc,char**argv){try{if(argc!=3)throw std::runtime_error("path corp
  for(auto budget:{std::size_t(0),std::size_t(65536)}){
   const auto start=std::chrono::steady_clock::now();Store db(argv[1],0,false,262144,budget,CommitSyncPolicy::ProcessCrash,false,true,false,false,false,false,true);const auto ready=std::chrono::steady_clock::now();
   for(bool cold:{false,true}){
+   // Explicitly warm every row for the warm phase. Otherwise the preceding
+   // DONTNEED screen leaves data cold, and J10's more expensive recovery warms
+   // payload pages incidentally while J11 reads only batch directories.
+   const auto warm_start=std::chrono::steady_clock::now();const auto warm_io=io_counter("read_bytes:");
+   if(!cold)for(const auto& [key,want]:expected){const auto got=db.get_in(7,key);if(!got||*got!=want)throw std::runtime_error("warmup mismatch");}
+   const auto warm_end=std::chrono::steady_clock::now();const auto warm_read=io_counter("read_bytes:")-warm_io;
    const auto count=cold?256U:10000U;std::mt19937 keys(445);std::uint64_t hash=0;
    const int fd=::open(argv[1],O_RDONLY);if(fd<0)throw std::runtime_error("open for read advice");
    const auto calls=io_counter("syscr:"),read_bytes=io_counter("rchar:"),physical=io_counter("read_bytes:");const auto begin=std::chrono::steady_clock::now();
@@ -30,7 +36,7 @@ int main(int argc,char**argv){try{if(argc!=3)throw std::runtime_error("path corp
     const auto key=std::int64_t(keys()%expected.size());const auto value=db.get_in(7,key);if(!value||*value!=expected.at(key))throw std::runtime_error("random read mismatch");hash+=value->size()+static_cast<unsigned char>((*value)[23]);
    }
    const auto end=std::chrono::steady_clock::now();::close(fd);
-   std::cout<<"{\"scope\":\"storage-only random access, advice may be ignored; not official T/B/M\",\"cache_bytes\":"<<budget<<",\"cold_advice\":"<<cold<<",\"reads\":"<<count<<",\"read_ms\":"<<ms(begin,end)<<",\"reopen_ms\":"<<ms(start,ready)<<",\"syscr\":"<<io_counter("syscr:")-calls<<",\"rchar\":"<<io_counter("rchar:")-read_bytes<<",\"physical_read_bytes\":"<<io_counter("read_bytes:")-physical<<",\"hash\":"<<hash<<"}\n";
+   std::cout<<"{\"scope\":\"storage-only random access, advice may be ignored; not official T/B/M\",\"cache_bytes\":"<<budget<<",\"cold_advice\":"<<cold<<",\"reads\":"<<count<<",\"read_ms\":"<<ms(begin,end)<<",\"warmup_ms\":"<<ms(warm_start,warm_end)<<",\"warmup_physical_read_bytes\":"<<warm_read<<",\"reopen_ms\":"<<ms(start,ready)<<",\"syscr\":"<<io_counter("syscr:")-calls<<",\"rchar\":"<<io_counter("rchar:")-read_bytes<<",\"physical_read_bytes\":"<<io_counter("read_bytes:")-physical<<",\"hash\":"<<hash<<"}\n";
   }
  }
  std::cout<<"{\"apply_ms\":"<<apply_ms<<",\"commit_ms\":"<<commit_ms<<",\"rows\":"<<expected.size()<<",\"file_bytes\":"<<std::filesystem::file_size(argv[1])<<"}\n";

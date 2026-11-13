@@ -358,7 +358,9 @@ void batch_sql(const std::filesystem::path& dir) {
     CHECK(d.execute("DELETE FROM t WHERE id<150").affected_rows==150);
     d.execute("COMMIT");
   }
-  CHECK(growth[1]==growth[0]);
+  // J11 stores shared metadata for actual batches; logical oracles above and
+  // after reopen remain identical for batched and single-row execution.
+  CHECK(growth[1]<growth[0]);
   for(auto name:{"batch.db","single.db"}) {
     Database d(dir/name);
     CHECK(q(d,"SELECT id FROM t WHERE n=2").rows.size()==150);
