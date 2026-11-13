@@ -289,3 +289,8 @@ add_test(NAME core_lossless_words COMMAND lossless_words_tests)
 add_executable(stream_cache_tests tests/stream_cache_tests.cpp)
 target_link_libraries(stream_cache_tests PRIVATE minivectordb_core)
 add_test(NAME core_stream_cache COMMAND stream_cache_tests)
+
+add_executable(writeback_tests tests/writeback_tests.cpp)
+target_link_libraries(writeback_tests PRIVATE minivectordb_core)
+target_link_options(writeback_tests PRIVATE -Wl,--wrap=sync_file_range)
+add_test(NAME core_writeback COMMAND writeback_tests)

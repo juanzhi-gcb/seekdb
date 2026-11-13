@@ -25,6 +25,7 @@ class JournalStore {
   struct Cached {Page bytes{};std::uint64_t page=UINT64_MAX;std::size_t size=0;};
   int fd_;
   CommitSyncPolicy policy_;
+  bool writeback_supported_=true;
   std::uint64_t head_=0,durable_=0,end_=8192,generation_=0;
   std::map<Key,std::uint64_t> index_;
   std::size_t empty_entries_=0;
@@ -37,13 +38,35 @@ class JournalStore {
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
   void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
+  // Advisory pipeline only: final fsync and Ordered's earlier barrier remain.
+  // Submit completed pages while later append chunks are being copied. Never
+  // write back the root pages, nor claim durability from this Linux-only hint.
+  void start_writeback(std::uint64_t offset,std::uint64_t length){
+#if defined(__linux__) && defined(SYNC_FILE_RANGE_WRITE)
+    if(!writeback_supported_ || !length)return;
+    const int saved=errno;
+    for(;;){
+      if(::sync_file_range(fd_,off_t(offset),off_t(length),SYNC_FILE_RANGE_WRITE)==0){errno=saved;return;}
+      if(errno==EINTR)continue;
+      if(errno==ENOSYS || errno==EOPNOTSUPP || errno==EINVAL || errno==EPERM){writeback_supported_=false;errno=saved;return;}
+      io("journal writeback");
+    }
+#else
+    (void)offset;(void)length;
+#endif
+  }
   void write(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
     if(!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
     std::size_t done=0;
+    const bool pipeline=offset>=8192 && bytes.size()>=32768;
+    std::uint64_t submitted=(offset+4095)/4096*4096;
     while(done<bytes.size()){
-      ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pwrite);n=::pwrite(fd_,bytes.data()+done,bytes.size()-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
+      ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pwrite);n=::pwrite(fd_,bytes.data()+done,pipeline?std::min(bytes.size()-done,std::size_t(16384)):bytes.size()-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
       if(n<0){if(errno==EINTR)continue;io("journal pwrite");}if(!n)throw std::runtime_error("zero-length journal pwrite");done+=std::size_t(n);
+      if(pipeline){const auto through=(offset+done)/4096*4096;
+        if(through>submitted && through-submitted>=12288){start_writeback(submitted,through-submitted);submitted=through;}
+      }
     }
   }
   std::size_t read_some(std::uint64_t offset,unsigned char* output,std::size_t size)const{

@@ -1,7 +1,7 @@
 name: Certified exact candidate search versus a24
 on:
   push:
-    branches: ['codex/scale-stream-6000-20261113']
+    branches: ['codex/writeback-6000-20261113']
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: certified-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: certified-results/
+          path: |
+            certified-results/
+            writeback-results/
           if-no-files-found: error
           retention-days: 14

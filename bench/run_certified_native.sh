@@ -56,3 +56,5 @@ for p in sorted(root.glob('*/summary.json')):
 print(json.dumps({k:v['ratios'] for k,v in out['comparisons'].items()}))
 for path in root.rglob('oracle-input.bin'):path.unlink()
 PY
+
+bash bench/writeback6000/run.sh
