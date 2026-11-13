@@ -91,17 +91,29 @@ class JournalStore {
     // write or I/O error while appending this batch. Published offsets change
     // only after the caller has written the complete batch successfully.
     const auto old=pending_;const auto old_block=pending_block_;const auto old_used=pending_used_;const bool old_valid=pending_valid_;
+    // Coalesce completed frames into bounded sequential writes. The final
+    // frame remains pending for its commit footer; no barrier is removed.
+    std::array<unsigned char,64*1024> staged;
+    std::size_t staged_size=0;std::uint64_t staged_at=0;
+    const auto flush_staged=[&]{if(staged_size){write_raw(staged_at,{reinterpret_cast<const char*>(staged.data()),staged_size});staged_size=0;}};
     try {
       std::size_t done=0;
       while(done<bytes.size()){
         const auto position=offset+done,block=(position-8192)/frame_payload;
         const auto inside=std::size_t((position-8192)%frame_payload);
-        if(pending_valid_ && pending_block_!=block){if(pending_used_!=frame_payload)throw std::logic_error("framed append gap");flush_frame(false,0);pending_valid_=false;}
+        if(pending_valid_ && pending_block_!=block){
+          if(pending_used_!=frame_payload)throw std::logic_error("framed append gap");
+          const auto p=frame(false,0);invalidate_block(pending_block_);
+          if(!staged_size)staged_at=physical(pending_block_);
+          std::memcpy(staged.data()+staged_size,p.data(),p.size());staged_size+=p.size();
+          if(staged_size==staged.size())flush_staged();pending_valid_=false;
+        }
         if(!pending_valid_){if(inside)throw std::logic_error("framed append prefix");pending_={};pending_block_=block;pending_used_=0;pending_valid_=true;}
         if(inside!=pending_used_)throw std::logic_error("framed append overlap");
         const auto n=std::min(bytes.size()-done,frame_payload-inside);
         std::memcpy(pending_.data()+inside,bytes.data()+done,n);pending_used_+=n;done+=n;invalidate_block(block);
       }
+      flush_staged();
     }catch(...){pending_=old;pending_block_=old_block;pending_used_=old_used;pending_valid_=old_valid;for(auto& c:cache_)c.page=UINT64_MAX;throw;}
   }
   std::string read_framed(std::uint64_t offset,std::size_t size)const{
