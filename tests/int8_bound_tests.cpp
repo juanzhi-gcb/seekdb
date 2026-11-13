@@ -67,6 +67,9 @@ void run_case(std::size_t dimension,unsigned mode) {
       for(std::size_t lane=0;lane<16;++lane) {
         double sum=0;for(std::size_t d=0;d<dimension;++d){double delta=double(q[d])-double(data[r+lane].value[d]);sum+=delta*delta;}
         const double distance=std::sqrt(sum);
+        std::array<double,16> certificate_lower{};
+        CHECK(cache.certified_lower_scores(encoded,r,certificate_lower));
+        CHECK(certificate_lower[lane]<=cache.certified_exclusion_upper(encoded,distance));
         for(double radius:{distance,std::nextafter(distance,INFINITY)}) {
           const auto portable=cache.survivors(encoded,radius,values,65535,false);
           CHECK(portable&(1U<<lane));

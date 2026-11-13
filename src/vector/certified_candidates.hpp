@@ -28,7 +28,7 @@ std::optional<std::vector<Neighbor>> certified_candidates(
   double excluded=std::numeric_limits<double>::infinity();
   for(std::size_t block=begin/16*16;block<end;block+=16){
     std::array<double,16> lower{};
-    if(!cache.lower_scores(encoded,block,lower))lower.fill(-std::numeric_limits<double>::infinity());
+    if(!cache.certified_lower_scores(encoded,block,lower))lower.fill(-std::numeric_limits<double>::infinity());
     if(entire_interval && block>=begin && end-block>=16 && candidates.size()==capacity) {
       const double minimum=*std::min_element(lower.begin(),lower.end());
       if(std::isfinite(minimum) && minimum>=candidates.front().lower) {
@@ -55,7 +55,7 @@ std::optional<std::vector<Neighbor>> certified_candidates(
     if(exact.size()<k){exact.push_back(item);std::push_heap(exact.begin(),exact.end(),better);}
     else if(better(item,exact.front())){std::pop_heap(exact.begin(),exact.end(),better);exact.back()=item;std::push_heap(exact.begin(),exact.end(),better);}
     const auto pending=i+1<candidates.size()?std::min(excluded,candidates[i+1].lower):excluded;
-    if(exact.size()==k&&pending>cache.exclusion_upper(encoded,exact.front().distance)){
+    if(exact.size()==k&&pending>cache.certified_exclusion_upper(encoded,exact.front().distance)){
       std::sort(exact.begin(),exact.end(),better);stats.certified=true;return exact;
     }
   }

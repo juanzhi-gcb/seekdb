@@ -224,6 +224,7 @@ public:
     // of 17 spread-out rows avoids making one exceptional row the origin.
     // This only chooses a code origin; every row is still validated and its
     // full representation error is bounded, including subtraction rounding.
+    double sampled_maximum=0;
     for(std::size_t d=0;d<dimension;++d) {
       std::array<double,17> sample{};
       for(std::size_t i=0;i<sample.size();++i) {
@@ -231,6 +232,9 @@ public:
         if(!std::isfinite(sample[i])){clear();return false;}
       }
       std::nth_element(sample.begin(),sample.begin()+8,sample.end());origins_[d]=sample[8];
+      for(double& x:sample)x=std::abs(x-origins_[d]);
+      std::nth_element(sample.begin(),sample.begin()+15,sample.end());
+      sampled_maximum=std::max(sampled_maximum,sample[15]);
     }
     double maximum=0;
     for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
@@ -238,7 +242,10 @@ public:
       if(!std::isfinite(value)){clear();return false;}
       maximum=std::max(maximum,std::abs(value));
     }
-    const double scale=maximum>0?maximum/127:1;
+    // Saturation is allowed only in auxiliary codes: the complete error of
+    // every row, including clipped components, is retained in its bound.
+    const double scale=sampled_maximum>0?sampled_maximum/127:1;
+    (void)maximum; // All rows were still scanned for finite input validation.
     try {
       codes_=std::make_unique<std::int8_t[]>(count*padded);
       norms_=std::make_unique<std::int32_t[]>(count);
@@ -309,6 +316,25 @@ public:
       scores[lane]=(a+b-c)-(std::abs(a)+std::abs(b)+std::abs(c))*0x1p-45;
     }
     return true;
+  }
+  // Convert each quantized squared bound into a lower bound on the true
+  // squared distance, using that row's error rather than the worst outlier.
+  // Downward margins dominate binary64 sqrt/add/multiply rounding. Bounds
+  // remain advisory: only a strict separation from the exact radius prunes.
+  bool certified_lower_scores(const Query& query,std::size_t row,std::array<double,16>& scores) const {
+    if(!lower_scores(query,row,scores))return false;
+    for(std::size_t lane=0;lane<16;++lane) {
+      const double root=std::sqrt(std::max(0.0,scores[lane]))*(1-0x1p-45);
+      const double error=(query.error+errors_[row+lane])*(1+0x1p-45);
+      const double lower=std::max(0.0,root-error);
+      scores[lane]=lower*lower*(1-0x1p-45);
+    }
+    return true;
+  }
+  double certified_exclusion_upper(const Query& query,double radius) const {
+    if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();
+    const double upper=up(up(radius)*(1+double(dimension_+8)*0x1p-48));
+    return up(upper*upper*(1+0x1p-45));
   }
   double exclusion_upper(const Query& query,double radius) const {
     if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();
