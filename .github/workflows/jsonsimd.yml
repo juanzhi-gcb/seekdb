@@ -1,0 +1,26 @@
+name: Wider JSON and UTF8 scans isolated native screen
+on:
+  push:
+    branches: ['codex/json-wide-screen-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash bench/jsonsimd6000/screen.sh
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: jsonwide-${{ matrix.replica }}-${{ github.run_id }}
+          path: jsonwide-results/
+          retention-days: 14

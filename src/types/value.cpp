@@ -23,6 +23,13 @@ std::size_t validate_text_impl(std::string_view text,std::size_t limit) {
   std::size_t count=0;
   for(std::size_t i=0;i<text.size();) {
     if constexpr(AsciiBlocks) {
+      if(text.size()-i>=32) {
+        std::uint64_t words[4];std::memcpy(words,text.data()+i,32);
+        if(((words[0]|words[1]|words[2]|words[3])&UINT64_C(0x8080808080808080))==0) {
+          if(limit-count<32)throw std::invalid_argument("text exceeds scalar length");
+          count+=32;i+=32;continue;
+        }
+      }
       if(text.size()-i>=sizeof(std::uint64_t)) {
         std::uint64_t block;
         std::memcpy(&block,text.data()+i,sizeof(block));

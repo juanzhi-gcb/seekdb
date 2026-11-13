@@ -22,6 +22,11 @@ int main(){try{
         std::string s(33,'a');s[position]=char(first);s[position+1]=char(second);
         CHECK(jsonl::plain_string_prefix(s)==scalar_prefix(s));++cases;
       }
+    for(unsigned offset=0;offset<32;++offset)for(unsigned at=0;at<129;++at)for(unsigned byte=0;byte<256;++byte){
+      std::string storage(offset+160,'a');storage[offset+at]=char(byte);
+      const auto view=std::string_view(storage).substr(offset,129);
+      CHECK(jsonl::plain_string_prefix(view)==scalar_prefix(view));++cases;
+    }
     for(unsigned trial=0;trial<2000;++trial) {
         std::string s;for(unsigned i=0,n=random()%4096;i<n;++i)s+=char(random());
         CHECK(jsonl::plain_string_prefix(s)==scalar_prefix(s));
