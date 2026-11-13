@@ -12,9 +12,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
-#if defined(__linux__)
-#include <linux/falloc.h>
-#endif
 
 namespace minivectordb::detail {
 // Format J08: immutable records linked to a previous logical head, plus two
