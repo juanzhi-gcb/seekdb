@@ -7,6 +7,7 @@
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include "../vector/validated.hpp"
+#include "../vector/certified_candidates.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
@@ -328,6 +329,24 @@ namespace minivectordb {
       bool certified=false;
       const auto [begin,end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
+      if(options.certified_candidate_search && !profile::enabled()) {
+        if(const auto* integer=typed_snapshot.integer_cache()) {
+          detail::CandidateStats attempt;
+          try {
+            auto result=detail::certified_candidates(*integer,*e.query,begin,end,k,
+              [&](std::size_t row){return certified||typed_matches(row,predicates);},
+              [&](std::size_t row){return typed_snapshot.key(row);},
+              [&](std::size_t row,std::vector<float>& scratch){return typed_snapshot.read_vector(row,scratch);},attempt);
+            if(result) {
+              info.rows_examined+=attempt.examined;info.typed_rows_examined+=attempt.examined;
+              info.distances_computed+=attempt.selected;
+              if(bulk)info.certified_blocks_examined+=(end+15)/16-begin/16;
+              info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
+              return result;
+            }
+          } catch(const std::bad_alloc&) {} // Optional bounded query scratch.
+        }
+      }
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {

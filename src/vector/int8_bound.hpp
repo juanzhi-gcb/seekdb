@@ -22,7 +22,7 @@ class Int8BoundCache {
   std::unique_ptr<double[]> errors_;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
-  double scale_=1;
+  double scale_=1,max_error_=0;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -164,7 +164,7 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;
+    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;
   }
   std::size_t bytes() const noexcept {return rows_*(padded_+16);}
   bool ready() const noexcept {return source_!=nullptr;}
@@ -197,6 +197,7 @@ public:
       }
       norms_[block+lane]=norm;sums_[block+lane]=sum;
       errors_[block+lane]=finish_error(error,padded);
+      max_error_=std::max(max_error_,errors_[block+lane]);
     }
     rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();return true;
   }
@@ -216,6 +217,32 @@ public:
     result.error=finish_error(square,padded_);
     result.norm_scaled=static_cast<double>(norm)*result.scale*result.scale;
     result.valid=true;return result;
+  }
+  // Conservative lower score in quantized squared-distance space. The same
+  // three-term rounding allowance as survivors(); caller supplies a block row
+  // in this immutable cache, not an address of temporary decoded vectors.
+  bool lower_scores(const Query& query,std::size_t row,std::array<double,16>& scores) const {
+    if(!query.valid||row%16||row>=rows_)return false;
+    std::array<std::int32_t,16> dots{};
+#if defined(__x86_64__) && defined(__GNUC__)
+    if(native_vnni())dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
+    else
+#endif
+    for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
+      for(std::size_t k=0;k<4;++k)dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
+    const auto ss=scale_*scale_,cross=2*scale_*query.scale;
+    for(std::size_t lane=0;lane<16;++lane){const auto dot=dots[lane]-128*sums_[row+lane];
+      const double a=query.norm_scaled,b=double(norms_[row+lane])*ss,c=cross*double(dot);
+      scores[lane]=(a+b-c)-(std::abs(a)+std::abs(b)+std::abs(c))*0x1p-45;
+    }
+    return true;
+  }
+  double exclusion_upper(const Query& query,double radius) const {
+    if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();
+    const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
+    const double bound=up(expanded+max_error_);
+    return up(bound*bound*(1+0x1p-45));
   }
   std::uint16_t survivors(const Query& query,double radius,std::span<const float> original,
                           std::uint16_t mask,bool native=true,bool force_avx2=false) const {
