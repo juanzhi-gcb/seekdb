@@ -11,6 +11,10 @@
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
+#if defined(__linux__)
+#include <linux/falloc.h>
+#endif
 
 namespace minivectordb::detail {
 // Format J08: immutable records linked to a previous logical head, plus two
@@ -23,6 +27,8 @@ class JournalStore {
   struct Undo {Key key;std::uint64_t value,head;};
   struct Cached {Page bytes{};std::uint64_t page=UINT64_MAX;std::size_t size=0;};
   int fd_;
+  std::uint64_t reserved_end_=0;
+  bool reserve_supported_=true;
   CommitSyncPolicy policy_;
   std::uint64_t head_=0,durable_=0,end_=8192,generation_=0;
   std::map<Key,std::uint64_t> index_;
@@ -36,8 +42,29 @@ class JournalStore {
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
   void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
+  // Reserve bounded future append extents without changing the logical file
+  // length, bytes or commit ordering. A failed advisory reservation falls back
+  // to ordinary writes; it never makes a failed write or sync appear successful.
+  void reserve_append(std::uint64_t offset,std::size_t size) noexcept {
+#if defined(__linux__)
+    if(!reserve_supported_ || offset<8192 || !size)return;
+    const auto limit=std::uint64_t(std::numeric_limits<off_t>::max());
+    if(offset>limit || size>limit-offset)return;
+    const auto end=offset+size; if(end<=reserved_end_)return;
+    constexpr std::uint64_t chunk=2*1024*1024;
+    const auto start=offset&~std::uint64_t(4095);
+    const auto rounded=end<=limit-(chunk-1)?((end+chunk-1)/chunk)*chunk:end;
+    const int saved=errno;
+    int result;do{result=::fallocate(fd_,FALLOC_FL_KEEP_SIZE,off_t(start),off_t(rounded-start));}while(result<0&&errno==EINTR);
+    if(result==0)reserved_end_=rounded;else reserve_supported_=false;
+    errno=saved;
+#else
+    (void)offset;(void)size;
+#endif
+  }
   void write(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
+    reserve_append(offset,bytes.size());
     if(!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
     std::size_t done=0;
     while(done<bytes.size()){
