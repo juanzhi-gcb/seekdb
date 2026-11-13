@@ -1,7 +1,7 @@
-name: Independent-row J11 journal versus a24 and J10
+name: J11 with wider text scans versus a24 and J11
 on:
   push:
-    branches: ['codex/batch-journal-6000-20261113']
+    branches: ['codex/j11-json-6000-20261113']
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,17 +18,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Paired journal random access screen
-        run: bash bench/batchjournal6000/screen.sh
       - name: Native correctness and complete T B M against a24 and direct parent
         run: bash bench/run_certified_native.sh
       - name: Preserve samples and failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: batchjournal-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: j11json-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            batchjournal-results/
             certified-results/
             parent-results/
           if-no-files-found: error

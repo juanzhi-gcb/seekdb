@@ -8,7 +8,7 @@ mkdir "$scratch/parent" "$scratch/data" "$scratch/tmp"
 chmod 0777 "$scratch/data" "$scratch/tmp"
 export TMPDIR="$scratch/tmp" PYTHONDONTWRITEBYTECODE=1
 trap 'sudo chown -R "$(id -u):$(id -g)" "$result"' EXIT
-parent=334ebac19109af2423f2621489cb778749b885a3
+parent=aed099071e6e1221bfd320f6f99bf4ce677e7cc3
 git archive "$parent" Dockerfile CMakeLists.txt src include tests | tar -x -C "$scratch/parent"
 docker build -t mvdb:direct-parent "$scratch/parent" > "$result/build-parent.log" 2>&1
 base=$(docker image inspect --format '{{.Id}}' mvdb:direct-parent)
@@ -24,7 +24,7 @@ done
 sudo python3 - "$result" <<'PY'
 import json,sys
 from pathlib import Path
-root=Path(sys.argv[1]);out={'scope':'Uninstrumented native candidate vs frontend J10 parent; not official score','comparisons':{}}
+root=Path(sys.argv[1]);out={'scope':'Uninstrumented native candidate vs J11 direct parent; not official score','comparisons':{}}
 for p in sorted(root.glob('*/summary.json')):
  d=json.loads(p.read_text());ratios={}
  for phase in ['write/unindexed','query/unindexed','query/indexed']:
