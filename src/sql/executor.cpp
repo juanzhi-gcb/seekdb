@@ -414,7 +414,7 @@ namespace minivectordb {
           }
         } else {
           projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column,options.certified_candidate_search&&detail::Int8BoundCache::available());
           if(typed_snapshot.refused())projection_snapshot.clear();
           else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
@@ -428,8 +428,11 @@ namespace minivectordb {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            } else typed_snapshot.observe_row(text_column?
-                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
+            } else {
+              if(typed_snapshot.observing_half()&&vector.empty())vector=row.vector_for_distance(e.column,scratch);
+              typed_snapshot.observe_row(text_column?
+                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{},vector);
+            }
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);

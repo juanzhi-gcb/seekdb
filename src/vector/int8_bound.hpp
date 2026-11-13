@@ -210,14 +210,20 @@ public:
   bool ready() const noexcept {return rows_!=0;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
              std::size_t budget,bool portable_test=false,bool row_major=false) {
+    if(!dimension || rows/16*16>source.size()/dimension) {clear();return false;}
+    const bool result=build_values(rows,dimension,budget,[&](std::size_t row,std::size_t d){return source[row_major?row*dimension+d:(row/16*16)*dimension+d*16+row%16];},portable_test);
+    if(result){source_=source.data();row_major_=row_major;}return result;
+  }
+  template<class Getter> bool build_values(std::size_t rows,std::size_t dimension,std::size_t budget,Getter&& get,bool portable_test=false) {
     clear();
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
-    if(count>budget/(padded+16) || count>source.size()/dimension)return false;
+    if(count>budget/(padded+16))return false;
     double maximum=0;
-    for(std::size_t i=0;i<count*dimension;++i) {
-      if(!std::isfinite(source[i]))return false;
-      maximum=std::max(maximum,std::abs(static_cast<double>(source[i])));
+    for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
+      const double value=get(row,d);
+      if(!std::isfinite(value))return false;
+      maximum=std::max(maximum,std::abs(value));
     }
     const double scale=maximum>0?maximum/127:1;
     try {
@@ -230,8 +236,8 @@ public:
     for(std::size_t block=0;block<count;block+=16)for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
-        const double value=d<dimension?source[row_major?(block+lane)*dimension+d:block*dimension+d*16+lane]:0;
-        if(d<dimension && value!=source[row_major?d:d*16])uniform_=false;
+        const double value=d<dimension?get(block+lane,d):0;
+        if(d<dimension && value!=get(0,d))uniform_=false;
         const int code=quantize(value,scale);
         codes_[block*padded+d/4*64+lane*4+d%4]=static_cast<std::int8_t>(code);
         norm+=code*code;sum+=code;
@@ -241,7 +247,7 @@ public:
       errors_[block+lane]=finish_error(error,padded);
       max_error_=std::max(max_error_,errors_[block+lane]);
     }
-    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();row_major_=row_major;return true;
+    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=nullptr;row_major_=true;return true;
   }
   Query query(std::span<const float> vector) const {
     Query result;

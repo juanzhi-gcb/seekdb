@@ -277,3 +277,7 @@ target_link_libraries(certified_candidates_tests PRIVATE minivectordb_core)
 set_source_files_properties(tests/certified_candidates_tests.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 add_test(NAME core_certified_candidates COMMAND certified_candidates_tests)
 set_tests_properties(core_certified_candidates PROPERTIES TIMEOUT 180)
+
+add_executable(lossless_half_tests tests/lossless_half_tests.cpp)
+target_link_libraries(lossless_half_tests PRIVATE minivectordb_core)
+add_test(NAME core_lossless_half COMMAND lossless_half_tests)

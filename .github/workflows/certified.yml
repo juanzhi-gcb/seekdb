@@ -1,7 +1,7 @@
 name: Certified exact candidate search versus a24
 on:
   push:
-    branches: ['codex/certified-rowwise-20261113']
+    branches: ['codex/certified-halfcache-20261113']
   workflow_dispatch:
 permissions:
   contents: read
