@@ -37,6 +37,44 @@ class Int8BoundCache {
     return up(std::sqrt(square)*(1+static_cast<double>(n+8)*0x1p-48));
   }
 #if defined(__x86_64__) && defined(__GNUC__)
+#if !defined(__clang__)
+  __attribute__((optimize("fp-contract=off")))
+#endif
+  __attribute__((target("avx512f,avx2"),noinline))
+  static void lower_native(const std::int32_t* dots,const std::int32_t* norms,
+      const std::int32_t* sums,double ss,double cross,double a,double* output) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+    const auto zero=_mm512_setzero_pd();
+    for(unsigned lane=0;lane<16;lane+=8){
+      const auto dot=_mm256_sub_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(dots+lane)),_mm256_slli_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(sums+lane)),7));
+      const auto b=_mm512_mul_pd(_mm512_cvtepi32_pd(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(norms+lane))),_mm512_set1_pd(ss));
+      const auto c=_mm512_mul_pd(_mm512_cvtepi32_pd(dot),_mm512_set1_pd(cross));
+      const auto ab=_mm512_add_pd(_mm512_set1_pd(a),b);
+      const auto allowance=_mm512_mul_pd(_mm512_add_pd(ab,_mm512_max_pd(c,_mm512_sub_pd(zero,c))),_mm512_set1_pd(0x1p-45));
+      _mm512_storeu_pd(output+lane,_mm512_sub_pd(_mm512_sub_pd(ab,c),allowance));
+    }
+  }
+#if !defined(__clang__)
+  __attribute__((optimize("fp-contract=off")))
+#endif
+  __attribute__((target("avx2"),noinline))
+  static void lower_avx2(const std::int32_t* dots,const std::int32_t* norms,
+      const std::int32_t* sums,double ss,double cross,double a,double* output) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+    const auto zero=_mm256_setzero_pd();
+    for(unsigned lane=0;lane<16;lane+=4){
+      const auto dot=_mm_sub_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(dots+lane)),_mm_slli_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(sums+lane)),7));
+      const auto b=_mm256_mul_pd(_mm256_cvtepi32_pd(_mm_loadu_si128(reinterpret_cast<const __m128i*>(norms+lane))),_mm256_set1_pd(ss));
+      const auto c=_mm256_mul_pd(_mm256_cvtepi32_pd(dot),_mm256_set1_pd(cross));
+      const auto ab=_mm256_add_pd(_mm256_set1_pd(a),b);
+      const auto allowance=_mm256_mul_pd(_mm256_add_pd(ab,_mm256_max_pd(c,_mm256_sub_pd(zero,c))),_mm256_set1_pd(0x1p-45));
+      _mm256_storeu_pd(output+lane,_mm256_sub_pd(_mm256_sub_pd(ab,c),allowance));
+    }
+  }
   __attribute__((target("avx2"),noinline))
   static void dots_avx2(const std::int8_t* codes,const std::uint32_t* query,
                        const std::int32_t* sums,std::size_t groups,std::int32_t* output) {
@@ -232,6 +270,10 @@ public:
     for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
       for(std::size_t k=0;k<4;++k)dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
     const auto ss=scale_*scale_,cross=2*scale_*query.scale;
+#if defined(__x86_64__) && defined(__GNUC__)
+    if(native_vnni()){lower_native(dots.data(),norms_.get()+row,sums_.get()+row,ss,cross,query.norm_scaled,scores.data());return true;}
+    if(available()){lower_avx2(dots.data(),norms_.get()+row,sums_.get()+row,ss,cross,query.norm_scaled,scores.data());return true;}
+#endif
     for(std::size_t lane=0;lane<16;++lane){const auto dot=dots[lane]-128*sums_[row+lane];
       const double a=query.norm_scaled,b=double(norms_[row+lane])*ss,c=cross*double(dot);
       scores[lane]=(a+b-c)-(std::abs(a)+std::abs(b)+std::abs(c))*0x1p-45;

@@ -15,7 +15,11 @@ std::optional<std::vector<Neighbor>> certified_candidates(
     std::size_t end,std::size_t k,Predicate&& predicate,KeyAt&& key_at,
     VectorAt&& vector_at,CandidateStats& stats) {
   stats={};
-  constexpr std::size_t capacity=64;
+#ifndef MVDB_CERTIFICATE_CAPACITY
+#define MVDB_CERTIFICATE_CAPACITY 64
+#endif
+  constexpr std::size_t capacity=MVDB_CERTIFICATE_CAPACITY;
+  static_assert(capacity>=16 && capacity<=256);
   if(!k||k>16||end<begin||end-begin<256)return {};
   const auto encoded=cache.query(query);if(!encoded.valid)return {};
   struct Candidate {double lower;std::size_t row;};
