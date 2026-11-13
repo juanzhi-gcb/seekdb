@@ -414,7 +414,7 @@ namespace minivectordb {
           }
         } else {
           projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column,options.certified_candidate_search&&detail::Int8BoundCache::available());
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column,options.certified_candidate_search&&transpose_enabled()&&options.bounded_int8_screen&&options.bounded_fp32_screen&&options.wide_simd_vector_kernel);
           if(typed_snapshot.refused())projection_snapshot.clear();
           else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
@@ -455,7 +455,7 @@ namespace minivectordb {
             });
           }
           projection_snapshot.finish();
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search);
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search&&transpose_enabled());
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());

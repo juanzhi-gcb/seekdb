@@ -1,0 +1,26 @@
+name: Lossless compact word codec screening
+on:
+  push:
+    branches: ['codex/certified-halfcache-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Native codec CPU density and random decode
+        run: |
+          mkdir codec-results
+          lscpu > codec-results/lscpu.txt
+          g++ -std=c++20 -O3 -Isrc -Iinclude bench/half_words_probe.cpp -o codec-results/probe
+          codec-results/probe | tee codec-results/paired.jsonl
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: halfwords-${{ github.run_id }}
+          path: codec-results/
+          retention-days: 14

@@ -161,7 +161,7 @@ public:
         if(!dimension || !scalar_count || scalar_count>budget/sizeof(std::size_t)) {refuse();return;}
         const auto metadata=scalar_count*sizeof(std::size_t);
         if(dimension>(budget-metadata)/sizeof(float)) {refuse();return;}
-        const bool use_half=allow_half_&&probation_complete_&&probation_half_exact_;
+        const bool use_half=allow_half_&&probation_complete_&&probation_rows_>=256&&probation_half_exact_;
         const auto vector_bytes=dimension*(use_half?sizeof(std::uint16_t):sizeof(float));
         if(scalar_count>(budget-metadata-vector_bytes)/sizeof(std::int64_t)) {refuse();return;}
         auto row_bytes=vector_bytes+scalar_count*sizeof(std::int64_t);
@@ -239,7 +239,7 @@ public:
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
-        const bool rowwise=rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
+        const bool rowwise=count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
         if(!half_ && !rowwise && transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
