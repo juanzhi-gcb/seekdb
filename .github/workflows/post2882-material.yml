@@ -16,6 +16,8 @@ jobs:
       - name: Verify measured runtime is unchanged
         run: git diff --exit-code eab4636980f4e5878e7c793298423e1772716a68 HEAD -- src include tests Dockerfile CMakeLists.txt
       - name: Verify entry points, quotations and exact archived provenance
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
           python3 -B scripts/check-submission-contract.py --check-internal-references
           python3 -B scripts/check-learning-material.py
