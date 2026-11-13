@@ -323,7 +323,8 @@ namespace minivectordb {
         const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
         const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
       if(!transpose_enabled() || !typed_eligible(s,b,index) ||
-          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) ||
+          (!typed_snapshot.transposed() && (!options.certified_candidate_search||!typed_snapshot.integer_cache())) ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
       bool certified=false;
@@ -336,7 +337,7 @@ namespace minivectordb {
             auto result=detail::certified_candidates(*integer,*e.query,begin,end,k,
               [&](std::size_t row){return certified||typed_matches(row,predicates);},
               [&](std::size_t row){return typed_snapshot.key(row);},
-              [&](std::size_t row,std::vector<float>& scratch){return typed_snapshot.read_vector(row,scratch);},attempt);
+              [&](std::size_t row,std::vector<float>& scratch){return typed_snapshot.read_vector(row,scratch);},attempt,certified);
             if(result) {
               info.rows_examined+=attempt.examined;info.typed_rows_examined+=attempt.examined;
               info.distances_computed+=attempt.selected;
@@ -347,6 +348,7 @@ namespace minivectordb {
           } catch(const std::bad_alloc&) {} // Optional bounded query scratch.
         }
       }
+      if(!typed_snapshot.transposed())return {};
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -450,7 +452,7 @@ namespace minivectordb {
             });
           }
           projection_snapshot.finish();
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());

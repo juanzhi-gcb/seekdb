@@ -23,7 +23,7 @@ class Int8BoundCache {
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
   double scale_=1,max_error_=0;
-  bool uniform_=false;
+  bool uniform_=false,row_major_=false;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -203,13 +203,13 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;
+    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;
   }
   std::size_t bytes() const noexcept {return rows_*(padded_+16);}
   bool uniform() const noexcept {return uniform_;}
-  bool ready() const noexcept {return source_!=nullptr;}
+  bool ready() const noexcept {return rows_!=0;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
-             std::size_t budget,bool portable_test=false) {
+             std::size_t budget,bool portable_test=false,bool row_major=false) {
     clear();
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
@@ -230,8 +230,8 @@ public:
     for(std::size_t block=0;block<count;block+=16)for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
-        const double value=d<dimension?source[block*dimension+d*16+lane]:0;
-        if(d<dimension && value!=source[d*16])uniform_=false;
+        const double value=d<dimension?source[row_major?(block+lane)*dimension+d:block*dimension+d*16+lane]:0;
+        if(d<dimension && value!=source[row_major?d:d*16])uniform_=false;
         const int code=quantize(value,scale);
         codes_[block*padded+d/4*64+lane*4+d%4]=static_cast<std::int8_t>(code);
         norm+=code*code;sum+=code;
@@ -241,7 +241,7 @@ public:
       errors_[block+lane]=finish_error(error,padded);
       max_error_=std::max(max_error_,errors_[block+lane]);
     }
-    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();return true;
+    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();row_major_=row_major;return true;
   }
   Query query(std::span<const float> vector) const {
     Query result;
@@ -292,7 +292,7 @@ public:
   }
   std::uint16_t survivors(const Query& query,double radius,std::span<const float> original,
                           std::uint16_t mask,bool native=true,bool force_avx2=false) const {
-    if(!query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
+    if(row_major_ || !query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
     const auto begin=reinterpret_cast<std::uintptr_t>(source_);
     const auto address=reinterpret_cast<std::uintptr_t>(original.data());
     if(address<begin || address-begin>=rows_*dimension_*sizeof(float))return mask;

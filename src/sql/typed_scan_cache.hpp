@@ -215,13 +215,14 @@ public:
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
     }
-    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false) noexcept {
+    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false,bool rowwise_candidates=false) noexcept {
         if(state_==State::probation) {probation_complete_=true;return;}
         if(!building())return;
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
-        if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
+        const bool rowwise=rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
+        if(!rowwise && transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
                 for(std::size_t row=0;row+16<=count_;row+=16) {
@@ -234,8 +235,8 @@ public:
                 transposed_=true;
             } catch(const std::bad_alloc&) {} // No block changed before allocation.
         }
-        if(integer_screen && transposed_ && budget_>bytes_)
-            integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_);
+        if(integer_screen && (transposed_||rowwise) && budget_>bytes_)
+            integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_,false,rowwise);
         state_=State::ready;
     }
     bool transposed() const noexcept {return transposed_;}

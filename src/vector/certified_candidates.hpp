@@ -16,7 +16,7 @@ std::optional<std::vector<Neighbor>> certified_candidates(
     VectorAt&& vector_at,CandidateStats& stats,bool entire_interval=false) {
   stats={};
 #ifndef MVDB_CERTIFICATE_CAPACITY
-#define MVDB_CERTIFICATE_CAPACITY 64
+#define MVDB_CERTIFICATE_CAPACITY 32
 #endif
   constexpr std::size_t capacity=MVDB_CERTIFICATE_CAPACITY;
   static_assert(capacity>=16 && capacity<=256);

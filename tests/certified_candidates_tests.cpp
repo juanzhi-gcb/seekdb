@@ -5,7 +5,7 @@
 #include <cfenv>
 int main(){try {
   std::size_t accepted=0,fallbacks=0,checked=0;
-  for(auto dimension:{32u,127u,128u,129u,1024u})for(unsigned mode=0;mode<5;++mode){
+  for(auto dimension:{32u,127u,128u,129u,1024u})for(unsigned mode=0;mode<5;++mode)for(bool rowwise:{false,true}){
     std::mt19937 gen(20261113+dimension+mode);const std::size_t rows=531;
     std::vector<Item> data;
     for(std::size_t r=0;r<rows;++r){std::vector<float> v(dimension);
@@ -18,7 +18,8 @@ int main(){try {
     }
     std::vector<float> transposed(rows/16*16*dimension);
     for(std::size_t r=0;r<rows/16*16;r+=16)for(std::size_t d=0;d<dimension;++d)for(std::size_t l=0;l<16;++l)transposed[r*dimension+d*16+l]=data[r+l].value[d];
-    detail::Int8BoundCache cache;CHECK(cache.build(transposed,rows,dimension,8*1024*1024,true));
+    std::vector<float> aos;for(auto& item:data)aos.insert(aos.end(),item.value.begin(),item.value.end());
+    detail::Int8BoundCache cache;CHECK(cache.build(rowwise?std::span<const float>(aos):std::span<const float>(transposed),rows,dimension,8*1024*1024,true,rowwise));
     for(unsigned trial=0;trial<4;++trial){auto q=data[trial*11].value;
       if(trial==1)for(auto& x:q)x=float(int(gen()%4097)-2048)/128;
       for(std::size_t k:{1u,10u,16u}){
