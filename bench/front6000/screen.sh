@@ -15,14 +15,14 @@ for kind in parent candidate; do
   source="$repo"
   flags=()
   if test "$kind" = parent; then source="$scratch/parent"; else flags=(-DMVDB_STREAM_PARSE=1); fi
-  g++ -std=c++20 -O3 -ffp-contract=off "${flags[@]}" -I"$source/include" -I"$source/src" bench/front6000/probe.cpp "$source/src/sql/lexer.cpp" "$source/src/sql/parser.cpp" "$source/src/sql/binder.cpp" "$source/src/types/value.cpp" "$source/src/storage/row_codec.cpp" -o "$scratch/$kind"
+  g++ -std=c++20 -O3 -ffp-contract=off "${flags[@]}" -I"$source/include" -I"$source/src" bench/front6000/probe.cpp "$source/src/sql/lexer.cpp" "$source/src/sql/parser.cpp" "$source/src/sql/binder.cpp" "$source/src/types/value.cpp" "$source/src/storage/row_codec.cpp" -o "$scratch/probe-$kind"
 done
 g++ -std=c++20 -O3 -ffp-contract=off -Iinclude tests/short_decimal_tests.cpp src/sql/lexer.cpp src/sql/binder.cpp src/types/value.cpp src/storage/row_codec.cpp -o "$scratch/decimal"
 "$scratch/decimal" > "$result/decimal-differential.json"
 for pair in 0 1 2; do
   order=(parent candidate)
   if test "$pair" = 1; then order=(candidate parent); fi
-  for kind in "${order[@]}"; do "$scratch/$kind" > "$result/$kind-$pair.jsonl"; done
+  for kind in "${order[@]}"; do "$scratch/probe-$kind" > "$result/$kind-$pair.jsonl"; done
 done
 python3 - "$result" <<'PY'
 import json,statistics,sys
