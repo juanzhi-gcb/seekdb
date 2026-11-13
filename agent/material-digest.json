@@ -1,17 +1,17 @@
 {
  "kind": "local-material-integrity-manifest",
- "date": "2026-11-13",
+ "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "submission_state": "Experimental candidate passed native full T/B/M; latest official result remains dfee; formal branch not changed by this material preparation.",
+ "submission_state": "Material-only revision on measured eab46369 runtime; no new performance changes or official scores.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 130363,
-   "sha256": "47fba59bbb94fd6f5708f6eb558920dd150f5855441c558fb4db4afaa6a891d2"
+   "bytes": 124363,
+   "sha256": "004a759392baa22f559856b1fe130e8580d71b8668d68b4196360832c1946a0f"
   },
   "conversation.json": {
-   "bytes": 130363,
-   "sha256": "47fba59bbb94fd6f5708f6eb558920dd150f5855441c558fb4db4afaa6a891d2"
+   "bytes": 124363,
+   "sha256": "004a759392baa22f559856b1fe130e8580d71b8668d68b4196360832c1946a0f"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 86,
+  "user_records": 90,
   "experiments": 55,
-  "agent_observations": 26,
+  "agent_observations": 27,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -87,11 +87,16 @@
    "path": "bench/results/post-2882-20261113/iteration-records-appendix.json",
    "bytes": 12353,
    "sha256": "538fdffa25cc01ea0f288f39849532521e0c6955320f38c1d1845a9c6124b4c0"
+  },
+  {
+   "path": "bench/results/prompt-20261114/iteration-records-appendix.json",
+   "bytes": 2096,
+   "sha256": "f83615d95a5a855941e5a3a67421a95acec4add145e59757f1656812e7e0478e"
   }
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 13,
+  "instances": 14,
   "note": "Evidence navigation only, no self-assigned grades."
  },
  "current_source_identity": {

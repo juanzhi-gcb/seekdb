@@ -1,0 +1,14 @@
+{
+  "bytes_before": 130363,
+  "bytes_after": 124363,
+  "references": 99,
+  "instances_before": 13,
+  "instances_after": 14,
+  "preserved_user_records": 86,
+  "preserved_experiments": 55,
+  "preserved_agent_observations": 26,
+  "unchanged_runtime_source": "eab4636980f4e5878e7c793298423e1772716a68",
+  "local_archive_selection_passed": true,
+  "no_reused_exact_rubric_quotes": true,
+  "platform_score": "not measured"
+}
