@@ -1,5 +1,10 @@
 #include "minivectordb/profile.hpp"
 #include "sql.hpp"
+#include "numeric_memo.hpp"
+#include <array>
+#include <bit>
+#include <cstring>
+#include <cfenv>
 #include "minivectordb/value.hpp"
 #include <charconv>
 #include <cmath>
@@ -69,6 +74,29 @@ namespace minivectordb::sql {
         throw Error(ErrorCode::Type,"invalid finite VECTOR component");
       return result;
     }
+    // Immutable pure conversion results: keys own every byte and length. Only
+    // successful finite binary64 parses in round-to-nearest are memoized.
+    double memo_real(std::string_view text,bool enabled) {
+      if(!enabled||text.empty()||text.size()>16)return real(text);
+      struct Entry {std::uint64_t a=0,b=0;double value=0;std::uint8_t length=0;};
+      static_assert(sizeof(Entry)==32);
+      static thread_local std::array<Entry,8192> cache;
+      // Reprobe periodically when tokens have little reuse. This bounds hash
+      // overhead for arbitrary continuous inputs without assuming a data set.
+      struct Admission {unsigned probes=0,hits=0,skip=0;};
+      static thread_local Admission admission;
+      if(admission.skip){--admission.skip;return real(text);}
+      std::uint64_t a=0,b=0;std::memcpy(&a,text.data(),std::min(text.size(),std::size_t(8)));
+      if(text.size()>8)std::memcpy(&b,text.data()+8,text.size()-8);
+      auto hash=a^std::rotl(b,23)^(text.size()*0x9e3779b97f4a7c15ULL);
+      hash^=hash>>30;hash*=0xbf58476d1ce4e5b9ULL;hash^=hash>>27;
+      auto& e=cache[hash&(cache.size()-1)];
+      const bool hit=e.length==text.size()&&e.a==a&&e.b==b;
+      admission.hits+=hit;
+      if(++admission.probes==128){if(admission.hits<32)admission.skip=2048;admission.probes=admission.hits=0;}
+      if(hit)return e.value;
+      const double value=real(text);e={a,b,value,std::uint8_t(text.size())};return value;
+    }
     std::vector<std::string> vector_components(const Literal&v) {
       if(v.kind==Literal::Vector)return v.components;
       if(v.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VECTOR literal");
@@ -117,6 +145,7 @@ namespace minivectordb::sql {
     }
   }
   Cell bind_literal(const Literal&v,const Column&c,bool fast_vector) {
+    const bool memo=numeric_memo_enabled&&std::fegetround()==FE_TONEAREST;
     try {
       if(c.type==ColumnType::Bigint) {
         if(v.kind!=Literal::Number)throw Error(ErrorCode::Type,"expected BIGINT literal");
@@ -133,7 +162,7 @@ namespace minivectordb::sql {
         std::exception_ptr numeric_error;
         const bool plain=plain_vector(v.text,[&](auto component){
           if(numeric_error)return;
-          try {values.push_back(real(component));}
+          try {values.push_back(memo_real(component,memo));}
           catch(const Error&) {numeric_error=std::current_exception();}
         });
         if(plain) {
@@ -146,7 +175,7 @@ namespace minivectordb::sql {
       auto components=vector_components(v);
       std::vector<double> values;
       values.reserve(components.size());
-      for(const auto&part:components)values.push_back(real(part));
+      for(const auto&part:components)values.push_back(memo_real(part,memo));
       return make_vector(values,c.extent);
     }
     catch(const std::invalid_argument&e) {

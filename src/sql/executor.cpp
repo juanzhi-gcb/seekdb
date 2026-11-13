@@ -1,4 +1,5 @@
 #include "sql.hpp"
+#include "numeric_memo.hpp"
 #include "sorter.hpp"
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
@@ -668,7 +669,7 @@ namespace minivectordb {
       sql::Bound bound;
       if(statement.kind!=sql::Statement::Create) {
         schema=lookup_table(store,statement.table);
-        if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
+        if(statement.kind!=sql::Statement::CreateIndex) {sql::NumericMemoScope memo(options.memoized_numbers);bound=sql::bind(statement,schema);}
       }
       if(statement.kind==sql::Statement::Select)return select(statement,schema,bound,sink);
       // Binding and existing-key checks finish before any statement mutation.
