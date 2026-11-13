@@ -13,7 +13,7 @@ for name in compact_writer lossless_words; do
 done
 cmake -S . -B "$scratch/build" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-O1 -g -fsanitize=address,undefined' > "$result/configure.log" 2>&1
 cmake --build "$scratch/build" --target packed_codec_tests --parallel 2 > "$result/build-packed.log" 2>&1
-"$scratch/build/packed_codec_tests" > "$result/packed_codec-test.txt"
+MVDB_TEST_DIR="$scratch/test-data" "$scratch/build/packed_codec_tests" > "$result/packed_codec-test.txt"
 for kind in parent candidate; do
   source="$repo"
   if [ "$kind" = parent ]; then source="$scratch/parent"; fi
