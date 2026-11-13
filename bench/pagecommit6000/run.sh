@@ -10,7 +10,7 @@ export TMPDIR="$scratch/tmp" PYTHONDONTWRITEBYTECODE=1
 trap 'sudo chown -R "$(id -u):$(id -g)" "$result"' EXIT
 lscpu > "$result/lscpu.txt"
 for item in reference candidate; do
-  if [[ "$item" == reference ]];then ref=55c6bffb4f84553e03d7fa8d30ea3fdef9986dce;else ref=HEAD;fi
+  if [[ "$item" == reference ]];then ref=a24d2cd764027adec7371f268f99ccdca2307032;else ref=d1376f67875c5c504525e0972bcdd42e6657e660;fi
   git archive "$ref" Dockerfile CMakeLists.txt src include tests | tar -x -C "$scratch/$item"
   python3 bench/pagecommit6000/instrument.py "$scratch/$item" "$repo/bench/pagecommit6000/diagnostic_trace.cpp"
   docker build -t "mvdb:latency-$item" "$scratch/$item" > "$result/build-$item.log" 2>&1

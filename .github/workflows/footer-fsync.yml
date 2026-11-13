@@ -1,0 +1,27 @@
+name: Compact footer fsync stability versus a24
+on:
+  push:
+    branches: ['codex/page48-fsync-a24-20261113']
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Five paired rounds with identical fsync diagnostics
+        run: bash bench/pagecommit6000/run.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: footer-fsync-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pagecommit-results/
+          retention-days: 14
