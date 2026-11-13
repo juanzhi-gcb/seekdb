@@ -1,7 +1,7 @@
 name: Matched native request and syscall latency diagnosis
 on:
   push:
-    branches: ['codex/latency-6000-20261113']
+    branches: ['codex/stages-6000-20261113']
 permissions:
   contents: read
 jobs:
