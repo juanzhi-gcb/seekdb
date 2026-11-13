@@ -239,7 +239,11 @@ public:
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
-        const bool rowwise=count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
+        // A failed certificate must retain the vectorized exact fallback. Keep
+        // full-precision blocks transposed even when candidate search is enabled.
+        // Shapes outside the transpose contract may still use rowwise bounds.
+        const bool can_transpose=transpose && dimension_>=16 && dimension_<=1024 && count_>=16;
+        const bool rowwise=!can_transpose && count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
         if(!half_ && !rowwise && transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
