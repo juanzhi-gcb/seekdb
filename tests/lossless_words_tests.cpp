@@ -28,5 +28,9 @@ int main(){try{
    std::string old,newer;CHECK(pack_bytes(input,old,true));CHECK(pack_bytes(input,newer,true,true));
    CHECK(newer.size()<=old.size());CHECK(unpack_bytes(newer,4064,true)==input);
  }
+ for(int power=-24;power<=15;++power)for(unsigned width=2;width<=15;++width) {
+   std::string input;for(unsigned i=0;i<128;++i){const int v=int(rng()%(1U<<width))-int(1U<<(width-1));const float x=std::ldexp(float(v),power);input.append(reinterpret_cast<const char*>(&x),4);}
+   std::string encoded;if(pack_bytes(input,encoded,true,true))CHECK(unpack_bytes(encoded,4064,true)==input);
+ }
  CHECK(newframes>100);std::cout<<"lossless words "<<cases<<" cases, "<<newframes<<" new frames; truncation, size bounds, legacy rejection, NaN bits passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
