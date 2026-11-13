@@ -1,6 +1,7 @@
 #include "journal_harness.hpp"
 #include <map>
 #include <random>
+#include <algorithm>
 #include <iostream>
 #include <unistd.h>
 using namespace minivectordb;
