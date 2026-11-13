@@ -1,0 +1,27 @@
+name: Exact integer shortlist kernel screen
+on:
+  push:
+    branches: ['codex/integer-rank-screen-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact oracle, SIMD equality and paired current-kernel screening
+        run: bash bench/integerrank6000/screen.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: integer-rank-${{ matrix.replica }}-${{ github.run_id }}
+          path: integer-rank-results/
+          retention-days: 14

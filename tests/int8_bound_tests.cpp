@@ -64,9 +64,15 @@ void run_case(std::size_t dimension,unsigned mode) {
     // Independently compare SIMD and scalar integer dot paths where available.
     for(std::size_t r=0;r<full;r+=16) {
       const auto values=std::span<const float>(storage.data()+r*dimension,dimension*16);
+      const auto shared=cache.query(q,true);std::array<std::int32_t,16> integer{},portable{},avx2{};
+      if(shared.integral){
+        CHECK(cache.integer_scores(shared,r,integer));CHECK(cache.integer_scores(shared,r,portable,false));CHECK(integer==portable);
+        CHECK(cache.integer_scores(shared,r,avx2,true,true));CHECK(integer==avx2);
+      }
       for(std::size_t lane=0;lane<16;++lane) {
         double sum=0;for(std::size_t d=0;d<dimension;++d){double delta=double(q[d])-double(data[r+lane].value[d]);sum+=delta*delta;}
         const double distance=std::sqrt(sum);
+        if(shared.integral){CHECK(integer[lane]>=0);CHECK(cache.integer_lower(shared,integer[lane])<=cache.exclusion_upper(shared,distance));}
         for(double radius:{distance,std::nextafter(distance,INFINITY)}) {
           const auto portable=cache.survivors(encoded,radius,values,65535,false);
           CHECK(portable&(1U<<lane));

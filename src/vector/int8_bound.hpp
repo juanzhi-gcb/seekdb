@@ -177,7 +177,8 @@ public:
   struct Query {
     std::vector<std::uint32_t> words;
     double scale=1,error=0,norm_scaled=0;
-    bool valid=false;
+    std::int32_t norm=0;
+    bool valid=false,integral=false;
   };
   static bool available() noexcept {
 #if defined(__x86_64__) && defined(__GNUC__)
@@ -249,12 +250,13 @@ public:
     }
     rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=nullptr;row_major_=true;return true;
   }
-  Query query(std::span<const float> vector) const {
+  Query query(std::span<const float> vector,bool shared_scale=false) const {
     Query result;
     if(!ready() || vector.size()!=dimension_ || !environment())return result;
     double maximum=0;
     for(float x:vector){if(!std::isfinite(x))return result;maximum=std::max(maximum,std::abs(static_cast<double>(x)));}
-    result.scale=maximum>0?maximum/127:1;
+    result.integral=shared_scale && maximum<=127*scale_;
+    result.scale=result.integral?scale_:(maximum>0?maximum/127:1);
     result.words.assign(padded_/4,0);std::int32_t norm=0;double square=0;
     for(std::size_t d=0;d<padded_;++d) {
       const double value=d<dimension_?vector[d]:0;
@@ -263,6 +265,7 @@ public:
       const double e=error_component(value,result.scale*code);square+=e*e;
     }
     result.error=finish_error(square,padded_);
+    result.norm=norm;
     result.norm_scaled=static_cast<double>(norm)*result.scale*result.scale;
     result.valid=true;return result;
   }
@@ -289,6 +292,37 @@ public:
       scores[lane]=(a+b-c)-(std::abs(a)+std::abs(b)+std::abs(c))*0x1p-45;
     }
     return true;
+  }
+  // Equal scales permit exact integer ranking: sum((q_code-x_code)^2).
+  // At dimension <=4096 this lies in [0,264257536], safely inside int32.
+  // No additional row index or copied vector representation is owned.
+  bool integer_scores(const Query& query,std::size_t row,std::array<std::int32_t,16>& scores,
+                      bool native=true,bool force_avx2=false) const {
+    if(!query.valid || !query.integral || query.scale!=scale_ || row%16 || row>=rows_)return false;
+    std::array<std::int32_t,16> dots{};
+#if defined(__x86_64__) && defined(__GNUC__)
+    if(native && native_vnni() && !force_avx2)dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(native && available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
+    else
+#else
+    (void)native;(void)force_avx2;
+#endif
+    for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
+      for(std::size_t k=0;k<4;++k)dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
+    for(std::size_t lane=0;lane<16;++lane)
+      scores[lane]=query.norm+norms_[row+lane]-2*(dots[lane]-128*sums_[row+lane]);
+    return true;
+  }
+  double integer_lower(const Query& query,std::int32_t score) const {
+    if(score==std::numeric_limits<std::int32_t>::max())return std::numeric_limits<double>::infinity();
+    if(!query.valid || !query.integral || query.scale!=scale_ || score<0)return -std::numeric_limits<double>::infinity();
+    // Integer D is exact; converting D is exact too. The two positive double
+    // products have no cancellation/overflow/underflow for finite float32
+    // inputs. This outward envelope dominates their combined rounding error.
+    // Existing per-vector error bounds already cover real scale*code versus
+    // its rounded product; exclusion_upper retains the original triangle proof.
+    const double value=double(score)*(scale_*scale_);
+    return std::nextafter(value-value*0x1p-44,-std::numeric_limits<double>::infinity());
   }
   double exclusion_upper(const Query& query,double radius) const {
     if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();

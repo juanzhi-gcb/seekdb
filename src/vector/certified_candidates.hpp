@@ -3,6 +3,7 @@
 #include "minivectordb/exact.hpp"
 #include <optional>
 #include <queue>
+#include <type_traits>
 
 namespace minivectordb::detail {
 struct CandidateStats {std::size_t examined=0,selected=0,exact=0;bool certified=false;};
@@ -21,17 +22,22 @@ std::optional<std::vector<Neighbor>> certified_candidates(
   constexpr std::size_t capacity=MVDB_CERTIFICATE_CAPACITY;
   static_assert(capacity>=16 && capacity<=256);
   if(!k||k>16||end<begin||end-begin<256||cache.uniform())return {};
-  const auto encoded=cache.query(query);if(!encoded.valid)return {};
-  struct Candidate {double lower;std::size_t row;};
+  const auto encoded=cache.query(query,true);if(!encoded.valid)return {};
+  const auto run=[&]<class Score>() -> std::optional<std::vector<Neighbor>> {
+  constexpr bool integral=std::is_integral_v<Score>;
+  constexpr Score unknown=integral?std::numeric_limits<Score>::lowest():-std::numeric_limits<Score>::infinity();
+  struct Candidate {Score lower;std::size_t row;};
   const auto less=[](const Candidate&a,const Candidate&b){return a.lower<b.lower||(a.lower==b.lower&&a.row<b.row);};
   std::vector<Candidate> candidates;candidates.reserve(capacity);
-  double excluded=std::numeric_limits<double>::infinity();
+  Score excluded=integral?std::numeric_limits<Score>::max():std::numeric_limits<Score>::infinity();
   for(std::size_t block=begin/16*16;block<end;block+=16){
-    std::array<double,16> lower{};
-    if(!cache.lower_scores(encoded,block,lower))lower.fill(-std::numeric_limits<double>::infinity());
+    std::array<Score,16> lower{};bool valid;
+    if constexpr(integral)valid=cache.integer_scores(encoded,block,lower);
+    else valid=cache.lower_scores(encoded,block,lower);
+    if(!valid)lower.fill(unknown);
     if(entire_interval && block>=begin && end-block>=16 && candidates.size()==capacity) {
-      const double minimum=*std::min_element(lower.begin(),lower.end());
-      if(std::isfinite(minimum) && minimum>=candidates.front().lower) {
+      const Score minimum=*std::min_element(lower.begin(),lower.end());
+      if(minimum!=unknown && std::isfinite(minimum) && minimum>=candidates.front().lower) {
         excluded=std::min(excluded,minimum);stats.examined+=16;stats.selected+=16;continue;
       }
     }
@@ -39,7 +45,7 @@ std::optional<std::vector<Neighbor>> certified_candidates(
       ++stats.examined;if(!predicate(row))continue;++stats.selected;
       Candidate item{lower[row-block],row};
       // Non-finite/unknown bounds cannot justify rejecting a row.
-      if(!std::isfinite(item.lower))item.lower=-std::numeric_limits<double>::infinity();
+      if constexpr(!integral)if(!std::isfinite(item.lower))item.lower=unknown;
       if(candidates.size()<capacity){candidates.push_back(item);std::push_heap(candidates.begin(),candidates.end(),less);}
       else if(less(item,candidates.front())){
         excluded=std::min(excluded,candidates.front().lower);
@@ -55,11 +61,15 @@ std::optional<std::vector<Neighbor>> certified_candidates(
     if(exact.size()<k){exact.push_back(item);std::push_heap(exact.begin(),exact.end(),better);}
     else if(better(item,exact.front())){std::pop_heap(exact.begin(),exact.end(),better);exact.back()=item;std::push_heap(exact.begin(),exact.end(),better);}
     const auto pending=i+1<candidates.size()?std::min(excluded,candidates[i+1].lower):excluded;
-    if(exact.size()==k&&pending>cache.exclusion_upper(encoded,exact.front().distance)){
+    const double lower=[&]{if constexpr(integral)return cache.integer_lower(encoded,pending);else return pending;}();
+    if(exact.size()==k&&lower>cache.exclusion_upper(encoded,exact.front().distance)){
       std::sort(exact.begin(),exact.end(),better);stats.certified=true;return exact;
     }
   }
   if(stats.selected<=capacity){std::sort(exact.begin(),exact.end(),better);stats.certified=true;return exact;}
   return {}; // Caller runs the complete unchanged exact path on failure.
+  };
+  if(encoded.integral)return run.template operator()<std::int32_t>();
+  return run.template operator()<double>();
 }
 }
