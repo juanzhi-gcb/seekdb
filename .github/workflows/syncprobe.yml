@@ -1,0 +1,25 @@
+name: Native durable sync screen
+on:
+  push:
+    branches: ['codex/syncprobe-6000-20261113']
+permissions:
+  contents: read
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 bench/latency6000/sync_probe.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sync-${{ matrix.replica }}-${{ github.run_id }}
+          path: sync-probe-results.json
+          if-no-files-found: error
