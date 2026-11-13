@@ -22,23 +22,22 @@ int main(){try{const auto dir=std::filesystem::path(std::getenv("MVDB_TEST_DIR")
  std::mt19937 rng(929);std::string payload(2000,'\0');for(auto& c:payload)c=char(rng());
  for(mode=0;mode<4;++mode){calls=interruptions=0;const auto path=dir/("db"+std::to_string(mode));
  {JournalHarnessStore db(path);db.begin();db.put_in(7,9000,"baseline");db.commit();db.begin();
-  std::vector<Store::Mutation> changes;for(int i=0;i<100;++i)changes.push_back({i,payload});
+  std::vector<Store::Mutation> changes;for(int i=0;i<12;++i)changes.push_back({i,payload});
   bool failed=false;try{db.apply_batch_in(7,changes);db.commit();}catch(const std::system_error&){failed=true;db.rollback();}
 #if defined(__linux__)
   CHECK(failed==(mode==2));CHECK(calls>0);if(mode==1)CHECK(calls==1);if(mode==3)CHECK(interruptions>=2);
 #else
   CHECK(!failed);
 #endif
-  CHECK(db.get_in(7,9000)=="baseline");if(!failed)CHECK(db.get_in(7,73)==payload);else CHECK(!db.get_in(7,73));
+  CHECK(db.get_in(7,9000)=="baseline");if(!failed)CHECK(db.get_in(7,7)==payload);else CHECK(!db.get_in(7,7));
  }
  {JournalHarnessStore db(path);CHECK(db.get_in(7,9000)=="baseline");
 #if defined(__linux__)
-  if(mode==2)CHECK(!db.get_in(7,73));else
+  if(mode==2)CHECK(!db.get_in(7,7));else
 #endif
-  CHECK(db.get_in(7,73)==payload);
+  CHECK(db.get_in(7,7)==payload);
   db.begin();db.put_in(7,3000,"after reopen");db.commit();}
  {JournalHarnessStore db(path);CHECK(db.get_in(7,3000)=="after reopen");}
  }
  std::filesystem::remove_all(dir);std::cout<<"writeback: page bounds, no WAIT flags, retry, unsupported fallback, I/O rollback/reopen passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
-

@@ -19,3 +19,5 @@ for version in ['reference','candidate']:
   summary['groups'][version+'/'+kind]={k:{'sum':sum(x[k] for x in rows),'median':statistics.median(x[k] for x in rows),'max':max(x[k] for x in rows),'p95':sorted(x[k] for x in rows)[int(.95*(len(rows)-1))],'p99':sorted(x[k] for x in rows)[int(.99*(len(rows)-1))],'over_100':sum(x[k]>100 for x in rows)} for k in ['client_ms','server_ms','server_cpu_ms','fsync_ms','fsync_cpu_ms','writeback_ms','writeback_count','pwrite_ms','pread_ms','outside_server_ms']}
 (root/'correlated-requests.json').write_text(json.dumps(result,indent=2)+'\n');(root/'diagnosis.json').write_text(json.dumps(summary,indent=2)+'\n')
 print(json.dumps(summary))
+
+assert summary["groups"]["candidate/INSERT"]["writeback_count"]["sum"]>0, "writeback path did not activate; cannot attribute latency differences"

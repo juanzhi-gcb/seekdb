@@ -8,4 +8,4 @@ s=s.replace('response.emit(id);','response.emit(id);\n        mvdb_diag_end();')
 s=s.replace('            continue;\n        }\n        // A transport','            mvdb_diag_end();continue;\n        }\n        // A transport')
 assert s.count('mvdb_diag_begin();')==2 and s.count('mvdb_diag_end();')==3
 p.write_text(s)
-with (root/'CMakeLists.txt').open('a') as f:f.write('\ntarget_sources(minivectordb PRIVATE src/diagnostic_trace.cpp)\ntarget_link_options(minivectordb PRIVATE -Wl,--wrap=fsync -Wl,--wrap=pwrite -Wl,--wrap=pread -Wl,--wrap=sync_file_range)\n')
+with (root/'CMakeLists.txt').open('a') as f:f.write('\ntarget_link_libraries(minivectordb PRIVATE Threads::Threads)\ntarget_sources(minivectordb PRIVATE src/diagnostic_trace.cpp)\ntarget_link_options(minivectordb PRIVATE -Wl,--wrap=fsync -Wl,--wrap=pwrite -Wl,--wrap=pread -Wl,--wrap=sync_file_range)\n')

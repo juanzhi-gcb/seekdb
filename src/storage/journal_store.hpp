@@ -59,13 +59,13 @@ class JournalStore {
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
     if(!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
     std::size_t done=0;
-    const bool pipeline=offset>=8192 && bytes.size()>=32768;
+    const bool pipeline=offset>=8192 && bytes.size()>=16384;
     std::uint64_t submitted=(offset+4095)/4096*4096;
     while(done<bytes.size()){
-      ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pwrite);n=::pwrite(fd_,bytes.data()+done,pipeline?std::min(bytes.size()-done,std::size_t(16384)):bytes.size()-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
+      ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pwrite);n=::pwrite(fd_,bytes.data()+done,pipeline?std::min(bytes.size()-done,std::size_t(8192)):bytes.size()-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
       if(n<0){if(errno==EINTR)continue;io("journal pwrite");}if(!n)throw std::runtime_error("zero-length journal pwrite");done+=std::size_t(n);
       if(pipeline){const auto through=(offset+done)/4096*4096;
-        if(through>submitted && through-submitted>=12288){start_writeback(submitted,through-submitted);submitted=through;}
+        if(through>submitted && through-submitted>=4096){start_writeback(submitted,through-submitted);submitted=through;}
       }
     }
   }
