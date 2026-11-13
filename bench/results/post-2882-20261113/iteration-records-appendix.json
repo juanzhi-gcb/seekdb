@@ -1,0 +1,90 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Actual user feedback and separately attributed Agent diagnostics; no simulated reviews.",
+ "conversations": [
+  {
+   "id": "u84",
+   "source": "user",
+   "excerpt": true,
+   "content": "关于prompt无效的原因，主要有以下两种：比较多的一项是agent认为这段对话不足以生成现在的代码，还有一个比较多的是agent会进行完全独立的三次评审，三次评审会从三个不同角度出发，如果产生结论上的差异，会给出一个材料“证据不足”的结论",
+   "context": "此前发布请求中关于评审的原文节选，与u83同一条用户消息的不同部分；这是用户转述，非该提交三轮报告。"
+  },
+  {
+   "id": "u85",
+   "source": "user",
+   "excerpt": true,
+   "content": "通过；此项为准入条件，不计排名分\n性能评测完成；原始指标 E = 2881.914324\nAgent Prompt评测完成；原始分 = 6.500000\n这是这版的提测结果，先找到这版掉性能分的原因，然后继续优化性能，大胆尝试，然后依据刚刚改动的prompt方向，再猜测别的可能评分的角度进行优化补充",
+   "context": "用户紧接dfee55b84284f4c39d2df45951cdbcb1d1baf1a2发布确认提供的正式反馈与后续要求；省略表头、重复分隔符，保留详情与要求原文。"
+  },
+  {
+   "id": "u86",
+   "source": "user",
+   "content": "主要看计分项的变化，以得分为第一要务"
+  }
+ ],
+ "experiments": [
+  {
+   "id": "e135",
+   "source": "user_supplied_platform_result",
+   "purpose": "首次有效Prompt与正式性能反例",
+   "output": "dfee55b84284f4c39d2df45951cdbcb1d1baf1a2正式MySQL通过，性能E=2881.914324，Agent Prompt=6.5且有效。相对a24的3977.995012下降27.553596%。仅有三项结果，没有正式T/B/M或逐维Prompt评审；不能由总分归因到fsync、量化、内存中的某一项，也不能由6.5反推出每个材料实例的得分。"
+  },
+  {
+   "id": "e136",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "数据分布反例与候选筛选失败诊断",
+   "output": "本机ARM可移植诊断，10000条×128维，40查询，固定种子20261113；该测试不作原生T/B/M。原dfee筛选：连续浮点40/40成功、正值浮点40/40成功，密集聚集0/40成功，加入一条1e6向量后0/40成功。公共中心实验：前三类均40/40成功，极端值仍0/40。中心平移误差计入保守界，原向量不改。ASan/UBSan下600组候选差分：378成功、222回退；整数界117168项比较通过、50825次排除，ARM不覆盖原生AVX掩码。已启动Linux原生对照，尚未据此断言正式退分根因或新分数。"
+  },
+  {
+   "id": "e137",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "两台原生复现正式版本的分布敏感退化",
+   "output": "run43449936712，22390e5d对a24和dfee；两台各2轮，10000×128维、200查询，79/79内部及20/20公开用例通过。聚集/离群数据中dfee对a24查询T增加79%～99%，同时B减少约11.6%～18.9%、M减少约30%～33%。仅恢复转置SIMD回退后，这些场景查询T对dfee减少41%～49%，B基本不变（单项+0.54%），M约±2%。数据库CPU从约69ms/200查询降至23～25ms，a24约20ms。证明一条查询退化机制；没有官方细项，不能证明它是全部正式退分的唯一原因。"
+  },
+  {
+   "id": "e138",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "公共中心叠加收益和代价",
+   "output": "run43451227724，e124978e，两台79/79与20/20通过，完整2轮200查询/场景。公共中心对修复回退版22390e5d：聚集查询T再减少14.3%～15.3%，B相同，M基本持平；对dfee聚集查询T减少49.4%～54.1%、离群减少39.5%～44.9%，普通随机场景基本持平且保留小幅回退。写入T无稳定新增收益。该版未处理离群点污染全局误差界的问题。"
+  },
+  {
+   "id": "e139",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "逐行误差筛选的否决与自适应修正",
+   "output": "总是启用逐行误差界的4f180b43在run43452454937两台原生内核测试中，普通分布变慢约45%～69%，离群分布明显改善，因此拒绝直接叠加。改为公共分量显著时才平移、极端值支配范围时才启用裁剪辅助码和逐行误差界，其余保持便宜的原路径。524007e3在run43453272546两台原生600组差分和117168项数值界比较及独立全排序校验通过；微内核不是计分T，采用与否看e140完整T/B/M。原float32值及最终距离均不量化，裁剪的误差逐行计入保守界。"
+  },
+  {
+   "id": "e140",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "最新候选完整计分项原始对照",
+   "output": "eab4636980f4e5878e7c793298423e1772716a68（运行源码同524007e3），run43453551018两台通过79/79内部和20/20公开检查。每项3轮，10000×128维、1000次查询；与a24直接比较网格BIGINT/VARCHAR、正值、聚集、离群负载；聚集/离群另与dfee直接比较。全部查询精确真值和全行重启核验通过。以下为各项三轮中位数，数组顺序为[T参照ms,T候选ms,B参照字节,B候选字节,M参照字节,M候选字节]，T展示到0.001ms。B/M包括准备、索引和预热；自造数据不等于正式隐藏数据，不换算E。\n[{\"host\":\"full2882-1-43453551018\",\"values\":{\"cluster-bigint-a24-candidate/write/unindexed\":[534.948,476.542,6770688,5746688,9850880,9306112],\"cluster-bigint-a24-candidate/query/unindexed\":[493.497,452.332,6770688,5746688,18784256,12832768],\"cluster-bigint-a24-candidate/query/indexed\":[487.327,460.15,7540736,6115328,20504576,14069760],\"cluster-bigint-dfee-candidate/write/unindexed\":[487.136,488.718,5746688,5746688,9351168,9232384],\"cluster-bigint-dfee-candidate/query/unindexed\":[884.268,451.233,5746688,5746688,12836864,12787712],\"cluster-bigint-dfee-candidate/query/indexed\":[893.187,456.501,6115328,6115328,14188544,14139392],\"grid-bigint-a24-candidate/write/unindexed\":[414.463,358.314,5648384,2899968,8220672,6217728],\"grid-bigint-a24-candidate/query/unindexed\":[441.932,435.233,5648384,2899968,14962688,7553024],\"grid-bigint-a24-candidate/query/indexed\":[446.94,437.199,6414336,3268608,16662528,8916992],\"grid-varchar-a24-candidate/write/unindexed\":[414.794,359.162,5763072,3289088,8409088,6520832],\"grid-varchar-a24-candidate/query/unindexed\":[432.454,426.432,5763072,3289088,15126528,7610368],\"grid-varchar-a24-candidate/query/indexed\":[441.282,432.104,6529024,3657728,17027072,8925184],\"outlier-bigint-a24-candidate/write/unindexed\":[557.279,520.905,9281536,8204288,12369920,11968512],\"outlier-bigint-a24-candidate/query/unindexed\":[495.864,474.591,9281536,8204288,21504000,14422016],\"outlier-bigint-a24-candidate/query/indexed\":[489.108,482.42,10051584,8572928,23101440,15769600],\"outlier-bigint-dfee-candidate/write/unindexed\":[507.004,494.15,8204288,8204288,11935744,11751424],\"outlier-bigint-dfee-candidate/query/unindexed\":[890.479,479.214,8204288,8204288,14487552,14458880],\"outlier-bigint-dfee-candidate/query/indexed\":[885.777,475.488,8572928,8572928,15794176,15671296],\"positive-bigint-a24-candidate/write/unindexed\":[545.53,512.112,9195520,8204288,12255232,11997184],\"positive-bigint-a24-candidate/query/unindexed\":[465.656,456.859,9195520,8204288,21254144,14475264],\"positive-bigint-a24-candidate/query/indexed\":[474.712,461.624,9965568,8572928,22978560,15908864]}},{\"host\":\"full2882-2-43453551018\",\"values\":{\"cluster-bigint-a24-candidate/write/unindexed\":[466.774,451.253,6770688,5746688,9711616,9498624],\"cluster-bigint-a24-candidate/query/unindexed\":[596.824,434.179,6770688,5746688,18747392,12816384],\"cluster-bigint-a24-candidate/query/indexed\":[567.08,441.419,7540736,6115328,20475904,14106624],\"cluster-bigint-dfee-candidate/write/unindexed\":[455.701,455.3,5746688,5746688,9256960,9445376],\"cluster-bigint-dfee-candidate/query/unindexed\":[993.868,442.11,5746688,5746688,12787712,12836864],\"cluster-bigint-dfee-candidate/query/indexed\":[985.149,450.898,6115328,6115328,14139392,14163968],\"grid-bigint-a24-candidate/write/unindexed\":[391.366,344.21,5648384,2899968,8044544,6189056],\"grid-bigint-a24-candidate/query/unindexed\":[440.604,400.096,5648384,2899968,15007744,7589888],\"grid-bigint-a24-candidate/query/indexed\":[490.97,419.297,6414336,3268608,16723968,8847360],\"grid-varchar-a24-candidate/write/unindexed\":[386.994,331.903,5763072,3289088,8441856,6537216],\"grid-varchar-a24-candidate/query/unindexed\":[470.791,421.805,5763072,3289088,15298560,7675904],\"grid-varchar-a24-candidate/query/indexed\":[474.097,415.528,6529024,3657728,17027072,8704000],\"outlier-bigint-a24-candidate/write/unindexed\":[520.927,466.745,9281536,8204288,12222464,11960320],\"outlier-bigint-a24-candidate/query/unindexed\":[561.991,463.242,9281536,8204288,21319680,14278656],\"outlier-bigint-a24-candidate/query/indexed\":[572.632,487.536,10051584,8572928,23076864,15798272],\"outlier-bigint-dfee-candidate/write/unindexed\":[480.204,509.795,8204288,8204288,11972608,11845632],\"outlier-bigint-dfee-candidate/query/unindexed\":[989.585,469.018,8204288,8204288,14401536,14491648],\"outlier-bigint-dfee-candidate/query/indexed\":[995.59,465.818,8572928,8572928,15757312,15654912],\"positive-bigint-a24-candidate/write/unindexed\":[528.755,468.133,9195520,8204288,12304384,12034048],\"positive-bigint-a24-candidate/query/unindexed\":[503.989,451.976,9195520,8204288,21278720,14249984],\"positive-bigint-a24-candidate/query/indexed\":[495.654,438.786,9965568,8572928,23064576,15708160]}}]"
+  }
+ ],
+ "agent_observations": [
+  {
+   "id": "a58",
+   "source": "agent",
+   "title": "当前距离次序说明及旧说明勘误",
+   "content": "旧Agent说明a52把排序写成“平方距离排序、开方只输出”，这与当前代码和协议不符。当前权威行为是float32输入、逐维double乘加、sqrt得到返回距离后按该距离排序；距离相同按有符号主键排序。SIMD按候选并行，不能改变单候选累加次序；筛选必须保守，不能证明排除时执行精确路径。旧a52保留在历史归档，本次选择用这条带勘误的说明替换，未修改历史用户记录或执行结果。"
+  },
+  {
+   "id": "a59",
+   "source": "agent",
+   "title": "正式反例改变优化接受标准",
+   "content": "此前将默认本地负载的B/M收益外推为当前性能最好，依据不足；直接父版对照已有写入长尾反例。此次正式E下降是必须保留的反证。新实验先比较a24、dfee、单项改动，增加聚集/离群数据，分开报告写入和查询T/B/M；代码检查发现候选判定失败时的按行布局阻断原有转置SIMD回退，这是一条待原生验证的机制，不是已知正式数据。"
+  },
+  {
+   "id": "a60",
+   "source": "agent",
+   "title": "Prompt有效性与学习证据分开",
+   "content": "本次6.5只证明dfee材料已得到有效评审，不证明哪项修改单独生效。评分角度按已知五维规则核对；不把Agent实现、计时和解释归给用户，不把一个修正链拆成多个实例。新增优先呈现用户具体的fsync假设及其测量窗口反证，并把入口假设、官方常见原因转述、材料修订和首次有效反馈串成同一链。材料没有用户独立解释机制的证据，追加Agent分析不能补成这一项。"
+  },
+  {
+   "id": "a61",
+   "source": "agent",
+   "title": "修复与自适应筛选的计分项边界",
+   "content": "首先保留转置存储，使候选证明失败仍有SIMD精确回退；其次对高度集中的数据使用共同中心缩小编码范围；仅在离群值支配范围时，裁剪辅助筛选码并按每行真实表示误差建立下界。原float32向量和返回距离不变，不能证明排除时仍精确计算。新增内存包括每维double中心并计入缓存预算；不增加持久化向量副本，写入与fsync协议未变。所有采样只选择加速方式，未采到的数据仍逐行验证和计入误差。测试只能证明已覆盖负载的收益；不得把查询场景提速倍数写成正式E倍数。"
+  }
+ ]
+}

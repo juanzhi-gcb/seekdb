@@ -1,0 +1,1225 @@
+{
+ "formal_feedback": {
+  "source": "user_supplied_formal_result",
+  "commit": "dfee55b84284f4c39d2df45951cdbcb1d1baf1a2",
+  "mysql": "passed",
+  "performance_E": 2881.914324,
+  "agent_prompt": 6.5,
+  "prior_official_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
+  "prior_E": 3977.995012,
+  "relative_change": -0.27553596339200237,
+  "official_T_B_M": null,
+  "prompt_dimension_scores": null
+ },
+ "scope": "Native Linux x86, 10000 rows / 128 dimensions. Regression/centered screens: 2 rounds and 200 queries. Full scoring metric suite: 3 rounds and1000 queries. Physical I/O and cgroup peak include preparation. Generated distributions are not hidden official data.",
+ "replicas": [
+  {
+   "artifact": "full2882-1-43453551018",
+   "rounds_per_host": 3,
+   "queries_per_sample": 1000,
+   "ctest_all_passed": true,
+   "public_result": {
+    "scope": "public-protocol-check",
+    "passed": true,
+    "cases": [
+     {
+      "id": "sql_crud",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 241
+     },
+     {
+      "id": "sql_comparisons",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 190
+     },
+     {
+      "id": "sql_ordering",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 224
+     },
+     {
+      "id": "sql_empty",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 188
+     },
+     {
+      "id": "sql_primary_key",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 230
+     },
+     {
+      "id": "sql_unicode",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 222
+     },
+     {
+      "id": "sql_bigint",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 241
+     },
+     {
+      "id": "sql_unsupported",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 185
+     },
+     {
+      "id": "storage_restart",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 398
+     },
+     {
+      "id": "vector_euclidean",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 194
+     },
+     {
+      "id": "transaction_commit",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 234
+     },
+     {
+      "id": "transaction_rollback",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 198
+     },
+     {
+      "id": "storage_mutations",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 396
+     },
+     {
+      "id": "storage_multiple_tables",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 432
+     },
+     {
+      "id": "vector_ties_and_filter",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 189
+     },
+     {
+      "id": "vector_float32",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 222
+     },
+     {
+      "id": "vector_index_maintenance",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 388
+     },
+     {
+      "id": "transaction_failed_insert",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 384
+     },
+     {
+      "id": "transaction_autocommit_atomic",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 374
+     },
+     {
+      "id": "transaction_shutdown_rollback",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 421
+     }
+    ],
+    "note": "Local diagnostic only; no performance/Agent scores or platform callbacks."
+   },
+   "comparisons": {
+    "cluster-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 534.948095,
+       "B_bytes": 6770688,
+       "M_bytes": 9850880
+      },
+      "candidate": {
+       "T_ms": 476.542336,
+       "B_bytes": 5746688,
+       "M_bytes": 9306112
+      },
+      "ratio": {
+       "T_ms": 0.8908197644857488,
+       "B_bytes": 0.8487598306110102,
+       "M_bytes": 0.9446985446985448
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 493.497035,
+       "B_bytes": 6770688,
+       "M_bytes": 18784256
+      },
+      "candidate": {
+       "T_ms": 452.332174,
+       "B_bytes": 5746688,
+       "M_bytes": 12832768
+      },
+      "ratio": {
+       "T_ms": 0.9165853934664471,
+       "B_bytes": 0.8487598306110102,
+       "M_bytes": 0.6831661578717837
+      },
+      "cpu_ms": {
+       "reference": 184.71100000000007,
+       "candidate": 147.89399999999995,
+       "ratio": 0.8006778156146623
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 487.326736,
+       "B_bytes": 7540736,
+       "M_bytes": 20504576
+      },
+      "candidate": {
+       "T_ms": 460.149953,
+       "B_bytes": 6115328,
+       "M_bytes": 14069760
+      },
+      "ratio": {
+       "T_ms": 0.9442329324611486,
+       "B_bytes": 0.8109722976643129,
+       "M_bytes": 0.6861765880942868
+      },
+      "cpu_ms": {
+       "reference": 182.971,
+       "candidate": 151.937,
+       "ratio": 0.830388422208984
+      }
+     }
+    },
+    "cluster-bigint-dfee-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 487.136213,
+       "B_bytes": 5746688,
+       "M_bytes": 9351168
+      },
+      "candidate": {
+       "T_ms": 488.718339,
+       "B_bytes": 5746688,
+       "M_bytes": 9232384
+      },
+      "ratio": {
+       "T_ms": 1.0032478102792985,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9872974156811213
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 884.267773,
+       "B_bytes": 5746688,
+       "M_bytes": 12836864
+      },
+      "candidate": {
+       "T_ms": 451.232576,
+       "B_bytes": 5746688,
+       "M_bytes": 12787712
+      },
+      "ratio": {
+       "T_ms": 0.5102895183764657,
+       "B_bytes": 1.0,
+       "M_bytes": 0.99617102744097
+      },
+      "cpu_ms": {
+       "reference": 569.483,
+       "candidate": 150.461,
+       "ratio": 0.26420630642178966
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 893.186733,
+       "B_bytes": 6115328,
+       "M_bytes": 14188544
+      },
+      "candidate": {
+       "T_ms": 456.500515,
+       "B_bytes": 6115328,
+       "M_bytes": 14139392
+      },
+      "ratio": {
+       "T_ms": 0.5110919118410148,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9965357967667436
+      },
+      "cpu_ms": {
+       "reference": 572.7089999999998,
+       "candidate": 151.83800000000008,
+       "ratio": 0.26512242692187504
+      }
+     }
+    },
+    "grid-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 414.463075,
+       "B_bytes": 5648384,
+       "M_bytes": 8220672
+      },
+      "candidate": {
+       "T_ms": 358.313624,
+       "B_bytes": 2899968,
+       "M_bytes": 6217728
+      },
+      "ratio": {
+       "T_ms": 0.8645248409644213,
+       "B_bytes": 0.5134155184916607,
+       "M_bytes": 0.7563527653213752
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 441.931592,
+       "B_bytes": 5648384,
+       "M_bytes": 14962688
+      },
+      "candidate": {
+       "T_ms": 435.233066,
+       "B_bytes": 2899968,
+       "M_bytes": 7553024
+      },
+      "ratio": {
+       "T_ms": 0.9848426179045375,
+       "B_bytes": 0.5134155184916607,
+       "M_bytes": 0.504790583082398
+      },
+      "cpu_ms": {
+       "reference": 129.50200000000007,
+       "candidate": 120.65899999999999,
+       "ratio": 0.9317153403036241
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 446.939737,
+       "B_bytes": 6414336,
+       "M_bytes": 16662528
+      },
+      "candidate": {
+       "T_ms": 437.199319,
+       "B_bytes": 3268608,
+       "M_bytes": 8916992
+      },
+      "ratio": {
+       "T_ms": 0.9782064175689977,
+       "B_bytes": 0.5095785440613027,
+       "M_bytes": 0.5351524090462143
+      },
+      "cpu_ms": {
+       "reference": 133.66400000000004,
+       "candidate": 121.89099999999996,
+       "ratio": 0.9119209360785246
+      }
+     }
+    },
+    "grid-varchar-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 414.793915,
+       "B_bytes": 5763072,
+       "M_bytes": 8409088
+      },
+      "candidate": {
+       "T_ms": 359.162329,
+       "B_bytes": 3289088,
+       "M_bytes": 6520832
+      },
+      "ratio": {
+       "T_ms": 0.8658813835299392,
+       "B_bytes": 0.5707178393745558,
+       "M_bytes": 0.7754505601558694
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 432.453582,
+       "B_bytes": 5763072,
+       "M_bytes": 15126528
+      },
+      "candidate": {
+       "T_ms": 426.431732,
+       "B_bytes": 3289088,
+       "M_bytes": 7610368
+      },
+      "ratio": {
+       "T_ms": 0.986075152916643,
+       "B_bytes": 0.5707178393745558,
+       "M_bytes": 0.5031139994584348
+      },
+      "cpu_ms": {
+       "reference": 126.50799999999998,
+       "candidate": 120.10500000000002,
+       "ratio": 0.9493866000569137
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 441.282303,
+       "B_bytes": 6529024,
+       "M_bytes": 17027072
+      },
+      "candidate": {
+       "T_ms": 432.103555,
+       "B_bytes": 3657728,
+       "M_bytes": 8925184
+      },
+      "ratio": {
+       "T_ms": 0.9791998275534742,
+       "B_bytes": 0.5602258469259724,
+       "M_bytes": 0.5241760885253789
+      },
+      "cpu_ms": {
+       "reference": 131.58700000000005,
+       "candidate": 122.519,
+       "ratio": 0.9310874174500517
+      }
+     }
+    },
+    "outlier-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 557.278778,
+       "B_bytes": 9281536,
+       "M_bytes": 12369920
+      },
+      "candidate": {
+       "T_ms": 520.904978,
+       "B_bytes": 8204288,
+       "M_bytes": 11968512
+      },
+      "ratio": {
+       "T_ms": 0.9347296157041172,
+       "B_bytes": 0.8839364518976169,
+       "M_bytes": 0.9675496688741722
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 495.863996,
+       "B_bytes": 9281536,
+       "M_bytes": 21504000
+      },
+      "candidate": {
+       "T_ms": 474.591086,
+       "B_bytes": 8204288,
+       "M_bytes": 14422016
+      },
+      "ratio": {
+       "T_ms": 0.9570993051086533,
+       "B_bytes": 0.8839364518976169,
+       "M_bytes": 0.6706666666666666
+      },
+      "cpu_ms": {
+       "reference": 187.11500000000007,
+       "candidate": 167.93599999999998,
+       "ratio": 0.8975015364882555
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 489.107898,
+       "B_bytes": 10051584,
+       "M_bytes": 23101440
+      },
+      "candidate": {
+       "T_ms": 482.420031,
+       "B_bytes": 8572928,
+       "M_bytes": 15769600
+      },
+      "ratio": {
+       "T_ms": 0.9863263974526946,
+       "B_bytes": 0.8528932355338223,
+       "M_bytes": 0.6826241134751773
+      },
+      "cpu_ms": {
+       "reference": 188.00599999999997,
+       "candidate": 171.35200000000003,
+       "ratio": 0.9114177207110414
+      }
+     }
+    },
+    "outlier-bigint-dfee-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 507.003614,
+       "B_bytes": 8204288,
+       "M_bytes": 11935744
+      },
+      "candidate": {
+       "T_ms": 494.1501,
+       "B_bytes": 8204288,
+       "M_bytes": 11751424
+      },
+      "ratio": {
+       "T_ms": 0.9746480820943418,
+       "B_bytes": 1.0,
+       "M_bytes": 0.984557309540151
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 890.478555,
+       "B_bytes": 8204288,
+       "M_bytes": 14487552
+      },
+      "candidate": {
+       "T_ms": 479.214134,
+       "B_bytes": 8204288,
+       "M_bytes": 14458880
+      },
+      "ratio": {
+       "T_ms": 0.5381534808550218,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9980209216850439
+      },
+      "cpu_ms": {
+       "reference": 573.463,
+       "candidate": 168.24900000000002,
+       "ratio": 0.2933912039660798
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 885.776847,
+       "B_bytes": 8572928,
+       "M_bytes": 15794176
+      },
+      "candidate": {
+       "T_ms": 475.488368,
+       "B_bytes": 8572928,
+       "M_bytes": 15671296
+      },
+      "ratio": {
+       "T_ms": 0.53680378936344,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9922199170124482
+      },
+      "cpu_ms": {
+       "reference": 572.145,
+       "candidate": 170.39499999999992,
+       "ratio": 0.2978178608569505
+      }
+     }
+    },
+    "positive-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 545.530181,
+       "B_bytes": 9195520,
+       "M_bytes": 12255232
+      },
+      "candidate": {
+       "T_ms": 512.111909,
+       "B_bytes": 8204288,
+       "M_bytes": 11997184
+      },
+      "ratio": {
+       "T_ms": 0.9387416623975934,
+       "B_bytes": 0.8922048997772829,
+       "M_bytes": 0.9789438502673797
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 465.655515,
+       "B_bytes": 9195520,
+       "M_bytes": 21254144
+      },
+      "candidate": {
+       "T_ms": 456.858575,
+       "B_bytes": 8204288,
+       "M_bytes": 14475264
+      },
+      "ratio": {
+       "T_ms": 0.9811084810194936,
+       "B_bytes": 0.8922048997772829,
+       "M_bytes": 0.6810560801695895
+      },
+      "cpu_ms": {
+       "reference": 161.66100000000006,
+       "candidate": 149.748,
+       "ratio": 0.92630875721417
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 474.71249,
+       "B_bytes": 9965568,
+       "M_bytes": 22978560
+      },
+      "candidate": {
+       "T_ms": 461.62435,
+       "B_bytes": 8572928,
+       "M_bytes": 15908864
+      },
+      "ratio": {
+       "T_ms": 0.9724293329632006,
+       "B_bytes": 0.8602548294286889,
+       "M_bytes": 0.6923351158645277
+      },
+      "cpu_ms": {
+       "reference": 160.54999999999995,
+       "candidate": 152.83300000000003,
+       "ratio": 0.9519339769542203
+      }
+     }
+    }
+   }
+  },
+  {
+   "artifact": "full2882-2-43453551018",
+   "rounds_per_host": 3,
+   "queries_per_sample": 1000,
+   "ctest_all_passed": true,
+   "public_result": {
+    "scope": "public-protocol-check",
+    "passed": true,
+    "cases": [
+     {
+      "id": "sql_crud",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 174
+     },
+     {
+      "id": "sql_comparisons",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 203
+     },
+     {
+      "id": "sql_ordering",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 167
+     },
+     {
+      "id": "sql_empty",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 176
+     },
+     {
+      "id": "sql_primary_key",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 165
+     },
+     {
+      "id": "sql_unicode",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 167
+     },
+     {
+      "id": "sql_bigint",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 170
+     },
+     {
+      "id": "sql_unsupported",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 173
+     },
+     {
+      "id": "storage_restart",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 314
+     },
+     {
+      "id": "vector_euclidean",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 225
+     },
+     {
+      "id": "transaction_commit",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 183
+     },
+     {
+      "id": "transaction_rollback",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 176
+     },
+     {
+      "id": "storage_mutations",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 307
+     },
+     {
+      "id": "storage_multiple_tables",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 316
+     },
+     {
+      "id": "vector_ties_and_filter",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 192
+     },
+     {
+      "id": "vector_float32",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 181
+     },
+     {
+      "id": "vector_index_maintenance",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 329
+     },
+     {
+      "id": "transaction_failed_insert",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 377
+     },
+     {
+      "id": "transaction_autocommit_atomic",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 337
+     },
+     {
+      "id": "transaction_shutdown_rollback",
+      "status": "PASS",
+      "message": "",
+      "duration_ms": 429
+     }
+    ],
+    "note": "Local diagnostic only; no performance/Agent scores or platform callbacks."
+   },
+   "comparisons": {
+    "cluster-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 466.77387,
+       "B_bytes": 6770688,
+       "M_bytes": 9711616
+      },
+      "candidate": {
+       "T_ms": 451.252865,
+       "B_bytes": 5746688,
+       "M_bytes": 9498624
+      },
+      "ratio": {
+       "T_ms": 0.9667483421897631,
+       "B_bytes": 0.8487598306110102,
+       "M_bytes": 0.9780683256010122
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 596.8238,
+       "B_bytes": 6770688,
+       "M_bytes": 18747392
+      },
+      "candidate": {
+       "T_ms": 434.178547,
+       "B_bytes": 5746688,
+       "M_bytes": 12816384
+      },
+      "ratio": {
+       "T_ms": 0.7274819586618362,
+       "B_bytes": 0.8487598306110102,
+       "M_bytes": 0.6836355691500983
+      },
+      "cpu_ms": {
+       "reference": 257.55299999999994,
+       "candidate": 160.75400000000002,
+       "ratio": 0.6241589109814293
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 567.079964,
+       "B_bytes": 7540736,
+       "M_bytes": 20475904
+      },
+      "candidate": {
+       "T_ms": 441.41873,
+       "B_bytes": 6115328,
+       "M_bytes": 14106624
+      },
+      "ratio": {
+       "T_ms": 0.7784065000046448,
+       "B_bytes": 0.8109722976643129,
+       "M_bytes": 0.6889377875575114
+      },
+      "cpu_ms": {
+       "reference": 245.94600000000003,
+       "candidate": 162.66299999999995,
+       "ratio": 0.661376887609475
+      }
+     }
+    },
+    "cluster-bigint-dfee-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 455.70113,
+       "B_bytes": 5746688,
+       "M_bytes": 9256960
+      },
+      "candidate": {
+       "T_ms": 455.299589,
+       "B_bytes": 5746688,
+       "M_bytes": 9445376
+      },
+      "ratio": {
+       "T_ms": 0.9991188501112561,
+       "B_bytes": 1.0,
+       "M_bytes": 1.020353982300885
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 993.867817,
+       "B_bytes": 5746688,
+       "M_bytes": 12787712
+      },
+      "candidate": {
+       "T_ms": 442.109878,
+       "B_bytes": 5746688,
+       "M_bytes": 12836864
+      },
+      "ratio": {
+       "T_ms": 0.44483770420750024,
+       "B_bytes": 1.0,
+       "M_bytes": 1.0038436899423446
+      },
+      "cpu_ms": {
+       "reference": 669.485,
+       "candidate": 160.962,
+       "ratio": 0.24042659656302978
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 985.148557,
+       "B_bytes": 6115328,
+       "M_bytes": 14139392
+      },
+      "candidate": {
+       "T_ms": 450.898405,
+       "B_bytes": 6115328,
+       "M_bytes": 14163968
+      },
+      "ratio": {
+       "T_ms": 0.4576958488099374,
+       "B_bytes": 1.0,
+       "M_bytes": 1.0017381228273465
+      },
+      "cpu_ms": {
+       "reference": 667.059,
+       "candidate": 168.19399999999996,
+       "ratio": 0.2521426140716188
+      }
+     }
+    },
+    "grid-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 391.366379,
+       "B_bytes": 5648384,
+       "M_bytes": 8044544
+      },
+      "candidate": {
+       "T_ms": 344.209843,
+       "B_bytes": 2899968,
+       "M_bytes": 6189056
+      },
+      "ratio": {
+       "T_ms": 0.8795079533390373,
+       "B_bytes": 0.5134155184916607,
+       "M_bytes": 0.7693482688391039
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 440.603799,
+       "B_bytes": 5648384,
+       "M_bytes": 15007744
+      },
+      "candidate": {
+       "T_ms": 400.095591,
+       "B_bytes": 2899968,
+       "M_bytes": 7589888
+      },
+      "ratio": {
+       "T_ms": 0.9080620546351668,
+       "B_bytes": 0.5134155184916607,
+       "M_bytes": 0.5057314410480349
+      },
+      "cpu_ms": {
+       "reference": 157.94500000000005,
+       "candidate": 128.25800000000004,
+       "ratio": 0.812042166576973
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 490.970317,
+       "B_bytes": 6414336,
+       "M_bytes": 16723968
+      },
+      "candidate": {
+       "T_ms": 419.296662,
+       "B_bytes": 3268608,
+       "M_bytes": 8847360
+      },
+      "ratio": {
+       "T_ms": 0.8540163172430646,
+       "B_bytes": 0.5095785440613027,
+       "M_bytes": 0.5290227773695811
+      },
+      "cpu_ms": {
+       "reference": 172.35000000000002,
+       "candidate": 131.88700000000006,
+       "ratio": 0.765227734261677
+      }
+     }
+    },
+    "grid-varchar-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 386.993925,
+       "B_bytes": 5763072,
+       "M_bytes": 8441856
+      },
+      "candidate": {
+       "T_ms": 331.902619,
+       "B_bytes": 3289088,
+       "M_bytes": 6537216
+      },
+      "ratio": {
+       "T_ms": 0.8576429694600504,
+       "B_bytes": 0.5707178393745558,
+       "M_bytes": 0.7743813682678311
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 470.79061,
+       "B_bytes": 5763072,
+       "M_bytes": 15298560
+      },
+      "candidate": {
+       "T_ms": 421.805055,
+       "B_bytes": 3289088,
+       "M_bytes": 7675904
+      },
+      "ratio": {
+       "T_ms": 0.8959504417473406,
+       "B_bytes": 0.5707178393745558,
+       "M_bytes": 0.5017402945113788
+      },
+      "cpu_ms": {
+       "reference": 161.57099999999997,
+       "candidate": 132.18400000000003,
+       "ratio": 0.8181171126006527
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 474.096528,
+       "B_bytes": 6529024,
+       "M_bytes": 17027072
+      },
+      "candidate": {
+       "T_ms": 415.528455,
+       "B_bytes": 3657728,
+       "M_bytes": 8704000
+      },
+      "ratio": {
+       "T_ms": 0.8764638221522686,
+       "B_bytes": 0.5602258469259724,
+       "M_bytes": 0.5111859514072649
+      },
+      "cpu_ms": {
+       "reference": 161.09799999999996,
+       "candidate": 129.85899999999998,
+       "ratio": 0.8060869781127017
+      }
+     }
+    },
+    "outlier-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 520.926736,
+       "B_bytes": 9281536,
+       "M_bytes": 12222464
+      },
+      "candidate": {
+       "T_ms": 466.745427,
+       "B_bytes": 8204288,
+       "M_bytes": 11960320
+      },
+      "ratio": {
+       "T_ms": 0.8959905390611397,
+       "B_bytes": 0.8839364518976169,
+       "M_bytes": 0.9785522788203753
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 561.990614,
+       "B_bytes": 9281536,
+       "M_bytes": 21319680
+      },
+      "candidate": {
+       "T_ms": 463.242196,
+       "B_bytes": 8204288,
+       "M_bytes": 14278656
+      },
+      "ratio": {
+       "T_ms": 0.8242881365986656,
+       "B_bytes": 0.8839364518976169,
+       "M_bytes": 0.6697406340057637
+      },
+      "cpu_ms": {
+       "reference": 249.21999999999997,
+       "candidate": 174.05200000000002,
+       "ratio": 0.698386967338095
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 572.632355,
+       "B_bytes": 10051584,
+       "M_bytes": 23076864
+      },
+      "candidate": {
+       "T_ms": 487.536391,
+       "B_bytes": 8572928,
+       "M_bytes": 15798272
+      },
+      "ratio": {
+       "T_ms": 0.8513951172039519,
+       "B_bytes": 0.8528932355338223,
+       "M_bytes": 0.6845935392261271
+      },
+      "cpu_ms": {
+       "reference": 260.4309999999999,
+       "candidate": 183.81400000000002,
+       "ratio": 0.7058069123875425
+      }
+     }
+    },
+    "outlier-bigint-dfee-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 480.203979,
+       "B_bytes": 8204288,
+       "M_bytes": 11972608
+      },
+      "candidate": {
+       "T_ms": 509.794588,
+       "B_bytes": 8204288,
+       "M_bytes": 11845632
+      },
+      "ratio": {
+       "T_ms": 1.0616209158899952,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9893944577488881
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 989.584579,
+       "B_bytes": 8204288,
+       "M_bytes": 14401536
+      },
+      "candidate": {
+       "T_ms": 469.017849,
+       "B_bytes": 8204288,
+       "M_bytes": 14491648
+      },
+      "ratio": {
+       "T_ms": 0.473954282385801,
+       "B_bytes": 1.0,
+       "M_bytes": 1.0062571103526734
+      },
+      "cpu_ms": {
+       "reference": 673.4840000000002,
+       "candidate": 178.18599999999998,
+       "ratio": 0.2645734716786144
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 995.590186,
+       "B_bytes": 8572928,
+       "M_bytes": 15757312
+      },
+      "candidate": {
+       "T_ms": 465.817693,
+       "B_bytes": 8572928,
+       "M_bytes": 15654912
+      },
+      "ratio": {
+       "T_ms": 0.4678809610122051,
+       "B_bytes": 1.0,
+       "M_bytes": 0.9935014296854692
+      },
+      "cpu_ms": {
+       "reference": 683.5250000000001,
+       "candidate": 177.15500000000003,
+       "ratio": 0.2591785230971801
+      }
+     }
+    },
+    "positive-bigint-a24-candidate": {
+     "write/unindexed": {
+      "reference": {
+       "T_ms": 528.755433,
+       "B_bytes": 9195520,
+       "M_bytes": 12304384
+      },
+      "candidate": {
+       "T_ms": 468.133192,
+       "B_bytes": 8204288,
+       "M_bytes": 12034048
+      },
+      "ratio": {
+       "T_ms": 0.8853491856224577,
+       "B_bytes": 0.8922048997772829,
+       "M_bytes": 0.978029294274301
+      }
+     },
+     "query/unindexed": {
+      "reference": {
+       "T_ms": 503.988565,
+       "B_bytes": 9195520,
+       "M_bytes": 21278720
+      },
+      "candidate": {
+       "T_ms": 451.976105,
+       "B_bytes": 8204288,
+       "M_bytes": 14249984
+      },
+      "ratio": {
+       "T_ms": 0.8967983331129745,
+       "B_bytes": 0.8922048997772829,
+       "M_bytes": 0.6696823869104909
+      },
+      "cpu_ms": {
+       "reference": 194.00600000000003,
+       "candidate": 161.94799999999998,
+       "ratio": 0.8347576879065594
+      }
+     },
+     "query/indexed": {
+      "reference": {
+       "T_ms": 495.654432,
+       "B_bytes": 9965568,
+       "M_bytes": 23064576
+      },
+      "candidate": {
+       "T_ms": 438.785809,
+       "B_bytes": 8572928,
+       "M_bytes": 15708160
+      },
+      "ratio": {
+       "T_ms": 0.8852655815655048,
+       "B_bytes": 0.8602548294286889,
+       "M_bytes": 0.681051323033209
+      },
+      "cpu_ms": {
+       "reference": 193.50999999999993,
+       "candidate": 163.25800000000004,
+       "ratio": 0.8436669939538013
+      }
+     }
+    }
+   }
+  }
+ ],
+ "source_commit": "eab4636980f4e5878e7c793298423e1772716a68",
+ "run_url": "https://github.com/juanzhi-gcb/seekdb/actions/runs/43453551018",
+ "artifact_manifests": [
+  {
+   "id": 14053569608,
+   "name": "full2882-1-43453551018",
+   "size_in_bytes": 2028948,
+   "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14053569608",
+   "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14053569608/zip",
+   "expired": false,
+   "created_at": "2026-11-13T15:49:27Z",
+   "expires_at": "2026-11-27T15:49:26Z",
+   "updated_at": "2026-11-13T15:49:27Z",
+   "digest": "sha256:a42db31e6f6f521e05c15b60eb20af001e3b9e39a3633a00c9378c130e378612",
+   "workflow_run": {
+    "id": 43453551018,
+    "repository_id": 1433994590,
+    "head_repository_id": 1433994590,
+    "head_branch": "codex/post2882-full-20261113",
+    "head_sha": "eab4636980f4e5878e7c793298423e1772716a68"
+   }
+  },
+  {
+   "id": 14054565860,
+   "name": "full2882-2-43453551018",
+   "size_in_bytes": 2054751,
+   "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14054565860",
+   "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14054565860/zip",
+   "expired": false,
+   "created_at": "2026-11-13T15:48:26Z",
+   "expires_at": "2026-11-27T15:48:24Z",
+   "updated_at": "2026-11-13T15:48:26Z",
+   "digest": "sha256:54fceeac1e809b11ef19593f165a769ebc3d0c99113fac20f97e9a4b3c5f4acc",
+   "workflow_run": {
+    "id": 43453551018,
+    "repository_id": 1433994590,
+    "head_repository_id": 1433994590,
+    "head_branch": "codex/post2882-full-20261113",
+    "head_sha": "eab4636980f4e5878e7c793298423e1772716a68"
+   }
+  }
+ ],
+ "scoring_interpretation": {
+  "decision": "Keep adaptive exact filtering and transposed fallback; reject always-on expensive bounds.",
+  "a24_comparison": "All 30 host/profile/phase median T/B/M triples improved; this is not a claim that every round improved.",
+  "dfee_comparison": "Cluster/outlier query T improves on both hosts, B is unchanged, M is near flat. Write T has no stable additional improvement and includes +6.16% in one comparison.",
+  "weights_from_cached_rule": {
+   "write_T": 0.2,
+   "write_B": 0.06666666666666667,
+   "write_M": 0.06666666666666667,
+   "query_T": 0.4,
+   "query_B": 0.13333333333333333,
+   "query_M": 0.13333333333333333
+  },
+  "no_official_prediction": "The published cached normalized formula and platform thousand-scale E differ. No unofficial scale conversion or prediction is made."
+ }
+}

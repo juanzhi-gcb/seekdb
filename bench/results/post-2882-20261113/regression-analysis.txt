@@ -1,0 +1,162 @@
+2882分版本的退化定位与原生对照
+正式dfee：MySQL通过，E2881.914324，相对a24/E3977.995012下降27.553596%；Prompt首次有效6.5。
+已复现的缺陷：候选判定失败时，按行向量布局失去原有转置SIMD回退；这解释本地聚集/离群数据的查询退化。没有正式T/B/M或隐藏输入，不能断言它是官方全部退分的唯一原因。
+实验：10000×128维，两类查询计划，保持全量精确结果及重启核验。前期筛选每台2轮200查询，full2882完整对照每台3轮1000查询。B/M为实际物理I/O与cgroup峰值；不同负载的绝对T不能混比，亦不能换算正式E。
+
+centered2882-1-43451227724
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-dfee-candidate/write/unindexed | -3.34% | +0.00% | +0.62% | 未拆分
+cluster-dfee-candidate/query/unindexed | -54.12% | +0.00% | -0.88% | -75.44%
+cluster-dfee-candidate/query/indexed | -51.96% | +0.00% | -1.17% | -74.49%
+cluster-fallback-candidate/write/unindexed | +90.05% | +0.00% | +1.37% | 未拆分
+cluster-fallback-candidate/query/unindexed | -15.31% | +0.00% | -0.06% | -30.37%
+cluster-fallback-candidate/query/indexed | -14.28% | +0.00% | +0.04% | -30.33%
+continuous-dfee-candidate/write/unindexed | +10.87% | +0.00% | -0.51% | 未拆分
+continuous-dfee-candidate/query/unindexed | -0.97% | +0.00% | -0.83% | +2.64%
+continuous-dfee-candidate/query/indexed | +1.27% | +0.00% | -2.10% | +3.31%
+continuous-fallback-candidate/write/unindexed | -7.13% | +0.00% | +1.14% | 未拆分
+continuous-fallback-candidate/query/unindexed | -2.99% | +0.00% | -0.28% | +1.38%
+continuous-fallback-candidate/query/indexed | +1.92% | +0.00% | +0.63% | +1.75%
+outlier-dfee-candidate/write/unindexed | -25.72% | +0.00% | -0.07% | 未拆分
+outlier-dfee-candidate/query/unindexed | -44.52% | +0.00% | -1.66% | -63.17%
+outlier-dfee-candidate/query/indexed | -44.88% | +0.00% | -1.25% | -64.04%
+outlier-fallback-candidate/write/unindexed | -4.60% | +0.00% | -0.57% | 未拆分
+outlier-fallback-candidate/query/unindexed | -2.34% | +0.00% | +1.94% | -2.20%
+outlier-fallback-candidate/query/indexed | -0.54% | +0.00% | -0.80% | +0.50%
+positive-dfee-candidate/write/unindexed | +154.29% | +0.00% | -1.66% | 未拆分
+positive-dfee-candidate/query/unindexed | -3.10% | +0.00% | -0.31% | +1.35%
+positive-dfee-candidate/query/indexed | +2.22% | +0.00% | +0.00% | +5.53%
+positive-fallback-candidate/write/unindexed | -15.38% | +0.00% | +1.83% | 未拆分
+positive-fallback-candidate/query/unindexed | -2.73% | +0.00% | +1.90% | +0.93%
+positive-fallback-candidate/query/indexed | -0.05% | +0.00% | +0.34% | +0.50%
+
+centered2882-2-43451227724
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-dfee-candidate/write/unindexed | +7.09% | +0.00% | +1.98% | 未拆分
+cluster-dfee-candidate/query/unindexed | -50.28% | +0.00% | +0.60% | -73.85%
+cluster-dfee-candidate/query/indexed | -49.43% | +0.00% | -0.99% | -73.30%
+cluster-fallback-candidate/write/unindexed | -2.36% | +0.00% | +3.38% | 未拆分
+cluster-fallback-candidate/query/unindexed | -14.28% | +0.00% | -0.24% | -30.66%
+cluster-fallback-candidate/query/indexed | -15.25% | +0.00% | +0.63% | -34.04%
+continuous-dfee-candidate/write/unindexed | +7.87% | +0.00% | -0.33% | 未拆分
+continuous-dfee-candidate/query/unindexed | -1.74% | +0.00% | -0.48% | +2.09%
+continuous-dfee-candidate/query/indexed | +0.93% | +0.00% | +0.43% | +1.46%
+continuous-fallback-candidate/write/unindexed | +1.38% | +0.00% | -1.68% | 未拆分
+continuous-fallback-candidate/query/unindexed | -0.51% | +0.00% | -1.96% | +1.96%
+continuous-fallback-candidate/query/indexed | -1.30% | +0.00% | +0.30% | -2.04%
+outlier-dfee-candidate/write/unindexed | +3.21% | +0.00% | -0.24% | 未拆分
+outlier-dfee-candidate/query/unindexed | -39.48% | +0.00% | +0.78% | -57.71%
+outlier-dfee-candidate/query/indexed | -39.68% | +0.00% | +0.99% | -58.02%
+outlier-fallback-candidate/write/unindexed | -1.89% | +0.00% | -0.17% | 未拆分
+outlier-fallback-candidate/query/unindexed | -0.57% | +0.00% | +0.06% | +1.49%
+outlier-fallback-candidate/query/indexed | -1.95% | +0.00% | +0.41% | -2.02%
+positive-dfee-candidate/write/unindexed | +2.39% | +0.00% | +0.66% | 未拆分
+positive-dfee-candidate/query/unindexed | -1.16% | +0.00% | -0.55% | +2.93%
+positive-dfee-candidate/query/indexed | +0.90% | +0.00% | -0.19% | +2.72%
+positive-fallback-candidate/write/unindexed | +5.30% | +0.00% | -0.74% | 未拆分
+positive-fallback-candidate/query/unindexed | -5.26% | +0.00% | +0.55% | -4.02%
+positive-fallback-candidate/query/indexed | -2.07% | +0.00% | +0.65% | -3.54%
+
+full2882-1-43453551018
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-bigint-a24-candidate/write/unindexed | -10.92% | -15.12% | -5.53% | 未拆分
+cluster-bigint-a24-candidate/query/unindexed | -8.34% | -15.12% | -31.68% | -19.93%
+cluster-bigint-a24-candidate/query/indexed | -5.58% | -18.90% | -31.38% | -16.96%
+cluster-bigint-dfee-candidate/write/unindexed | +0.32% | +0.00% | -1.27% | 未拆分
+cluster-bigint-dfee-candidate/query/unindexed | -48.97% | +0.00% | -0.38% | -73.58%
+cluster-bigint-dfee-candidate/query/indexed | -48.89% | +0.00% | -0.35% | -73.49%
+grid-bigint-a24-candidate/write/unindexed | -13.55% | -48.66% | -24.36% | 未拆分
+grid-bigint-a24-candidate/query/unindexed | -1.52% | -48.66% | -49.52% | -6.83%
+grid-bigint-a24-candidate/query/indexed | -2.18% | -49.04% | -46.48% | -8.81%
+grid-varchar-a24-candidate/write/unindexed | -13.41% | -42.93% | -22.45% | 未拆分
+grid-varchar-a24-candidate/query/unindexed | -1.39% | -42.93% | -49.69% | -5.06%
+grid-varchar-a24-candidate/query/indexed | -2.08% | -43.98% | -47.58% | -6.89%
+outlier-bigint-a24-candidate/write/unindexed | -6.53% | -11.61% | -3.25% | 未拆分
+outlier-bigint-a24-candidate/query/unindexed | -4.29% | -11.61% | -32.93% | -10.25%
+outlier-bigint-a24-candidate/query/indexed | -1.37% | -14.71% | -31.74% | -8.86%
+outlier-bigint-dfee-candidate/write/unindexed | -2.54% | +0.00% | -1.54% | 未拆分
+outlier-bigint-dfee-candidate/query/unindexed | -46.18% | +0.00% | -0.20% | -70.66%
+outlier-bigint-dfee-candidate/query/indexed | -46.32% | +0.00% | -0.78% | -70.22%
+positive-bigint-a24-candidate/write/unindexed | -6.13% | -10.78% | -2.11% | 未拆分
+positive-bigint-a24-candidate/query/unindexed | -1.89% | -10.78% | -31.89% | -7.37%
+positive-bigint-a24-candidate/query/indexed | -2.76% | -13.97% | -30.77% | -4.81%
+
+full2882-2-43453551018
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-bigint-a24-candidate/write/unindexed | -3.33% | -15.12% | -2.19% | 未拆分
+cluster-bigint-a24-candidate/query/unindexed | -27.25% | -15.12% | -31.64% | -37.58%
+cluster-bigint-a24-candidate/query/indexed | -22.16% | -18.90% | -31.11% | -33.86%
+cluster-bigint-dfee-candidate/write/unindexed | -0.09% | +0.00% | +2.04% | 未拆分
+cluster-bigint-dfee-candidate/query/unindexed | -55.52% | +0.00% | +0.38% | -75.96%
+cluster-bigint-dfee-candidate/query/indexed | -54.23% | +0.00% | +0.17% | -74.79%
+grid-bigint-a24-candidate/write/unindexed | -12.05% | -48.66% | -23.07% | 未拆分
+grid-bigint-a24-candidate/query/unindexed | -9.19% | -48.66% | -49.43% | -18.80%
+grid-bigint-a24-candidate/query/indexed | -14.60% | -49.04% | -47.10% | -23.48%
+grid-varchar-a24-candidate/write/unindexed | -14.24% | -42.93% | -22.56% | 未拆分
+grid-varchar-a24-candidate/query/unindexed | -10.40% | -42.93% | -49.83% | -18.19%
+grid-varchar-a24-candidate/query/indexed | -12.35% | -43.98% | -48.88% | -19.39%
+outlier-bigint-a24-candidate/write/unindexed | -10.40% | -11.61% | -2.14% | 未拆分
+outlier-bigint-a24-candidate/query/unindexed | -17.57% | -11.61% | -33.03% | -30.16%
+outlier-bigint-a24-candidate/query/indexed | -14.86% | -14.71% | -31.54% | -29.42%
+outlier-bigint-dfee-candidate/write/unindexed | +6.16% | +0.00% | -1.06% | 未拆分
+outlier-bigint-dfee-candidate/query/unindexed | -52.60% | +0.00% | +0.63% | -73.54%
+outlier-bigint-dfee-candidate/query/indexed | -53.21% | +0.00% | -0.65% | -74.08%
+positive-bigint-a24-candidate/write/unindexed | -11.47% | -10.78% | -2.20% | 未拆分
+positive-bigint-a24-candidate/query/unindexed | -10.32% | -10.78% | -33.03% | -16.52%
+positive-bigint-a24-candidate/query/indexed | -11.47% | -13.97% | -31.89% | -15.63%
+
+regression2882-1-43449936712
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-a24-dfee/write/unindexed | -13.62% | -15.12% | -5.24% | 未拆分
+cluster-a24-dfee/query/unindexed | +79.15% | -15.12% | -31.61% | +208.93%
+cluster-a24-dfee/query/indexed | +84.90% | -18.90% | -30.98% | +213.13%
+cluster-dfee-candidate/write/unindexed | -2.60% | +0.00% | -0.09% | 未拆分
+cluster-dfee-candidate/query/unindexed | -42.49% | +0.00% | +0.34% | -62.46%
+cluster-dfee-candidate/query/indexed | -42.05% | +0.54% | +0.76% | -62.51%
+continuous-a24-dfee/write/unindexed | -4.63% | -11.61% | -1.47% | 未拆分
+continuous-a24-dfee/query/unindexed | -3.90% | -11.61% | -33.05% | -7.83%
+continuous-a24-dfee/query/indexed | -2.23% | -14.68% | -31.10% | -5.62%
+continuous-dfee-candidate/write/unindexed | -1.51% | +0.00% | -0.33% | 未拆分
+continuous-dfee-candidate/query/unindexed | -0.73% | +0.00% | +0.14% | +0.57%
+continuous-dfee-candidate/query/indexed | +0.68% | +0.00% | +0.47% | +2.22%
+outlier-a24-dfee/write/unindexed | -8.58% | -11.61% | -4.17% | 未拆分
+outlier-a24-dfee/query/unindexed | +83.40% | -11.61% | -33.31% | +217.38%
+outlier-a24-dfee/query/indexed | +82.71% | -14.71% | -31.05% | +211.18%
+outlier-dfee-candidate/write/unindexed | -3.94% | +0.00% | +1.57% | 未拆分
+outlier-dfee-candidate/query/unindexed | -41.26% | +0.00% | -1.75% | -61.47%
+outlier-dfee-candidate/query/indexed | -41.67% | +0.00% | +1.15% | -61.88%
+positive-a24-dfee/write/unindexed | -6.75% | -10.78% | -3.56% | 未拆分
+positive-a24-dfee/query/unindexed | -6.80% | -10.78% | -31.34% | -10.77%
+positive-a24-dfee/query/indexed | -2.46% | -13.97% | -30.95% | -7.37%
+positive-dfee-candidate/write/unindexed | +2.45% | +0.00% | +0.90% | 未拆分
+positive-dfee-candidate/query/unindexed | -0.30% | +0.00% | -1.20% | +3.42%
+positive-dfee-candidate/query/indexed | +1.13% | +0.00% | -0.52% | +2.37%
+
+regression2882-2-43449936712
+场景/对照/阶段 | T变化 | B变化 | M变化 | 数据库CPU变化
+cluster-a24-dfee/write/unindexed | -13.82% | -15.12% | -5.38% | 未拆分
+cluster-a24-dfee/query/unindexed | +90.23% | -15.12% | -31.34% | +234.22%
+cluster-a24-dfee/query/indexed | +98.84% | -18.90% | -30.46% | +243.50%
+cluster-dfee-candidate/write/unindexed | +12.50% | +0.00% | -0.09% | 未拆分
+cluster-dfee-candidate/query/unindexed | -49.11% | +0.00% | +0.03% | -66.86%
+cluster-dfee-candidate/query/indexed | -46.33% | +0.00% | -0.77% | -65.68%
+continuous-a24-dfee/write/unindexed | -11.55% | -11.61% | -4.63% | 未拆分
+continuous-a24-dfee/query/unindexed | -4.59% | -11.61% | -32.96% | -8.48%
+continuous-a24-dfee/query/indexed | -6.56% | -14.68% | -30.96% | -9.08%
+continuous-dfee-candidate/write/unindexed | -1.61% | +0.00% | -0.46% | 未拆分
+continuous-dfee-candidate/query/unindexed | -3.67% | +0.00% | -1.47% | +0.83%
+continuous-dfee-candidate/query/indexed | -0.43% | +0.00% | +2.21% | +0.55%
+outlier-a24-dfee/write/unindexed | -3.56% | -11.61% | -4.30% | 未拆分
+outlier-a24-dfee/query/unindexed | +96.85% | -11.61% | -32.53% | +241.85%
+outlier-a24-dfee/query/indexed | +96.07% | -14.71% | -31.85% | +231.07%
+outlier-dfee-candidate/write/unindexed | +3.31% | +0.00% | -1.45% | 未拆分
+outlier-dfee-candidate/query/unindexed | -45.45% | +0.00% | +0.91% | -64.06%
+outlier-dfee-candidate/query/indexed | -45.54% | +0.00% | +0.14% | -64.28%
+positive-a24-dfee/write/unindexed | -13.16% | -10.78% | -2.84% | 未拆分
+positive-a24-dfee/query/unindexed | -8.84% | -10.78% | -33.02% | -8.78%
+positive-a24-dfee/query/indexed | -1.32% | -13.97% | -30.52% | -6.41%
+positive-dfee-candidate/write/unindexed | +2.24% | +0.00% | -0.58% | 未拆分
+positive-dfee-candidate/query/unindexed | -4.39% | +0.00% | -0.73% | +0.93%
+positive-dfee-candidate/query/indexed | +3.05% | +0.00% | +0.69% | +6.57%
+
+Prompt：保留有效结构，关联本次正式反馈和真实修正链；补充fsync计时窗口的反证，修正旧Agent说明与当前sqrt后排序行为的矛盾。新增说明均归Agent，不把机制解释包装为用户历史理解。草稿尚不代表新正式Prompt分数。
