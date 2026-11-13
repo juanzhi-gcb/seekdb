@@ -1,7 +1,7 @@
 name: Lossless compact word codec screening
 on:
   push:
-    branches: ['codex/certified-halfcache-20261113']
+    branches: ['codex/certified-halfwords-20261113']
 permissions:
   contents: read
 jobs:
@@ -16,7 +16,9 @@ jobs:
         run: |
           mkdir codec-results
           lscpu > codec-results/lscpu.txt
-          g++ -std=c++20 -O3 -Isrc -Iinclude bench/half_words_probe.cpp -o codec-results/probe
+          g++ -std=c++20 -O3 -Isrc -Iinclude bench/half_words_integrated_probe.cpp -o codec-results/probe
+          g++ -std=c++20 -O3 -Isrc -Iinclude tests/lossless_words_tests.cpp -o codec-results/edge-tests
+          codec-results/edge-tests | tee codec-results/edges.txt
           codec-results/probe | tee codec-results/paired.jsonl
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

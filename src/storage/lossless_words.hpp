@@ -8,10 +8,21 @@
 namespace minivectordb::detail::halfwords {
 inline float word(const char*p){float x;std::memcpy(&x,p,4);return x;}
 inline bool transform(std::string_view s,std::string& out){
- unsigned align=0;std::size_t best=0;
- for(unsigned a=0;a<4&&a<=s.size();++a){std::size_t count=0;const auto words=(s.size()-a)/4;const auto samples=std::min(words,std::size_t(16));for(std::size_t i=0;i<samples;++i){const auto p=a+4*(i*words/samples);count+=minivectordb::detail::half_exact(word(s.data()+p));}if(count>best){align=a;best=count;}}
- // General-purpose lossless bit pattern admission, not a SQL/vector assumption.
- if(best<4)return false;
+ unsigned align=0;std::size_t best=0;int best_balance=0;
+ for(unsigned a=0;a<4&&a<=s.size();++a){
+  std::size_t count=0;int balance=0;std::uint32_t tag=0;
+  const auto words=(s.size()-a)/4,samples=std::min(words,std::size_t(16));
+  for(std::size_t i=0;i<samples;++i){const auto p=a+4*(i*words/samples);const float value=word(s.data()+p);
+   if(minivectordb::detail::half_exact(value)){
+    ++count;const auto bits=std::bit_cast<std::uint32_t>(value);
+    if(!balance){tag=bits;balance=1;}else balance+=bits==tag?1:-1;
+   }
+  }
+  if(count>best){align=a;best=count;best_balance=balance;}
+ }
+ // A dominant repeated word is already well handled by byte-plane runs.
+ // This is a compression-selection heuristic only; all encodings remain exact.
+ if(best<4 || best_balance>int(best/2))return false;
  out.clear();out.reserve(s.size());out+=char(align);out.append(s.substr(0,align));std::size_t p=align;
  while(p+4<=s.size()){const auto n=std::min(std::size_t(32),(s.size()-p)/4);std::uint32_t mask=0;for(unsigned i=0;i<n;++i)if(minivectordb::detail::half_exact(word(s.data()+p+i*4)))mask|=1U<<i;out.append(reinterpret_cast<const char*>(&mask),4);
   for(unsigned i=0;i<n;++i){if(mask&(1U<<i)){auto h=minivectordb::detail::half_encode_exact(word(s.data()+p+i*4));out.append(reinterpret_cast<const char*>(&h),2);}else out.append(s.substr(p+i*4,4));}p+=n*4;

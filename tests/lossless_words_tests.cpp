@@ -23,5 +23,10 @@ int main(){try{
  // Non-finite bit patterns are raw escapes, never converted; both signs of zero survive.
  std::string raw;for(unsigned i=0;i<100;++i)for(std::uint32_t x:{0U,0x80000000U,0x7f800000U,0xff800000U,0x7fc01234U,0x7f801234U})raw.append(reinterpret_cast<const char*>(&x),4);
  std::string coded;CHECK(pack_bytes(raw,coded,true,true));CHECK(unpack_bytes(coded,4064,true)==raw);
+ for(float constant:{0.f,1.f,0.25f}) {
+   std::string input(805,'a');for(unsigned p=25;p<537;p+=4)std::memcpy(input.data()+p,&constant,4);
+   std::string old,newer;CHECK(pack_bytes(input,old,true));CHECK(pack_bytes(input,newer,true,true));
+   CHECK(newer.size()<=old.size());CHECK(unpack_bytes(newer,4064,true)==input);
+ }
  CHECK(newframes>100);std::cout<<"lossless words "<<cases<<" cases, "<<newframes<<" new frames; truncation, size bounds, legacy rejection, NaN bits passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
