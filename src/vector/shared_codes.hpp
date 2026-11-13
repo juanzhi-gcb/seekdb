@@ -50,10 +50,13 @@ public:
   void allocate(std::size_t rows,std::size_t dim,const SharedCodePlan& plan) {
     clear();rows_=rows;dim_=dim;padded_=(dim+3)/4*4;width_=plan.width();
     fine_=plan.power();shift_=plan.shift();stride_=(dim*width_+7)/8;
-    codes_=std::make_unique<std::int8_t[]>(rows*padded_);
-    residuals_=std::make_unique<unsigned char[]>(rows*stride_);
+    // Do not touch the whole arena while the source file is still cached.
+    codes_.reset(new std::int8_t[rows*padded_]);
+    residuals_.reset(new unsigned char[rows*stride_]);
   }
   bool append(std::size_t row,std::span<const float> values) noexcept {
+    std::fill_n(codes_.get()+row*padded_,padded_,std::int8_t(0));
+    if(stride_)std::memset(residuals_.get()+row*stride_,0,stride_);
     for(std::size_t d=0;d<dim_;++d){
       const auto x=values[d];if(!std::isfinite(x)||std::bit_cast<std::uint32_t>(x)==0x80000000U)return false;
       const double scaled=std::ldexp(double(x),-fine_);
