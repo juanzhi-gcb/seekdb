@@ -1,6 +1,10 @@
 #include "minivectordb/value.hpp"
 #include "text_validation.hpp"
 #include <charconv>
+#include <bit>
+#if defined(__x86_64__) && defined(__GNUC__)
+#include <immintrin.h>
+#endif
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -24,16 +28,15 @@ std::size_t validate_text_impl(std::string_view text,std::size_t limit) {
   for(std::size_t i=0;i<text.size();) {
     if constexpr(AsciiBlocks) {
       if(text.size()-i>=sizeof(std::uint64_t)) {
-        std::uint64_t block;std::memcpy(&block,text.data()+i,sizeof(block));
+        std::uint64_t block;
+        std::memcpy(&block,text.data()+i,sizeof(block));
+        // This mask identifies non-ASCII bytes on either endian order. A mixed
+        // block leaves i unchanged so the scalar parser validates it normally.
         if((block&UINT64_C(0x8080808080808080))==0) {
-          std::size_t advance=8;
-          // Inspect the wider suffix only after the first eight bytes prove
-          // ASCII. Mixed UTF-8 must not pay four wide loads per scalar.
-          if(text.size()-i>=32){std::uint64_t tail[3];std::memcpy(tail,text.data()+i+8,24);
-            if(((tail[0]|tail[1]|tail[2])&UINT64_C(0x8080808080808080))==0)advance=32;
-          }
-          if(limit-count<advance)throw std::invalid_argument("text exceeds scalar length");
-          count+=advance;i+=advance;continue;
+          // Every preceding increment checked the limit, so count<=limit.
+          if(limit-count<sizeof(block))throw std::invalid_argument("text exceeds scalar length");
+          count+=sizeof(block);i+=sizeof(block);
+          continue;
         }
       }
     }
@@ -57,9 +60,35 @@ std::size_t validate_text_impl(std::string_view text,std::size_t limit) {
   return count;
 }
 }
+namespace {
+#if defined(__x86_64__) && defined(__GNUC__)
+__attribute__((target("avx2"),noinline))
+std::size_t ascii_prefix_wide(std::string_view text) noexcept {
+  std::size_t n=0;
+  while(text.size()-n>=32) {
+    auto bytes=_mm256_loadu_si256(reinterpret_cast<const __m256i*>(text.data()+n));
+    auto mask=static_cast<unsigned>(_mm256_movemask_epi8(bytes));
+    if(mask)return n+std::countr_zero(mask);
+    n+=32;
+  }
+  while(n<text.size() && static_cast<unsigned char>(text[n])<128)++n;
+  return n;
+}
+#endif
+}
 std::size_t validate_text(std::string_view text,std::size_t limit) {
   if(detail::text_validation_mode==detail::TextValidationMode::scalar)
     return validate_text_impl<false>(text,limit);
+#if defined(__x86_64__) && defined(__GNUC__)
+  static const bool wide=__builtin_cpu_supports("avx2");
+  // Only scan the initial ASCII run: mixed Unicode retains the original loop.
+  if(text.size()>=64 && static_cast<unsigned char>(text.front())<128 && wide) {
+    const auto n=ascii_prefix_wide(text);
+    if(n>limit)throw std::invalid_argument("text exceeds scalar length");
+    if(n==text.size())return n;
+    return n+validate_text_impl<true>(text.substr(n),limit-n);
+  }
+#endif
   return validate_text_impl<true>(text,limit);
 }
 int compare_text(std::string_view a,std::string_view b) {
