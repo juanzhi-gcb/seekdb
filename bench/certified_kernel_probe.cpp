@@ -27,7 +27,7 @@ int main(){try {
         const detail::BlockVectorSource source=[&](const detail::BlockVectorVisitor& visit){std::array<std::int64_t,16> keys{};
           for(std::size_t b=begin/16*16;b<end;b+=16){std::uint16_t mask=0;for(std::size_t l=0;l<16;++l){keys[l]=std::int64_t(n-b-l);if(b+l>=begin&&b+l<end)mask|=std::uint16_t(1U<<l);}visit(keys,{transposed.data()+b*dim,dim*16},mask);}};
         std::optional<std::vector<Neighbor>> result;
-        if(mode){detail::CandidateStats stats;result=detail::certified_candidates(cache,query,begin,end,10,[](auto){return true;},[&](auto r){return std::int64_t(n-r);},[&](auto r,auto&){return std::span<const float>(vectors.data()+r*dim,dim);},stats);accepted+=bool(result);attempted_exact+=stats.exact;}
+        if(mode){detail::CandidateStats stats;result=detail::certified_candidates(cache,query,begin,end,10,[](auto){return true;},[&](auto r){return std::int64_t(n-r);},[&](auto r,auto&){return std::span<const float>(vectors.data()+r*dim,dim);},stats,true);accepted+=bool(result);attempted_exact+=stats.exact;}
         if(!result)result=detail::exact_top_k_transposed_validated_candidates(query,10,source,true,true,nullptr,&cache);
         if(round==0&&mode==0)reference[q]=*result;
         else {if(result->size()!=reference[q].size())throw std::runtime_error("result size");for(std::size_t i=0;i<result->size();++i)if((*result)[i].key!=reference[q][i].key||std::bit_cast<std::uint64_t>((*result)[i].distance)!=std::bit_cast<std::uint64_t>(reference[q][i].distance))throw std::runtime_error("exact result mismatch");}

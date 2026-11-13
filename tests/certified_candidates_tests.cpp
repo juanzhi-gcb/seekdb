@@ -24,7 +24,7 @@ int main(){try {
       for(std::size_t k:{1u,10u,16u}){
         const auto predicate=[&](std::size_t r){return trial<2||data[r].key%7==0;};
         detail::CandidateStats stats;
-        auto actual=detail::certified_candidates(cache,q,0,rows,k,predicate,[&](auto r){return data[r].key;},[&](auto r,auto&){return std::span<const float>(data[r].value);},stats);
+        auto actual=detail::certified_candidates(cache,q,0,rows,k,predicate,[&](auto r){return data[r].key;},[&](auto r,auto&){return std::span<const float>(data[r].value);},stats,trial<2);
         if(actual){same(*actual,oracle(data,q,k,[&](auto key){return trial<2||key%7==0;}));++accepted;}
         else ++fallbacks;
         CHECK(stats.exact<=64);++checked;
