@@ -1,5 +1,6 @@
 #include "journal_harness.hpp"
 #include <cerrno>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <iostream>
@@ -40,3 +41,4 @@ int main(){try{const auto dir=std::filesystem::path(std::getenv("MVDB_TEST_DIR")
  }
  std::filesystem::remove_all(dir);std::cout<<"writeback: page bounds, no WAIT flags, retry, unsupported fallback, I/O rollback/reopen passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
