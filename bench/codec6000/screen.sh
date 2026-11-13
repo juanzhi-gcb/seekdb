@@ -7,10 +7,13 @@ scratch=$(mktemp -d "$RUNNER_TEMP/j11-screen-XXXXXX")
 mkdir "$scratch/parent"
 git archive aed099071e6e1221bfd320f6f99bf4ce677e7cc3 src include | tar -x -C "$scratch/parent"
 lscpu > "$result/lscpu.txt"
-for name in compact_writer lossless_words packed_codec; do
+for name in compact_writer lossless_words; do
  g++ -std=c++20 -O1 -g -fsanitize=address,undefined -Iinclude "tests/${name}_tests.cpp" -o "$scratch/$name-test"
  "$scratch/$name-test" > "$result/$name-test.txt"
 done
+cmake -S . -B "$scratch/build" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-O1 -g -fsanitize=address,undefined' > "$result/configure.log" 2>&1
+cmake --build "$scratch/build" --target packed_codec_tests --parallel 2 > "$result/build-packed.log" 2>&1
+"$scratch/build/packed_codec_tests" > "$result/packed_codec-test.txt"
 for kind in parent candidate; do
   source="$repo"
   if [ "$kind" = parent ]; then source="$scratch/parent"; fi
