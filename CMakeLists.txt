@@ -289,3 +289,7 @@ add_test(NAME core_lossless_words COMMAND lossless_words_tests)
 add_executable(stream_cache_tests tests/stream_cache_tests.cpp)
 target_link_libraries(stream_cache_tests PRIVATE minivectordb_core)
 add_test(NAME core_stream_cache COMMAND stream_cache_tests)
+
+add_executable(shared_codes_tests tests/shared_codes_tests.cpp)
+target_link_libraries(shared_codes_tests PRIVATE minivectordb_core)
+add_test(NAME core_shared_codes COMMAND shared_codes_tests)

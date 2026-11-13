@@ -1,7 +1,7 @@
 name: Certified exact candidate search versus a24
 on:
   push:
-    branches: ['codex/scale-stream-6000-20261113']
+    branches: ['codex/sharedcodes-6000-20261113']
   workflow_dispatch:
 permissions:
   contents: read

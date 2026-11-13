@@ -17,7 +17,8 @@ namespace minivectordb::detail {
 // Auxiliary rejection index only. Original float32 vectors remain authoritative;
 // every survivor uses the unchanged sequential-double distance and tie order.
 class Int8BoundCache {
-  std::unique_ptr<std::int8_t[]> codes_;
+  std::unique_ptr<std::int8_t[]> owned_codes_;
+  const std::int8_t* codes_=nullptr;
   std::unique_ptr<std::int32_t[]> norms_,sums_;
   std::unique_ptr<double[]> errors_;
   const float* source_=nullptr;
@@ -202,10 +203,10 @@ public:
 #endif
   }
   void clear() noexcept {
-    codes_.reset();norms_.reset();sums_.reset();errors_.reset();
+    owned_codes_.reset();codes_=nullptr;norms_.reset();sums_.reset();errors_.reset();
     source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;
   }
-  std::size_t bytes() const noexcept {return rows_*(padded_+16);}
+  std::size_t bytes() const noexcept {return rows_*((owned_codes_?padded_:0)+16);}
   bool uniform() const noexcept {return uniform_;}
   bool ready() const noexcept {return rows_!=0;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
@@ -214,20 +215,21 @@ public:
     const bool result=build_values(rows,dimension,budget,[&](std::size_t row,std::size_t d){return source[row_major?row*dimension+d:(row/16*16)*dimension+d*16+row%16];},portable_test);
     if(result){source_=source.data();row_major_=row_major;}return result;
   }
-  template<class Getter> bool build_values(std::size_t rows,std::size_t dimension,std::size_t budget,Getter&& get,bool portable_test=false) {
+  template<class Getter> bool build_values(std::size_t rows,std::size_t dimension,std::size_t budget,Getter&& get,bool portable_test=false,const std::int8_t* shared=nullptr,double shared_scale=0) {
     clear();
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
-    if(count>budget/(padded+16))return false;
+    if(count>budget/((shared?0:padded)+16))return false;
     double maximum=0;
     for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
       const double value=get(row,d);
       if(!std::isfinite(value))return false;
       maximum=std::max(maximum,std::abs(value));
     }
-    const double scale=maximum>0?maximum/127:1;
+    const double scale=shared?shared_scale:(maximum>0?maximum/127:1);
+    if(!(scale>0) || !std::isfinite(scale))return false;
     try {
-      codes_=std::make_unique<std::int8_t[]>(count*padded);
+      if(shared)codes_=shared;else {owned_codes_=std::make_unique<std::int8_t[]>(count*padded);codes_=owned_codes_.get();}
       norms_=std::make_unique<std::int32_t[]>(count);
       sums_=std::make_unique<std::int32_t[]>(count);
       errors_=std::make_unique<double[]>(count);
@@ -238,8 +240,9 @@ public:
       for(std::size_t d=0;d<padded;++d) {
         const double value=d<dimension?get(block+lane,d):0;
         if(d<dimension && value!=get(0,d))uniform_=false;
-        const int code=quantize(value,scale);
-        codes_[block*padded+d/4*64+lane*4+d%4]=static_cast<std::int8_t>(code);
+        const auto at=block*padded+d/4*64+lane*4+d%4;
+        const int code=shared?int(shared[at]):quantize(value,scale);
+        if(owned_codes_)owned_codes_[at]=static_cast<std::int8_t>(code);
         norm+=code*code;sum+=code;
         const double e=error_component(value,scale*code);error+=e*e;
       }
@@ -273,8 +276,8 @@ public:
     if(!query.valid||row%16||row>=rows_)return false;
     std::array<std::int32_t,16> dots{};
 #if defined(__x86_64__) && defined(__GNUC__)
-    if(native_vnni())dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
-    else if(available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
+    if(native_vnni())dots_native(codes_+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(available())dots_avx2(codes_+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
     else
 #endif
     for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
@@ -307,8 +310,8 @@ public:
     const auto row=offset/(dimension_*sizeof(float));
     std::array<std::int32_t,16> dots{};
 #if defined(__x86_64__) && defined(__GNUC__)
-    if(native&&native_vnni()&&!force_avx2)dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
-    else if(native&&available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
+    if(native&&native_vnni()&&!force_avx2)dots_native(codes_+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(native&&available())dots_avx2(codes_+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
     else
 #else
     (void)native;(void)force_avx2;
