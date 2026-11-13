@@ -1,0 +1,45 @@
+Experimental J11 batch directory and direct row references
+
+Base: 334ebac19109af2423f2621489cb778749b885a3 (J10 compact footer + frontend).
+No change to JSONL protocol, exact answers, transaction acknowledgements, or fsync policy.
+Existing J08 and J10 files are read and written without migration. Newly created
+journal files use MVDBJL11/JFR11. J09 was an unpublished intermediate format and
+is not a supported migration input. This is an experiment, not a formal submission.
+
+JBA3 header: 48 bytes; magic, count, namespace, signed base key, previous head,
+body length, directory CRC, offset width, header CRC. Up to 128 sorted keys with
+nonnegative deltas <= 32767. Each descriptor is a uint16 delta/packed flag and
+a cumulative uint16/uint32 body end. A zero interval deletes; other intervals
+contain a CRC32 immediately followed by one independently encoded row. Empty
+values have a four-byte CRC0 interval. Full directory and entry validation runs
+on recovery. All reads additionally validate each physical frame checksum.
+
+Persisted heads encode batch virtual offset, seven-bit slot, seven-bit count-1,
+and offset-width hint under bit63. Ordinary JREC pointers remain supported in
+mixed histories. Disk heads/previous links cannot use the in-memory row tag.
+Backward ordering compares decoded offset and slot, preventing cycles. Undo and
+savepoints retain opaque heads; failed appends do not publish references. Snapshot
+records remain append-only even after restore or rollback.
+
+The existing uint64 index value can instead encode a direct row reference:
+bits63..62=11, bit61=packed, bits60..41=payload length, bits40..0=CRC offset.
+These references are constructed only after directory validation or successful
+append; they are never accepted from disk or public inputs. The namespace/key
+association is established at index construction, not re-read for every lookup.
+Point lookup reads CRC and exactly one row payload in one logical read, validates
+CRC, then independently decompresses it. No additional per-row index allocation.
+Files near the 2 TiB direct-reference limit, wide keys, single rows and oversized
+single values fall back to JREC. Each temporary batch stays API bounded.
+
+A bounded two-entry directory cache supports recovery and historic-head traversal;
+normal indexed point reads do not consult it. Physical scan order and cache-release
+positions decode the reference before sorting or calling fadvise. ProcessCrash
+still fsyncs once before acknowledging each commit; Ordered still fsyncs twice.
+
+Predecessor experiments are preserved locally: fully decoded directory cache
+caused 52-91% host random-read regressions, and constant-time metadata still had
+49-53% regressions with 64 KiB caching due to an additional metadata page read.
+This layout relocates existing CRCs next to rows to remove that extra read without
+increasing encoded bytes. Native end-to-end T/B/M, random I/O, fault injection and
+legacy compatibility must all pass before selecting this candidate. No official
+E prediction is made from host microbenchmarks.
