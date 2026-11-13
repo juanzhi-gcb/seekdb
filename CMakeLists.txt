@@ -281,3 +281,7 @@ set_tests_properties(core_certified_candidates PROPERTIES TIMEOUT 180)
 add_executable(lossless_half_tests tests/lossless_half_tests.cpp)
 target_link_libraries(lossless_half_tests PRIVATE minivectordb_core)
 add_test(NAME core_lossless_half COMMAND lossless_half_tests)
+
+add_executable(lossless_words_tests tests/lossless_words_tests.cpp)
+target_link_libraries(lossless_words_tests PRIVATE minivectordb_core)
+add_test(NAME core_lossless_words COMMAND lossless_words_tests)
