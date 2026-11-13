@@ -285,3 +285,7 @@ add_test(NAME core_lossless_half COMMAND lossless_half_tests)
 add_executable(lossless_words_tests tests/lossless_words_tests.cpp)
 target_link_libraries(lossless_words_tests PRIVATE minivectordb_core)
 add_test(NAME core_lossless_words COMMAND lossless_words_tests)
+
+add_executable(stream_cache_tests tests/stream_cache_tests.cpp)
+target_link_libraries(stream_cache_tests PRIVATE minivectordb_core)
+add_test(NAME core_stream_cache COMMAND stream_cache_tests)

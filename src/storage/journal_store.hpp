@@ -11,6 +11,7 @@
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 namespace minivectordb::detail {
 // Format J08: immutable records linked to a previous logical head, plus two
@@ -132,7 +133,40 @@ public:
     if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});sync();
     generation_=next;durable_=head_;undo_.clear();purge_empty();
   }
-  auto snapshot(std::uint64_t space)const{
+  // Copy into an owned cache in physical order. Completed pages can be released
+  // after the visitor retains their decoded contents. This never changes data,
+  // durability, roots or the normal ordered scan contract.
+  void release_before(std::uint64_t at,std::uint64_t& released,bool enabled,bool final=false) const noexcept {
+#if defined(POSIX_FADV_DONTNEED)
+    const auto end=at/4096*4096;
+    if(enabled && head_==durable_ && end>released && (final||end-released>=262144)) {
+      (void)::posix_fadvise(fd_,off_t(released),off_t(end-released),POSIX_FADV_DONTNEED);released=end;
+    }
+#else
+    (void)at;(void)released;(void)enabled;(void)final;
+#endif
+  }
+  void cache_scan(std::uint64_t space,const std::function<bool(std::int64_t,std::string_view)>& visitor) const {
+    auto rows=snapshot(space);std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.second<b.second;});
+    std::uint64_t released=8192,last=8192;bool retain=true;
+    for(auto [key,at]:rows){auto value=value_at(space,key,at);retain=visitor(key,value)&&retain;release_before(at,released,retain);last=at;}
+    release_before(last,released,retain,true);
+  }
+  void cache_scan_equal(std::uint64_t left_space,std::uint64_t right_space,
+      const std::function<bool(std::int64_t,std::string_view,std::string_view)>& visitor) const {
+    struct Pair{std::int64_t key;std::uint64_t left,right;};std::vector<Pair> rows;
+    auto l=index_.lower_bound({left_space,INT64_MIN}),r=index_.lower_bound({right_space,INT64_MIN});
+    const auto advance=[&](auto& it,std::uint64_t space){while(it!=index_.end()&&it->first.first==space&&!it->second)++it;};
+    for(;;){advance(l,left_space);advance(r,right_space);const bool le=l==index_.end()||l->first.first!=left_space,re=r==index_.end()||r->first.first!=right_space;
+      if(le||re){if(le!=re)throw Store::KeySetMismatch();break;}
+      if(l->first.second!=r->first.second)throw Store::KeySetMismatch();rows.push_back({l->first.second,l->second,r->second});++l;++r;
+    }
+    std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.right<b.right;});
+    std::uint64_t released=8192,last=8192;bool retain=true;
+    for(auto row:rows){auto a=value_at(left_space,row.key,row.left),b=value_at(right_space,row.key,row.right);retain=visitor(row.key,a,b)&&retain;release_before(row.right,released,retain);last=row.right;}
+    release_before(last,released,retain,true);
+  }
+  std::vector<std::pair<std::int64_t,std::uint64_t>> snapshot(std::uint64_t space)const{
     std::vector<std::pair<std::int64_t,std::uint64_t>> rows;
     for(auto it=index_.lower_bound({space,INT64_MIN});it!=index_.end()&&it->first.first==space;++it)if(it->second)rows.push_back({it->first.second,it->second});return rows;
   }

@@ -97,6 +97,7 @@ struct Options {
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
   bool journal_store=false; // New-file backend; existing formats autodetected.
   bool certified_candidate_search=true; // Exact exclusion certificate, otherwise reference fallback.
+  bool streaming_cache_build=true; // Physical-order owned-cache construction.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;

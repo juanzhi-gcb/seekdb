@@ -74,6 +74,10 @@ public:
   // Atomic working-root update; duplicate keys and oversized batches fail before writing.
   // Payload is bounded by max_batch_bytes, except one individually oversized value.
   void apply_batch_in(std::uint64_t space, std::span<const Mutation> mutations);
+  // Unordered, immutable-head traversal for complete owned-cache construction.
+  // A false visitor result disables further page-cache release for this scan.
+  void scan_cache_in(std::uint64_t, const std::function<bool(std::int64_t,std::string_view)>&) const;
+  void scan_cache_equal_in(std::uint64_t,std::uint64_t,const std::function<bool(std::int64_t,std::string_view,std::string_view)>&) const;
   void scan_in(std::uint64_t space, const std::function<void(std::int64_t, std::string_view)>& visitor) const;
   // Co-visits equal key sets in signed order from one immutable root snapshot.
   // Both namespaces are resolved before callbacks; callbacks may mutate/rollback.

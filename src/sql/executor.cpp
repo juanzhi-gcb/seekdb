@@ -438,21 +438,23 @@ namespace minivectordb {
               ++info.distances_computed;visit(key,vector);
             }
           };
+          const bool streaming=options.streaming_cache_build&&typed_snapshot.building()&&projection_snapshot.building();
           if(index) {
-            store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
+            const auto read=[&](auto key,auto bytes,auto base) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.vector_index_entries_examined;++info.rows_examined;
               SelectRow row(s,key,base,options.selective_decode,info);
-              auto vector=index_candidate(bytes,s,*index,key,row,scratch);
-              consume(key,row,vector);
-            });
+              auto vector=index_candidate(bytes,s,*index,key,row,scratch);consume(key,row,vector);
+            };
+            if(streaming)store.scan_cache_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base){read(key,bytes,base);return typed_snapshot.building()&&projection_snapshot.building();});
+            else store.scan_equal_in(index->id,s.id,read);
           } else {
-            store.scan_in(s.id,[&](auto key,auto bytes) {
+            const auto read=[&](auto key,auto bytes) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
-              ++info.rows_examined;
-              SelectRow row(s,key,bytes,options.selective_decode,info);
-              consume(key,row,{});
-            });
+              ++info.rows_examined;SelectRow row(s,key,bytes,options.selective_decode,info);consume(key,row,{});
+            };
+            if(streaming)store.scan_cache_in(s.id,[&](auto key,auto bytes){read(key,bytes);return typed_snapshot.building()&&projection_snapshot.building();});
+            else store.scan_in(s.id,read);
           }
           projection_snapshot.finish();
           typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search&&transpose_enabled());
