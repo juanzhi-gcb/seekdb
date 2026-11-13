@@ -10,10 +10,10 @@ export TMPDIR="$scratch/tmp" PYTHONDONTWRITEBYTECODE=1
 trap 'sudo chown -R "$(id -u):$(id -g)" "$result"' EXIT
 lscpu > "$result/lscpu.txt"
 git rev-parse HEAD > "$result/candidate-commit.txt"
-for item in a24 dfee candidate; do
+for item in fallback dfee candidate; do
   mkdir "$scratch/$item"
   case "$item" in
-    a24) ref=a24d2cd764027adec7371f268f99ccdca2307032;;
+    fallback) ref=22390e5d2c2e6e07e4995ddd96061c1ee2308b85;;
     dfee) ref=dfee55b84284f4c39d2df45951cdbcb1d1baf1a2;;
     candidate) ref=HEAD;;
   esac
@@ -26,7 +26,7 @@ docker run --rm --network none --cpus 2 --memory 2g --memory-swap 2g --pids-limi
 python3 -B bench/vendor/seekdb-round2-f4d4e26/protocol_check/run.py --image mvdb:regression-candidate --output "$result/public" > "$result/public.log" 2>&1
 g++ -std=c++20 -O2 -ffp-contract=off bench/jsonl_oracle.cpp -o "$scratch/oracle"
 for shape in continuous positive cluster outlier; do
-  for pair in a24-dfee dfee-candidate; do
+  for pair in fallback-candidate dfee-candidate; do
     base=${pair%-*};candidate=${pair#*-}
     sudo env MVDB_SCREEN_SHAPE="$shape" PYTHONPATH="$repo/bench" python3 -B bench/after2882/distribution.py --reference-image "$(cat "$result/$base-image.txt")" --candidate-image "$(cat "$result/$candidate-image.txt")" --oracle-bin "$scratch/oracle" --output "$result/$shape-$pair" --data-root "$scratch/data/contract" --temp-root "$scratch/tmp/contract" --rounds 2 --rows 10000 --queries 200 --warmup 10 --filter-type bigint > "$result/$shape-$pair.log" 2>&1
   done

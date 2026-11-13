@@ -19,7 +19,7 @@ namespace minivectordb::detail {
 class Int8BoundCache {
   std::unique_ptr<std::int8_t[]> codes_;
   std::unique_ptr<std::int32_t[]> norms_,sums_;
-  std::unique_ptr<double[]> errors_;
+  std::unique_ptr<double[]> errors_,origins_;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
   double scale_=1,max_error_=0;
@@ -202,10 +202,10 @@ public:
 #endif
   }
   void clear() noexcept {
-    codes_.reset();norms_.reset();sums_.reset();errors_.reset();
+    codes_.reset();norms_.reset();sums_.reset();errors_.reset();origins_.reset();
     source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;
   }
-  std::size_t bytes() const noexcept {return rows_*(padded_+16);}
+  std::size_t bytes() const noexcept {return rows_*(padded_+16)+(origins_?dimension_*sizeof(double):0);}
   bool uniform() const noexcept {return uniform_;}
   bool ready() const noexcept {return rows_!=0;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
@@ -218,11 +218,24 @@ public:
     clear();
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
-    if(count>budget/(padded+16))return false;
+    if(budget<dimension*sizeof(double) || count>(budget-dimension*sizeof(double))/(padded+16))return false;
+    try {origins_=std::make_unique<double[]>(dimension);}catch(const std::bad_alloc&){return false;}
+    // A shared translation leaves every true distance unchanged. The median
+    // of 17 spread-out rows avoids making one exceptional row the origin.
+    // This only chooses a code origin; every row is still validated and its
+    // full representation error is bounded, including subtraction rounding.
+    for(std::size_t d=0;d<dimension;++d) {
+      std::array<double,17> sample{};
+      for(std::size_t i=0;i<sample.size();++i) {
+        sample[i]=get(i*(count-1)/(sample.size()-1),d);
+        if(!std::isfinite(sample[i])){clear();return false;}
+      }
+      std::nth_element(sample.begin(),sample.begin()+8,sample.end());origins_[d]=sample[8];
+    }
     double maximum=0;
     for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
-      const double value=get(row,d);
-      if(!std::isfinite(value))return false;
+      const double value=double(get(row,d))-origins_[d];
+      if(!std::isfinite(value)){clear();return false;}
       maximum=std::max(maximum,std::abs(value));
     }
     const double scale=maximum>0?maximum/127:1;
@@ -236,12 +249,15 @@ public:
     for(std::size_t block=0;block<count;block+=16)for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
-        const double value=d<dimension?get(block+lane,d):0;
-        if(d<dimension && value!=get(0,d))uniform_=false;
+        const double original=d<dimension?get(block+lane,d):0;
+        const double origin=d<dimension?origins_[d]:0;
+        const double value=original-origin;
+        if(d<dimension && original!=get(0,d))uniform_=false;
         const int code=quantize(value,scale);
         codes_[block*padded+d/4*64+lane*4+d%4]=static_cast<std::int8_t>(code);
         norm+=code*code;sum+=code;
-        const double e=error_component(value,scale*code);error+=e*e;
+        const double e=up(error_component(value,scale*code)+(std::abs(original)+std::abs(origin))*0x1p-48);
+        error+=e*e;
       }
       norms_[block+lane]=norm;sums_[block+lane]=sum;
       errors_[block+lane]=finish_error(error,padded);
@@ -253,14 +269,18 @@ public:
     Query result;
     if(!ready() || vector.size()!=dimension_ || !environment())return result;
     double maximum=0;
-    for(float x:vector){if(!std::isfinite(x))return result;maximum=std::max(maximum,std::abs(static_cast<double>(x)));}
+    for(std::size_t d=0;d<vector.size();++d){if(!std::isfinite(vector[d]))return result;
+      maximum=std::max(maximum,std::abs(double(vector[d])-origins_[d]));}
     result.scale=maximum>0?maximum/127:1;
     result.words.assign(padded_/4,0);std::int32_t norm=0;double square=0;
     for(std::size_t d=0;d<padded_;++d) {
-      const double value=d<dimension_?vector[d]:0;
+      const double original=d<dimension_?vector[d]:0;
+      const double origin=d<dimension_?origins_[d]:0;
+      const double value=original-origin;
       const int code=quantize(value,result.scale);norm+=code*code;
       result.words[d/4]|=std::uint32_t(code+128)<<(8*(d%4));
-      const double e=error_component(value,result.scale*code);square+=e*e;
+      const double e=up(error_component(value,result.scale*code)+(std::abs(original)+std::abs(origin))*0x1p-48);
+      square+=e*e;
     }
     result.error=finish_error(square,padded_);
     result.norm_scaled=static_cast<double>(norm)*result.scale*result.scale;

@@ -1,7 +1,7 @@
-name: Distribution regression and exact fallback recovery
+name: Centered conservative bounds versus fallback repair and formal dfee
 on:
   push:
-    branches: ['codex/regression-2882-20261113']
+    branches: ['codex/centered-2882-20261113']
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: regression2882-${{ matrix.replica }}-${{ github.run_id }}
+          name: centered2882-${{ matrix.replica }}-${{ github.run_id }}
           path: regression-results/
           retention-days: 14
