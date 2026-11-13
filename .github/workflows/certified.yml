@@ -1,7 +1,7 @@
 name: Certified exact candidate search versus a24
 on:
   push:
-    branches: ['codex/page48-6000-20261113']
+    branches: ['codex/integer-rank-6000-20261113']
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,6 +27,6 @@ jobs:
           name: certified-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             certified-results/
-            pagecommit-results/
+            parent-results/
           if-no-files-found: error
           retention-days: 14
