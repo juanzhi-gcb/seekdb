@@ -294,3 +294,12 @@ add_executable(page_commit_tests tests/page_commit_tests.cpp)
 target_link_libraries(page_commit_tests PRIVATE minivectordb_core)
 target_link_options(page_commit_tests PRIVATE -Wl,--wrap=pwrite -Wl,--wrap=fsync)
 add_test(NAME core_page_commit COMMAND page_commit_tests)
+
+# Frontend differential tests exercise borrowed-literal ownership and numeric parity.
+add_executable(stream_lexer_tests tests/stream_lexer_tests.cpp)
+target_link_libraries(stream_lexer_tests PRIVATE minivectordb_core)
+add_test(NAME core_stream_lexer COMMAND stream_lexer_tests)
+add_executable(short_decimal_tests tests/short_decimal_tests.cpp)
+target_link_libraries(short_decimal_tests PRIVATE minivectordb_core)
+add_test(NAME core_short_decimal COMMAND short_decimal_tests)
+set_tests_properties(core_stream_lexer core_short_decimal PROPERTIES TIMEOUT 120)

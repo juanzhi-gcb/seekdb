@@ -57,4 +57,4 @@ print(json.dumps({k:v['ratios'] for k,v in out['comparisons'].items()}))
 for path in root.rglob('oracle-input.bin'):path.unlink()
 PY
 
-bash bench/pagecommit6000/run.sh
+bash bench/front6000/parent.sh

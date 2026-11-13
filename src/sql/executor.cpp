@@ -632,7 +632,7 @@ namespace minivectordb {
       reset {
         busy
       };
-      auto statement=sql::parse(text);
+      auto statement=options.streaming_sql_tokens?sql::parse_stream(text,true):sql::parse(text);
       store.set_write_cache_hint(statement.kind!=sql::Statement::Select);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.

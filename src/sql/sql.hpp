@@ -8,6 +8,15 @@ namespace minivectordb::sql {
   struct Token {
     TokenKind kind;
     std::string text;
+    std::string_view borrowed;
+  };
+  class Lexer {
+    std::string_view input;
+    std::size_t position=0;
+    bool borrow_literals=false;
+  public:
+    explicit Lexer(std::string_view text,bool borrow=false):input(text),borrow_literals(borrow){}
+    Token next();
   };
   std::vector<Token> lex(std::string_view);
   struct Literal {
@@ -17,6 +26,8 @@ namespace minivectordb::sql {
     kind=Number;
     std::string text;
     std::vector<std::string> components;
+    std::string_view borrowed;
+    std::string_view view() const noexcept {return borrowed.data()?borrowed:std::string_view(text);}
   };
   struct Expr {
     std::string column;
@@ -49,6 +60,8 @@ namespace minivectordb::sql {
     std::vector<std::pair<std::string,Literal>> assignments;
   };
   Statement parse(std::string_view);
+  // borrow=true is internal: input stays immutable until bind() materializes owned values.
+  Statement parse_stream(std::string_view,bool borrow=false);
   std::size_t column_index(const Schema&,std::string_view);
   Cell bind_literal(const Literal&,const Column&,bool fast_vector=true);
   struct BoundExpr {
