@@ -22,7 +22,8 @@ class Int8BoundCache {
   std::unique_ptr<double[]> errors_;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
-  double scale_=1;
+  double scale_=1,max_error_=0;
+  bool uniform_=false,row_major_=false;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -37,6 +38,44 @@ class Int8BoundCache {
     return up(std::sqrt(square)*(1+static_cast<double>(n+8)*0x1p-48));
   }
 #if defined(__x86_64__) && defined(__GNUC__)
+#if !defined(__clang__)
+  __attribute__((optimize("fp-contract=off")))
+#endif
+  __attribute__((target("avx512f,avx2"),noinline))
+  static void lower_native(const std::int32_t* dots,const std::int32_t* norms,
+      const std::int32_t* sums,double ss,double cross,double a,double* output) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+    const auto zero=_mm512_setzero_pd();
+    for(unsigned lane=0;lane<16;lane+=8){
+      const auto dot=_mm256_sub_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(dots+lane)),_mm256_slli_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(sums+lane)),7));
+      const auto b=_mm512_mul_pd(_mm512_cvtepi32_pd(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(norms+lane))),_mm512_set1_pd(ss));
+      const auto c=_mm512_mul_pd(_mm512_cvtepi32_pd(dot),_mm512_set1_pd(cross));
+      const auto ab=_mm512_add_pd(_mm512_set1_pd(a),b);
+      const auto allowance=_mm512_mul_pd(_mm512_add_pd(ab,_mm512_max_pd(c,_mm512_sub_pd(zero,c))),_mm512_set1_pd(0x1p-45));
+      _mm512_storeu_pd(output+lane,_mm512_sub_pd(_mm512_sub_pd(ab,c),allowance));
+    }
+  }
+#if !defined(__clang__)
+  __attribute__((optimize("fp-contract=off")))
+#endif
+  __attribute__((target("avx2"),noinline))
+  static void lower_avx2(const std::int32_t* dots,const std::int32_t* norms,
+      const std::int32_t* sums,double ss,double cross,double a,double* output) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+    const auto zero=_mm256_setzero_pd();
+    for(unsigned lane=0;lane<16;lane+=4){
+      const auto dot=_mm_sub_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(dots+lane)),_mm_slli_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(sums+lane)),7));
+      const auto b=_mm256_mul_pd(_mm256_cvtepi32_pd(_mm_loadu_si128(reinterpret_cast<const __m128i*>(norms+lane))),_mm256_set1_pd(ss));
+      const auto c=_mm256_mul_pd(_mm256_cvtepi32_pd(dot),_mm256_set1_pd(cross));
+      const auto ab=_mm256_add_pd(_mm256_set1_pd(a),b);
+      const auto allowance=_mm256_mul_pd(_mm256_add_pd(ab,_mm256_max_pd(c,_mm256_sub_pd(zero,c))),_mm256_set1_pd(0x1p-45));
+      _mm256_storeu_pd(output+lane,_mm256_sub_pd(_mm256_sub_pd(ab,c),allowance));
+    }
+  }
   __attribute__((target("avx2"),noinline))
   static void dots_avx2(const std::int8_t* codes,const std::uint32_t* query,
                        const std::int32_t* sums,std::size_t groups,std::int32_t* output) {
@@ -164,20 +203,27 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;
+    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;max_error_=0;uniform_=false;row_major_=false;
   }
   std::size_t bytes() const noexcept {return rows_*(padded_+16);}
-  bool ready() const noexcept {return source_!=nullptr;}
+  bool uniform() const noexcept {return uniform_;}
+  bool ready() const noexcept {return rows_!=0;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
-             std::size_t budget,bool portable_test=false) {
+             std::size_t budget,bool portable_test=false,bool row_major=false) {
+    if(!dimension || rows/16*16>source.size()/dimension) {clear();return false;}
+    const bool result=build_values(rows,dimension,budget,[&](std::size_t row,std::size_t d){return source[row_major?row*dimension+d:(row/16*16)*dimension+d*16+row%16];},portable_test);
+    if(result){source_=source.data();row_major_=row_major;}return result;
+  }
+  template<class Getter> bool build_values(std::size_t rows,std::size_t dimension,std::size_t budget,Getter&& get,bool portable_test=false) {
     clear();
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
-    if(count>budget/(padded+16) || count>source.size()/dimension)return false;
+    if(count>budget/(padded+16))return false;
     double maximum=0;
-    for(std::size_t i=0;i<count*dimension;++i) {
-      if(!std::isfinite(source[i]))return false;
-      maximum=std::max(maximum,std::abs(static_cast<double>(source[i])));
+    for(std::size_t row=0;row<count;++row)for(std::size_t d=0;d<dimension;++d) {
+      const double value=get(row,d);
+      if(!std::isfinite(value))return false;
+      maximum=std::max(maximum,std::abs(value));
     }
     const double scale=maximum>0?maximum/127:1;
     try {
@@ -186,10 +232,12 @@ public:
       sums_=std::make_unique<std::int32_t[]>(count);
       errors_=std::make_unique<double[]>(count);
     }catch(const std::bad_alloc&){clear();return false;}
+    uniform_=true;
     for(std::size_t block=0;block<count;block+=16)for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
-        const double value=d<dimension?source[block*dimension+d*16+lane]:0;
+        const double value=d<dimension?get(block+lane,d):0;
+        if(d<dimension && value!=get(0,d))uniform_=false;
         const int code=quantize(value,scale);
         codes_[block*padded+d/4*64+lane*4+d%4]=static_cast<std::int8_t>(code);
         norm+=code*code;sum+=code;
@@ -197,8 +245,9 @@ public:
       }
       norms_[block+lane]=norm;sums_[block+lane]=sum;
       errors_[block+lane]=finish_error(error,padded);
+      max_error_=std::max(max_error_,errors_[block+lane]);
     }
-    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();return true;
+    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=nullptr;row_major_=true;return true;
   }
   Query query(std::span<const float> vector) const {
     Query result;
@@ -217,9 +266,39 @@ public:
     result.norm_scaled=static_cast<double>(norm)*result.scale*result.scale;
     result.valid=true;return result;
   }
+  // Conservative lower score in quantized squared-distance space. The same
+  // three-term rounding allowance as survivors(); caller supplies a block row
+  // in this immutable cache, not an address of temporary decoded vectors.
+  bool lower_scores(const Query& query,std::size_t row,std::array<double,16>& scores) const {
+    if(!query.valid||row%16||row>=rows_)return false;
+    std::array<std::int32_t,16> dots{};
+#if defined(__x86_64__) && defined(__GNUC__)
+    if(native_vnni())dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());
+    else if(available())dots_avx2(codes_.get()+row*padded_,query.words.data(),sums_.get()+row,padded_/4,dots.data());
+    else
+#endif
+    for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
+      for(std::size_t k=0;k<4;++k)dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
+    const auto ss=scale_*scale_,cross=2*scale_*query.scale;
+#if defined(__x86_64__) && defined(__GNUC__)
+    if(native_vnni()){lower_native(dots.data(),norms_.get()+row,sums_.get()+row,ss,cross,query.norm_scaled,scores.data());return true;}
+    if(available()){lower_avx2(dots.data(),norms_.get()+row,sums_.get()+row,ss,cross,query.norm_scaled,scores.data());return true;}
+#endif
+    for(std::size_t lane=0;lane<16;++lane){const auto dot=dots[lane]-128*sums_[row+lane];
+      const double a=query.norm_scaled,b=double(norms_[row+lane])*ss,c=cross*double(dot);
+      scores[lane]=(a+b-c)-(std::abs(a)+std::abs(b)+std::abs(c))*0x1p-45;
+    }
+    return true;
+  }
+  double exclusion_upper(const Query& query,double radius) const {
+    if(!query.valid||!std::isfinite(radius)||radius<0)return std::numeric_limits<double>::infinity();
+    const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
+    const double bound=up(expanded+max_error_);
+    return up(bound*bound*(1+0x1p-45));
+  }
   std::uint16_t survivors(const Query& query,double radius,std::span<const float> original,
                           std::uint16_t mask,bool native=true,bool force_avx2=false) const {
-    if(!query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
+    if(row_major_ || !query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
     const auto begin=reinterpret_cast<std::uintptr_t>(source_);
     const auto address=reinterpret_cast<std::uintptr_t>(original.data());
     if(address<begin || address-begin>=rows_*dimension_*sizeof(float))return mask;

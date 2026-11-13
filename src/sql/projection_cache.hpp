@@ -24,6 +24,7 @@ class ProjectionCache {
   void refuse() noexcept {entries_.reset();data_.reset();count_=used_=0;state_=State::refused;}
 public:
   void clear() noexcept {entries_.reset();data_.reset();state_=State::empty;table_=index_=0;budget_=expected_rows_=expected_bytes_=count_=used_=0;complete_=false;}
+  bool building() const noexcept {return state_==State::building;}
   bool ready(std::uint64_t table,std::uint64_t index) const noexcept {return state_==State::ready&&table_==table&&index_==index;}
   std::size_t bytes() const noexcept {return entries_?expected_rows_*sizeof(Entry)+expected_bytes_:0;}
   std::size_t planned_bytes() const noexcept {return bytes()?bytes():state_==State::probation&&complete_?expected_rows_*sizeof(Entry)+expected_bytes_:0;}

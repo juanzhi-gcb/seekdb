@@ -14,9 +14,8 @@ namespace minivectordb::sql {
       return c>='A'&&c<='Z'?static_cast<char>(c+('a'-'A')):c;
     }
   }
-  std::vector<Token> lex(std::string_view s) {
-    std::vector<Token> out;
-    std::size_t i=0;
+  Token Lexer::next() {
+    const auto s=input;auto& i=position;
     while(i<s.size()) {
       if(space(s[i])) {
         ++i;
@@ -36,6 +35,13 @@ namespace minivectordb::sql {
       }
       if(s[i]=='\''||s[i]=='`') {
         char quote=s[i++];
+        if(borrow_literals && quote=='\'') {
+          const auto end=s.find(quote,i);
+          if(end!=std::string_view::npos && (end+1==s.size() || s[end+1]!=quote)) {
+            const auto view=s.substr(i,end-i);i=end+1;
+            return {TokenKind::String,{},view};
+          }
+        }
         std::string value;
         bool closed=false;
         while(i<s.size()) {
@@ -51,10 +57,9 @@ namespace minivectordb::sql {
         }
         if(!closed)throw Error(ErrorCode::Syntax,"unterminated quoted token");
         if(quote=='`')for(auto& c:value)c=lower(c);
-        out.push_back( {
+        return {
           quote=='\''?TokenKind::String:TokenKind::Identifier,std::move(value)
-        });
-        continue;
+        };
       }
       if(alpha(s[i])) {
         std::string word;
@@ -62,10 +67,9 @@ namespace minivectordb::sql {
           word.push_back(lower(s[i++]));
         }
         while(i<s.size()&&(alpha(s[i])||digit(s[i])));
-        out.push_back( {
+        return {
           TokenKind::Word,std::move(word)
-        });
-        continue;
+        };
       }
       if(digit(s[i])||s[i]=='.'||s[i]=='+'||s[i]=='-') {
         auto start=i;
@@ -90,25 +94,23 @@ namespace minivectordb::sql {
           while(i<s.size()&&digit(s[i]))++i;
           if(i==digits)throw Error(ErrorCode::Syntax,"invalid exponent");
         }
-        out.push_back( {
+        return {
           TokenKind::Number,std::string(s.substr(start,i-start))
-        });
-        continue;
+        };
       }
       if(std::string_view("(),[]=<>*;").find(s[i])!=std::string_view::npos) {
         std::string symbol(1,s[i++]);
         if((symbol=="<"||symbol==">")&&i<s.size()&&s[i]=='=')symbol.push_back(s[i++]);
-        out.push_back( {
+        return {
           TokenKind::Symbol,std::move(symbol)
-        });
-        continue;
+        };
       }
       throw Error(ErrorCode::Syntax,"unexpected SQL character");
     }
-    out.push_back( {
-      TokenKind::End, {
-      }
-    });
-    return out;
+    return {TokenKind::End,{}};
+  }
+  std::vector<Token> lex(std::string_view s) {
+    Lexer lexer(s);std::vector<Token> out;
+    for(;;){auto token=lexer.next();const bool done=token.kind==TokenKind::End;out.push_back(std::move(token));if(done)return out;}
   }
 }

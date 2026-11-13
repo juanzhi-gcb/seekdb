@@ -3,8 +3,26 @@
 #include <set>
 namespace minivectordb::sql {
   namespace {
-    class Parser {
-      std::vector<Token> tokens;
+    // One owned lookahead token, consumed synchronously before the next one.
+    // External parse calls own literals; internal binding may borrow immutable input.
+    class Cursor {
+      mutable Lexer lexer;
+      mutable Token current{TokenKind::End,{}};
+      mutable std::size_t index=0;
+      mutable bool ready=false;
+    public:
+      explicit Cursor(std::string_view s,bool borrow):lexer(s,borrow){}
+      const Token& at(std::size_t requested) const {
+        if(!ready || requested!=index){
+          if(ready && requested!=index+1)throw std::logic_error("nonsequential SQL token cursor");
+          current=lexer.next();index=requested;ready=true;
+        }
+        return current;
+      }
+      Token& operator[](std::size_t requested){(void)at(requested);return current;}
+    };
+    template<class Tokens> class Parser {
+      Tokens tokens;
       std::size_t at=0;
       const Token& peek()const {
         return tokens.at(at);
@@ -43,7 +61,7 @@ namespace minivectordb::sql {
         }
         else if(peek().kind==TokenKind::String) {
           v.kind=Literal::String;
-          v.text=std::move(tokens[at++].text);
+          auto& token=tokens[at++];v.text=std::move(token.text);v.borrowed=token.borrowed;
         }
         else if(take("[")) {
           v.kind=Literal::Vector;
@@ -138,7 +156,7 @@ namespace minivectordb::sql {
         validate_schema(s.schema);
       }
       public:
-      explicit Parser(std::string_view sql):tokens(lex(sql)) {
+      explicit Parser(Tokens input):tokens(std::move(input)) {
       }
       Statement run() {
         Statement s;
@@ -224,6 +242,14 @@ namespace minivectordb::sql {
     };
   }
   Statement parse(std::string_view s) {
-    return Parser(s).run();
+    return Parser<std::vector<Token>>(lex(s)).run();
+  }
+  Statement parse_stream(std::string_view s,bool borrow) {
+    try{return Parser<Cursor>(Cursor(s,borrow)).run();}
+    catch(const Error&){
+      // Legacy lex() examines the whole input before grammar/schema errors.
+      // On rejection only, preserve that precedence including malformed tails.
+      (void)lex(s);throw;
+    }
   }
 }

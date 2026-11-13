@@ -290,29 +290,34 @@ void failure(const std::filesystem::path&p,bool batch,int initial=3) {
   if(pid==0) {
     try {
       Database d(p,{p.parent_path()/"sort",4096,true,batch});
-      d.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(4))");
+      d.execute("CREATE TABLE t(id BIGINT PRIMARY KEY,s VARCHAR(8192))");
       d.execute("CREATE TABLE u(id BIGINT PRIMARY KEY)");
       std::string insert="INSERT INTO t VALUES";
       for(int i=1;i<=initial;++i)insert+=(i>1?",":"")+std::string("(")+std::to_string(i)+",'a')";
       d.execute(insert);
       const auto earlier="INSERT INTO t VALUES("+std::to_string(initial+1)+",'d')";
-      // Measure this mode's exact statement extent before imposing a partial-page
-      // limit. This keeps failure coverage when batch sharing reduces page count.
+      // Force multiple physical writes even when the final frame is buffered.
+      // Fail halfway through that extent, preserving the partial-statement and
+      // earlier-statement rollback oracle for both packed and framed layouts.
+      std::mt19937 random(7391);
+      std::string large(8192, 'a');
+      for(auto& c:large)c=char('a'+random()%26);
+      const auto update="UPDATE t SET s='"+large+"'";
       d.execute("BEGIN"); d.execute(earlier); d.execute("INSERT INTO u VALUES(9)");
       auto before=std::filesystem::file_size(p);
-      d.execute("UPDATE t SET s='oops'");
+      d.execute(update);
       auto growth=std::filesystem::file_size(p)-before;
-      CHECK(growth>1);
+      CHECK(growth>8192);
       d.execute("ROLLBACK");
       d.execute("BEGIN"); d.execute(earlier); d.execute("INSERT INTO u VALUES(9)");
       auto expected=q(d,"SELECT * FROM t").rows;
       struct rlimit original{};
       CHECK(getrlimit(RLIMIT_FSIZE,&original)==0);
       auto limited=original;
-      limited.rlim_cur=std::filesystem::file_size(p)+growth-1;
+      limited.rlim_cur=std::filesystem::file_size(p)+growth/2;
       CHECK(signal(SIGXFSZ,SIG_IGN)!=SIG_ERR);
       CHECK(setrlimit(RLIMIT_FSIZE,&limited)==0);
-      rejects([&] { d.execute("UPDATE t SET s='oops'"); });
+      rejects([&] { d.execute(update); });
       CHECK(setrlimit(RLIMIT_FSIZE,&original)==0);
       CHECK(q(d,"SELECT * FROM t").rows==expected);
       CHECK(q(d,"SELECT * FROM u").rows.size()==1);
@@ -353,7 +358,9 @@ void batch_sql(const std::filesystem::path& dir) {
     CHECK(d.execute("DELETE FROM t WHERE id<150").affected_rows==150);
     d.execute("COMMIT");
   }
-  CHECK(growth[1]==growth[0]);
+  // J11 stores shared metadata for actual batches; logical oracles above and
+  // after reopen remain identical for batched and single-row execution.
+  CHECK(growth[1]<growth[0]);
   for(auto name:{"batch.db","single.db"}) {
     Database d(dir/name);
     CHECK(q(d,"SELECT id FROM t WHERE n=2").rows.size()==150);

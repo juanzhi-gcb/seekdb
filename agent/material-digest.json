@@ -2,16 +2,16 @@
  "kind": "local-material-integrity-manifest",
  "date": "2026-11-13",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
- "base_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
- "submission_state": "Materials rebuilt on 2026-11-13 as an explicit agent-learning-evidence-v3-unbounded map. The platform has not evaluated this rebuild; the latest user-reported result still belongs to ff117199 and its old-format material.",
+ "base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
+ "submission_state": "Current source71de1c64 verified on two native hosts; material and source are packaged together for user-requested formal test; no official current score.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 61521,
-   "sha256": "30179553904625a8ff7eeee06eb34612bd41fda0891146016bd3d3766a1c597b"
+   "bytes": 125783,
+   "sha256": "1f222e4fdca0a64b7e2f1014a03c73c8f5e75b6d94be7ad08ac8935a8d9da821"
   },
   "conversation.json": {
-   "bytes": 61521,
-   "sha256": "30179553904625a8ff7eeee06eb34612bd41fda0891146016bd3d3766a1c597b"
+   "bytes": 125783,
+   "sha256": "1f222e4fdca0a64b7e2f1014a03c73c8f5e75b6d94be7ad08ac8935a8d9da821"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 69,
-  "experiments": 23,
-  "agent_observations": 5,
+  "user_records": 83,
+  "experiments": 49,
+  "agent_observations": 23,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -66,30 +66,41 @@
  },
  "latest_formal_feedback": {
   "source": "user_supplied_platform_result",
-  "reported_commit": "ff117199f8077de7a6e3e1f91a611397bb6641a0",
+  "reported_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
   "mysql_admission": "passed",
-  "performance_E_text": "2576.778405",
+  "performance_E_text": "3977.995012",
   "prompt_result_text": "Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
-  "verification_scope": "Bound by the user conversation sequence; platform locked commit and internal grader report were not independently read. This integrity manifest is not the platform material summary."
+  "scope": "该结果属于a24旧提交；当前提交尚待正式提测。"
  },
  "selection_supplements": [
   {
    "path": "bench/results/score-next-20261112/iteration-records-appendix.json",
    "bytes": 23625,
    "sha256": "dd7f612805f19095729485eb653293746de827032a7ae0e97cc129a7a6a9fc84"
+  },
+  {
+   "path": "bench/results/submission-current-20261113/iteration-records-appendix.json",
+   "bytes": 22860,
+   "sha256": "315e8eeccf638b1ed380b07e02277d541c5cb5345a2927d6928cdeddf704869e"
   }
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 11,
-  "dimensions": {
-   "问题理解与自主拆解": 2,
-   "技术理解与迁移": 1,
-   "独立验证与质疑": 4,
-   "实验与反馈迭代": 2,
-   "取舍与反思": 2
+  "instances": 12,
+  "note": "Evidence navigation only, no self-assigned grades."
+ },
+ "current_source_identity": {
+  "verified_engine_commit": "71de1c645f32c187d15fba3e73471433227b1afc",
+  "runtime_trees": {
+   "src": "1930da47d1b827c96b32e4507cefa066dcdbe973",
+   "include": "81b866ece93c9e187265d8ba802a51785840a173",
+   "tests": "4615a66050be89cf2d3c424b98b4c610966c2282",
+   "CMakeLists.txt": "93ce57d15340c5840f964f01a18bfff146b31a0c",
+   "Dockerfile": "5ca119733dfffd36fa9e11ee4612607d65ccc468"
   },
-  "suggested_level_sum": 10.5,
-  "note": "suggested_level is a local evidence rating, not a platform score."
+  "native_artifacts_sha256": [
+   "c4555b0399877ce06117bb172a418a6cab7a35e87e5908b6cb426ad96ac1e752",
+   "3607e9fbf459b45ea2413d4193e8439ec882671cf804445678c968950c04baf7"
+  ]
  }
 }

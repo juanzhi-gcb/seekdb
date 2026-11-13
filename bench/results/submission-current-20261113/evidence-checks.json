@@ -1,0 +1,10 @@
+{
+ "source_commit": "71de1c645f32c187d15fba3e73471433227b1afc",
+ "source_file_sha_verified": 33,
+ "user_records_preserved": 69,
+ "current_user_records": 83,
+ "internal_string_pointers_checked": 81,
+ "quoted_pointers_checked": 75,
+ "material_bytes": 125783,
+ "checks_scope": "Local provenance, packaging and source identity; not an AI grade or hidden admission result"
+}

@@ -94,25 +94,28 @@ void storage(const fs::path& d) {
 using SqlMap=std::map<int64_t,std::pair<std::string,std::vector<float>>>;
 void sql_equal(Database& db,const SqlMap& oracle) {
  SqlMap got;db.execute("SELECT id,n,v FROM t",{.row=[&](const Row& r){check(r.size()==3,"SQL row width");check(got.emplace(std::get<int64_t>(r[0]),std::make_pair(std::get<std::string>(r[1]),std::get<std::vector<float>>(r[2]))).second,"duplicate SQL row");}});check(got==oracle,"SQL row oracle mismatch");
- std::vector<int64_t> result;db.execute("SELECT id FROM t ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 200",{.row=[&](const Row& r){result.push_back(std::get<int64_t>(r[0]));}});
+ std::vector<int64_t> result;db.execute("SELECT id FROM t ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 1000",{.row=[&](const Row& r){result.push_back(std::get<int64_t>(r[0]));}});
  std::vector<int64_t> expected;for(auto& [key,value]:oracle)expected.push_back(key);
  // Every seed uses v=[key,0]; nonnegative distinct keys order by distance exactly.
  check(result==expected,"SQL vector index oracle mismatch");
 }
 void sql(const fs::path& d) {
+ // With J11 compact tombstone directories, 140 rows across three namespaces
+ // can fit entirely in the pending frame and issue no pwrite. Use 400 rows so
+ // even DELETE spans multiple physical frames; keep every injection/assertion.
  const auto seed=d/"sql-seed";SqlMap original;
  Options opt;opt.data_cache_bytes=65536;opt.index_cache_bytes=65536;opt.scan_snapshot_bytes=65536;
  {Database db(seed,opt);db.execute("CREATE TABLE t (id BIGINT PRIMARY KEY,n VARCHAR(20),v VECTOR(2))");
-  std::string q="INSERT INTO t VALUES ";for(int i=0;i<140;++i){if(i)q+=",";q+="("+std::to_string(i)+",'old',["+std::to_string(i)+",0])";original[i]={"old",{float(i),0}};}db.execute(q);
+  std::string q="INSERT INTO t VALUES ";for(int i=0;i<400;++i){if(i)q+=",";q+="("+std::to_string(i)+",'old',["+std::to_string(i)+",0])";original[i]={"old",{float(i),0}};}db.execute(q);
   db.execute("CREATE VECTOR INDEX first ON t(v)");db.execute("CREATE VECTOR INDEX second ON t(v)");}
  for(auto statement:{"UPDATE t SET n='new',v=[999,0]", "DELETE FROM t", "CREATE VECTOR INDEX third ON t(v)"}) {
   auto measure=d/"sql-measure";fs::copy_file(seed,measure,fs::copy_options::overwrite_existing);int count=0;
-  {Database db(measure,opt);db.execute("BEGIN");db.execute("INSERT INTO t VALUES (200,'prior',[200,0])");arm();db.execute(statement);disarm();count=writes;db.execute("ROLLBACK");}
-  std::cout<<statement<<" writepoints="<<count<<std::endl;
+  {Database db(measure,opt);db.execute("BEGIN");db.execute("INSERT INTO t VALUES (1000,'prior',[1000,0])");arm();db.execute(statement);disarm();count=writes;db.execute("ROLLBACK");}
+  std::cout<<statement<<" writepoints="<<count<<std::endl;check(count>0,"SQL fixture must cross a physical write boundary");
   // Check every write boundary with partial pwrite followed by EIO, inside explicit tx.
   for(int n=1;n<=count;++n) {
-   auto path=d/"sql-case";fs::copy_file(seed,path,fs::copy_options::overwrite_existing);auto prior=original;prior[200]={"prior",{200,0}};
-   {Database db(path,opt);db.execute("BEGIN");db.execute("INSERT INTO t VALUES (200,'prior',[200,0])");sql_equal(db,prior);
+   auto path=d/"sql-case";fs::copy_file(seed,path,fs::copy_options::overwrite_existing);auto prior=original;prior[1000]={"prior",{1000,0}};
+   {Database db(path,opt);db.execute("BEGIN");db.execute("INSERT INTO t VALUES (1000,'prior',[1000,0])");sql_equal(db,prior);
     arm(n,0,1);bool failed=throws([&]{db.execute(statement);});disarm();check(failed,"SQL statement must fail");check(db.in_transaction(),"SQL prior tx retained");sql_equal(db,prior);
     // Repeat another failed statement; the earlier transaction write must survive both.
     arm(1,0,0);check(throws([&]{db.execute("DELETE FROM t");}),"nested failure");disarm();sql_equal(db,prior);db.execute("COMMIT");}

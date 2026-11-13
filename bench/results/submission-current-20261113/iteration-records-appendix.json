@@ -1,0 +1,185 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "User statements from the current conversation; Agent explanations and summaries of verified tool results are separately attributed.",
+ "conversations": [
+  {
+   "id": "u70",
+   "source": "user",
+   "content": "通过；此项为准入条件，不计排名分\n性能评测完成；原始指标 E = 3977.995012\nPrompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
+   "context": "用户在明确以a24d2cd7提测后给出的三个详情原文节选；未提供T/B/M明细。",
+   "excerpt": true
+  },
+  {
+   "id": "u71",
+   "source": "user",
+   "content": "现在根据我们最新的3978版本，先找我们能大幅优化的部分，大胆尝试，不用担心退化，我们追求的是大幅提升性能，允许大幅修改，继续优化，同样以提升至双倍为目标"
+  },
+  {
+   "id": "u72",
+   "source": "user",
+   "content": "继续试批次压缩段，和 a24d2cd7 做原生 T、B、M 对照，重点看随机读取和解压缓存的代价。大胆改，有稳定收益就叠加，目标还是把3978分翻倍。"
+  },
+  {
+   "id": "u73",
+   "source": "user",
+   "content": "现在的提升效率幅度不够大，可以激进一点，用更大胆的方法进行尝试，突破T耗时和I/O和M内存，先规划几个大胆改动的方向，然后进行尝试",
+   "context": "同一请求在对话中重复出现；此处只保留一个证据记录，不重复计数。",
+   "excerpt": true
+  },
+  {
+   "id": "u74",
+   "source": "user",
+   "content": "继续大胆优化，先查清写入 T 异常，再重点突破端到端 T、存储压缩和缓存重叠内存。保留已有 B、M 收益，每版都和 a24 做原生对照，达到6000前不要给我正式测评版"
+  },
+  {
+   "id": "u75",
+   "source": "user",
+   "content": "继续优化，保留这轮 B、M 的收益，重点突破写入 T 和 fsync 长尾，也大胆试试筛选码与精确向量共享存储。每版都和 a24 做原生对照，达到6000前先别给我正式提测版。"
+  },
+  {
+   "id": "u76",
+   "source": "user",
+   "content": "解决fsync 占了约 435 m，占一半以上的这个问题",
+   "context": "此为用户当时的待核验判断，不作为已确认测量事实。",
+   "excerpt": true
+  },
+  {
+   "id": "u77",
+   "source": "user",
+   "content": "继续看紧凑页尾版本的原生结果，和 a24 对比完整 T、B、M，确认 fsync 长尾改善是否稳定。保留 B、M 收益，接下来重点突破真正计分的端到端 T，达到6000前先别给我正式提测版。"
+  },
+  {
+   "id": "u78",
+   "source": "user",
+   "content": "大胆点去尝试，继续"
+  },
+  {
+   "id": "u79",
+   "source": "user",
+   "content": "继续"
+  },
+  {
+   "id": "u80",
+   "source": "user",
+   "content": "继续】"
+  },
+  {
+   "id": "u81",
+   "source": "user",
+   "content": "现在相比于上一版的提效是多少"
+  },
+  {
+   "id": "u82",
+   "source": "user",
+   "content": "继续你的优化，抓住薄弱部分，大胆尝试优化方案"
+  },
+  {
+   "id": "u83",
+   "source": "user",
+   "content": "就当前性能最好的一版先推送，我想先提测一版",
+   "context": "最新用户请求中的发布决定原文节选；用户改为先正式提测检验方向，不再要求本次发布先达到6000。",
+   "excerpt": true
+  }
+ ],
+ "experiments": [
+  {
+   "id": "e126",
+   "source": "user_supplied_platform_result",
+   "purpose": "a24正式反馈，区分官方成绩与后续本地候选",
+   "output": "用户指定a24d2cd7正式提测后反馈：MySQL通过；性能原始E=3977.995012；Prompt仍为合并无效提示。没有T/B/M明细或逐轮Prompt评审报告。官方值属于a24d2cd764027adec7371f268f99ccdca2307032，不属于当前候选。"
+  },
+  {
+   "id": "e127",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "J11批次目录的完整原生对照",
+   "output": "run43428903228，aed099071e6e1221bfd320f6f99bf4ce677e7cc3：两台Linux x86均通过79/79 CTest和20/20公开协议用例。默认1万行三轮中位数对a24：B减少42.93%～49.04%；写入M减少21.33%～26.20%；查询M减少46.98%～50.58%；查询T减少3.15%～9.13%。对直接334ebac1父版B再降约11%～19.5%，T没有稳定收益；BIGINT无索引查询M增加2.54%～3.98%。3万行VARCHAR一台写入T增加103.70%，保留退化。"
+  },
+  {
+   "id": "e128",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "随机读取、恢复与缓存代价",
+   "output": "J11首版共享解码目录缓存的本地随机读退化52%～91%，第二版虽可O(1)寻址，但64KiB缓存点读仍多读目录页而退化49%～53%，均未采用。最终JBA3保留行独立压缩，并用64位直接行引用消除点读目录跳转。run43428903228两台原生显式预热后，无应用缓存随机读T减少35.7%～38.7%，64KiB缓存减少2.8%～4.15%，文件大小减少6.66%～12.46%；预热成本增加1.37～2.11倍。冷读有一次增加112.7%，不宣称冷读稳定改善。局部指标不是完整计分T/B/M。"
+  },
+  {
+   "id": "e129",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "J11首次失败与修复复验",
+   "output": "首次run43426768991为77/79通过，未执行完整T/B/M。两个用例依赖旧布局：批量与逐行增长相等的断言不再适用；140行删除未产生pwrite，故障点未触发。改为严格验证批量占用更少，删除扩为400行并断言确实写入；保留语句回滚、前序事务保留和重启全行核验。本地29个故障场景及后续两台原生79/79均通过，未放宽持久化要求。"
+  },
+  {
+   "id": "e130",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "写入等待与435ms归因纠正",
+   "output": "历史435.155ms发生在查询准备阶段的INSERT，不是计时查询T，也不是可以直接称为批量写入T一半的同一测量。run43434030844两台各BIGINT/VARCHAR五轮配对、100INSERT/轮及完整行重启核验通过。fsync单请求中位数0.34～0.54ms，服务线程CPU约2.05～2.20ms，未复现数百毫秒长尾；这不能证明长尾已被解决。run43435443434分阶段CPU两台一致：绑定约31%，mutation约40%（包含apply约30%），JSON约7%，SQL解析约6%。嵌套计时不可相加。"
+  },
+  {
+   "id": "e131",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "文本宽扫描的失败、修正与边界验证",
+   "output": "run43431369539的初版和run43432965378的修订均出现混合Unicode退化，后一版为约6.6%～24.2%，未合入。改为只加速起始ASCII连续段，遇到Unicode回到原校验循环；JSON扫描使用受边界约束的AVX2、运行时CPU分派和可移植回退。run43434400113两台局部解析所有已测形式下降16%～82%。UTF-8校验321404组/模式，最终JSON前缀、转义与保护页2173136组通过。局部提速不等于端到端降幅。"
+  },
+  {
+   "id": "e132",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "当前交付源码71de的完整原生原始T/B/M",
+   "output": "run43435183257，源码71de1c645f32c187d15fba3e73471433227b1afc，两台完整79/79 CTest、20/20公开用例，默认三轮、大数据与连续浮点各一轮；a24与J11父版均完成。同下JSON中T_ms为端到端计时，B_bytes为完整生命周期物理I/O，M_bytes为cgroup峰值含文件页缓存。\n[{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"capacity-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":1021.227788,\"B_bytes\":16936960,\"M_bytes\":19349504},\"candidate\":{\"T_ms\":900.317443,\"B_bytes\":9842688,\"M_bytes\":14458880}},\"query/unindexed\":{\"reference\":{\"T_ms\":39.326313,\"B_bytes\":16936960,\"M_bytes\":40579072},\"candidate\":{\"T_ms\":34.252445,\"B_bytes\":9842688,\"M_bytes\":18042880}},\"query/indexed\":{\"reference\":{\"T_ms\":38.520998,\"B_bytes\":19222528,\"M_bytes\":46047232},\"candidate\":{\"T_ms\":36.424072,\"B_bytes\":10948608,\"M_bytes\":22093824}}}},{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"capacity-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":1256.849925,\"B_bytes\":17281024,\"M_bytes\":19841024},\"candidate\":{\"T_ms\":1172.017444,\"B_bytes\":9842688,\"M_bytes\":14897152}},\"query/unindexed\":{\"reference\":{\"T_ms\":38.193299,\"B_bytes\":17281024,\"M_bytes\":41840640},\"candidate\":{\"T_ms\":34.749095,\"B_bytes\":9842688,\"M_bytes\":18440192}},\"query/indexed\":{\"reference\":{\"T_ms\":38.300111,\"B_bytes\":19570688,\"M_bytes\":46743552},\"candidate\":{\"T_ms\":35.269811,\"B_bytes\":10948608,\"M_bytes\":22781952}}}},{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"default-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":348.486334,\"B_bytes\":5648384,\"M_bytes\":8208384},\"candidate\":{\"T_ms\":309.725635,\"B_bytes\":2899968,\"M_bytes\":6103040}},\"query/unindexed\":{\"reference\":{\"T_ms\":319.972638,\"B_bytes\":5648384,\"M_bytes\":14831616},\"candidate\":{\"T_ms\":309.915193,\"B_bytes\":2899968,\"M_bytes\":7557120}},\"query/indexed\":{\"reference\":{\"T_ms\":326.596114,\"B_bytes\":6414336,\"M_bytes\":16904192},\"candidate\":{\"T_ms\":312.490758,\"B_bytes\":3268608,\"M_bytes\":8802304}}}},{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"default-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":366.112695,\"B_bytes\":5763072,\"M_bytes\":8413184},\"candidate\":{\"T_ms\":309.225829,\"B_bytes\":3289088,\"M_bytes\":6758400}},\"query/unindexed\":{\"reference\":{\"T_ms\":314.738062,\"B_bytes\":5763072,\"M_bytes\":15261696},\"candidate\":{\"T_ms\":300.617504,\"B_bytes\":3289088,\"M_bytes\":7598080}},\"query/indexed\":{\"reference\":{\"T_ms\":320.172743,\"B_bytes\":6529024,\"M_bytes\":17018880},\"candidate\":{\"T_ms\":307.649236,\"B_bytes\":3657728,\"M_bytes\":8740864}}}},{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"general-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":476.215474,\"B_bytes\":9285632,\"M_bytes\":12165120},\"candidate\":{\"T_ms\":421.710059,\"B_bytes\":8204288,\"M_bytes\":11755520}},\"query/unindexed\":{\"reference\":{\"T_ms\":72.818215,\"B_bytes\":9285632,\"M_bytes\":21336064},\"candidate\":{\"T_ms\":66.497419,\"B_bytes\":8204288,\"M_bytes\":14401536}},\"query/indexed\":{\"reference\":{\"T_ms\":68.332456,\"B_bytes\":10051584,\"M_bytes\":23040000},\"candidate\":{\"T_ms\":66.45624,\"B_bytes\":8572928,\"M_bytes\":15450112}}}},{\"host\":\"1\",\"reference\":\"a24\",\"scenario\":\"general-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":463.470173,\"B_bytes\":9342976,\"M_bytes\":12472320},\"candidate\":{\"T_ms\":409.726927,\"B_bytes\":8613888,\"M_bytes\":12173312}},\"query/unindexed\":{\"reference\":{\"T_ms\":71.598354,\"B_bytes\":9342976,\"M_bytes\":21454848},\"candidate\":{\"T_ms\":67.410694,\"B_bytes\":8613888,\"M_bytes\":14831616}},\"query/indexed\":{\"reference\":{\"T_ms\":66.917043,\"B_bytes\":10113024,\"M_bytes\":23097344},\"candidate\":{\"T_ms\":65.535273,\"B_bytes\":8982528,\"M_bytes\":16183296}}}},{\"host\":\"1\",\"reference\":\"J11/aed09907\",\"scenario\":\"default-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":316.023927,\"B_bytes\":2899968,\"M_bytes\":6062080},\"candidate\":{\"T_ms\":621.541874,\"B_bytes\":2899968,\"M_bytes\":6090752}},\"query/unindexed\":{\"reference\":{\"T_ms\":313.984658,\"B_bytes\":2899968,\"M_bytes\":7524352},\"candidate\":{\"T_ms\":304.594931,\"B_bytes\":2899968,\"M_bytes\":7610368}},\"query/indexed\":{\"reference\":{\"T_ms\":311.564598,\"B_bytes\":3268608,\"M_bytes\":8794112},\"candidate\":{\"T_ms\":326.366364,\"B_bytes\":3268608,\"M_bytes\":8802304}}}},{\"host\":\"1\",\"reference\":\"J11/aed09907\",\"scenario\":\"default-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":330.768038,\"B_bytes\":3289088,\"M_bytes\":6496256},\"candidate\":{\"T_ms\":387.167344,\"B_bytes\":3289088,\"M_bytes\":6582272}},\"query/unindexed\":{\"reference\":{\"T_ms\":306.804503,\"B_bytes\":3289088,\"M_bytes\":7520256},\"candidate\":{\"T_ms\":307.064806,\"B_bytes\":3289088,\"M_bytes\":7577600}},\"query/indexed\":{\"reference\":{\"T_ms\":309.230835,\"B_bytes\":3657728,\"M_bytes\":8937472},\"candidate\":{\"T_ms\":311.848794,\"B_bytes\":3657728,\"M_bytes\":8933376}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"capacity-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":1296.483881,\"B_bytes\":16936960,\"M_bytes\":19259392},\"candidate\":{\"T_ms\":1114.01436,\"B_bytes\":9842688,\"M_bytes\":14680064}},\"query/unindexed\":{\"reference\":{\"T_ms\":54.454126,\"B_bytes\":16936960,\"M_bytes\":40792064},\"candidate\":{\"T_ms\":46.533273,\"B_bytes\":9842688,\"M_bytes\":17981440}},\"query/indexed\":{\"reference\":{\"T_ms\":53.412398,\"B_bytes\":19222528,\"M_bytes\":45707264},\"candidate\":{\"T_ms\":47.710644,\"B_bytes\":10948608,\"M_bytes\":22233088}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"capacity-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":1270.311034,\"B_bytes\":17281024,\"M_bytes\":20070400},\"candidate\":{\"T_ms\":1100.459581,\"B_bytes\":9842688,\"M_bytes\":14557184}},\"query/unindexed\":{\"reference\":{\"T_ms\":53.054641,\"B_bytes\":17281024,\"M_bytes\":41570304},\"candidate\":{\"T_ms\":46.652977,\"B_bytes\":9842688,\"M_bytes\":18558976}},\"query/indexed\":{\"reference\":{\"T_ms\":49.235608,\"B_bytes\":19570688,\"M_bytes\":46800896},\"candidate\":{\"T_ms\":46.669916,\"B_bytes\":10948608,\"M_bytes\":22745088}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"default-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":463.643307,\"B_bytes\":5648384,\"M_bytes\":8167424},\"candidate\":{\"T_ms\":384.375872,\"B_bytes\":2899968,\"M_bytes\":6123520}},\"query/unindexed\":{\"reference\":{\"T_ms\":412.671627,\"B_bytes\":5648384,\"M_bytes\":14811136},\"candidate\":{\"T_ms\":393.008904,\"B_bytes\":2899968,\"M_bytes\":7557120}},\"query/indexed\":{\"reference\":{\"T_ms\":428.758547,\"B_bytes\":6414336,\"M_bytes\":16695296},\"candidate\":{\"T_ms\":406.144688,\"B_bytes\":3268608,\"M_bytes\":8847360}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"default-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":465.346908,\"B_bytes\":5763072,\"M_bytes\":8347648},\"candidate\":{\"T_ms\":399.254174,\"B_bytes\":3289088,\"M_bytes\":6311936}},\"query/unindexed\":{\"reference\":{\"T_ms\":418.844669,\"B_bytes\":5763072,\"M_bytes\":15249408},\"candidate\":{\"T_ms\":400.528724,\"B_bytes\":3289088,\"M_bytes\":7708672}},\"query/indexed\":{\"reference\":{\"T_ms\":422.129734,\"B_bytes\":6529024,\"M_bytes\":17092608},\"candidate\":{\"T_ms\":403.827379,\"B_bytes\":3657728,\"M_bytes\":8941568}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"general-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":609.550486,\"B_bytes\":9285632,\"M_bytes\":12529664},\"candidate\":{\"T_ms\":565.383355,\"B_bytes\":8204288,\"M_bytes\":11894784}},\"query/unindexed\":{\"reference\":{\"T_ms\":92.897159,\"B_bytes\":9285632,\"M_bytes\":21336064},\"candidate\":{\"T_ms\":84.340264,\"B_bytes\":8204288,\"M_bytes\":14184448}},\"query/indexed\":{\"reference\":{\"T_ms\":90.163392,\"B_bytes\":10051584,\"M_bytes\":22851584},\"candidate\":{\"T_ms\":86.222729,\"B_bytes\":8572928,\"M_bytes\":15593472}}}},{\"host\":\"2\",\"reference\":\"a24\",\"scenario\":\"general-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":647.015222,\"B_bytes\":9342976,\"M_bytes\":12283904},\"candidate\":{\"T_ms\":548.278799,\"B_bytes\":8613888,\"M_bytes\":12038144}},\"query/unindexed\":{\"reference\":{\"T_ms\":94.491422,\"B_bytes\":9342976,\"M_bytes\":21475328},\"candidate\":{\"T_ms\":84.679584,\"B_bytes\":8613888,\"M_bytes\":14794752}},\"query/indexed\":{\"reference\":{\"T_ms\":90.415383,\"B_bytes\":10113024,\"M_bytes\":23257088},\"candidate\":{\"T_ms\":85.74145,\"B_bytes\":8982528,\"M_bytes\":16412672}}}},{\"host\":\"2\",\"reference\":\"J11/aed09907\",\"scenario\":\"default-bigint\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":383.608427,\"B_bytes\":2899968,\"M_bytes\":5976064},\"candidate\":{\"T_ms\":380.623891,\"B_bytes\":2899968,\"M_bytes\":6082560}},\"query/unindexed\":{\"reference\":{\"T_ms\":406.314801,\"B_bytes\":2899968,\"M_bytes\":7524352},\"candidate\":{\"T_ms\":398.210201,\"B_bytes\":2899968,\"M_bytes\":7725056}},\"query/indexed\":{\"reference\":{\"T_ms\":400.823631,\"B_bytes\":3268608,\"M_bytes\":9031680},\"candidate\":{\"T_ms\":404.24701,\"B_bytes\":3268608,\"M_bytes\":8884224}}}},{\"host\":\"2\",\"reference\":\"J11/aed09907\",\"scenario\":\"default-varchar\",\"phases\":{\"write/unindexed\":{\"reference\":{\"T_ms\":400.233982,\"B_bytes\":3289088,\"M_bytes\":6467584},\"candidate\":{\"T_ms\":391.44413,\"B_bytes\":3289088,\"M_bytes\":6565888}},\"query/unindexed\":{\"reference\":{\"T_ms\":395.830845,\"B_bytes\":3289088,\"M_bytes\":7749632},\"candidate\":{\"T_ms\":395.436456,\"B_bytes\":3289088,\"M_bytes\":7716864}},\"query/indexed\":{\"reference\":{\"T_ms\":407.46676,\"B_bytes\":3657728,\"M_bytes\":8822784},\"candidate\":{\"T_ms\":401.256088,\"B_bytes\":3657728,\"M_bytes\":8929280}}}}]"
+  },
+  {
+   "id": "e133",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "当前版本的收益与反例，不用局部数字替代正式分数",
+   "output": "71de对a24默认写入T减少11.12%～17.10%，查询T减少3.14%～5.27%，B减少42.93%～49.04%，写入M减少19.67%～25.65%，查询M减少47.01%～50.21%。对直接J11父版B完全一致：一台写入T减少0.78%～2.20%，另一台增加17.05%～96.68%；后者出现350.32ms/210.84ms请求，而该批CPU仍约188～190ms，对照约195～198ms。M亦有约1%～3%回退。尚不能确认6000、7000或翻倍，当前发布由用户要求先提测验证方向。"
+  },
+  {
+   "id": "e134",
+   "source": "agent_summary_of_verified_tool_output",
+   "purpose": "新路线筛选及未交付边界",
+   "output": "有界压缩缓冲实验run43438925378两台通过20325字节兼容/回环、2284压缩字测试与SQL/崩溃/损坏校验；各六组文件逐字节相同，默认apply下降5.72%～8.48%，连续浮点下降1.35%～1.48%。但未做完整T/B/M，未纳入当前交付。直接float32绑定run43436465067局部收益微弱且一台长小数绑定退化4%～5%，未纳入。整字短小数144216差分通过但本地绑定退化21%～26%，未纳入。未把所有实验都写成当前代码。"
+  }
+ ],
+ "agent_observations": [
+  {
+   "id": "a51",
+   "source": "agent",
+   "title": "实现来源与协作边界",
+   "content": "本项目并非一次简短问答生成全部代码。起点是官方题包和用户指定的已有参赛分支，之后按类型/精确向量/存储核心、SQL与表目录、JSONL对接、正确性修复、资源优化逐阶段实现。用户给出目标、约束、正式反馈及接受/换路线决定；代码、具体算法、测试执行和技术解释由Agent完成。基础阶段的失败到通过记录e04/e05/e08/e09、协议阶段e32-e35和当前e132在同一JSON内。这里的机制解释是Agent对实际代码的说明，不作为用户独立推导的原话。"
+  },
+  {
+   "id": "a52",
+   "source": "agent",
+   "title": "精确性与性能的关系",
+   "content": "向量以float32存储，距离按稳定的double累加次序计算。平方距离用于排序，开方只用于输出，避免相邻距离先开方后合并；并列按主键决定次序。批量SIMD按维度顺序保留每个候选的累加顺序，不使用改变结果的乘加融合。筛选码只提供保守下界，不能证明排除时必须走精确路径。无损half/shared-scale布局仅接纳能精确表示的值，其余值保留原始位，不能把所有输入量化为近似值。"
+  },
+  {
+   "id": "a53",
+   "source": "agent",
+   "title": "J11持久化设计",
+   "content": "新文件MVDBJL11以4048字节载荷加48字节页尾组成4096字节帧；JBA3批次共享48字节头与紧凑目录，行载荷独立压缩并各带CRC。内存直接行引用在64位内携带地址、长度和压缩标记，点读无需先读批次目录。磁盘head/previous仍是经过验证的历史引用，不接受仅供内存使用的直接行标记。语句失败按保存点恢复；提交错误可能已持久化，不能继续假装回滚。ProcessCrash与Ordered的同步次数和确认顺序没有放宽。旧J08/J10仍可读写，新格式不原地迁移旧文件。"
+  },
+  {
+   "id": "a54",
+   "source": "agent",
+   "title": "缓存复用与失效",
+   "content": "重复查询可复用不可变页的已校验内容、表扫描快照和紧凑向量表示；每次查询仍绑定谓词和查询向量、求本次距离、排序并投影本次结果。DML、DDL、BEGIN/COMMIT/ROLLBACK及失败写路径保守失效，避免旧版本与新根的ABA误复用。首次构建、写后首次查询和缓存重叠的峰值M都必须计入实验，不把热查询收益扩展到全部工作负载。"
+  },
+  {
+   "id": "a55",
+   "source": "agent",
+   "title": "压缩与随机读取取舍",
+   "content": "整个批次压成一个块虽可能降低磁盘字节，却可能使一个TopK获胜行的随机读取解压数十或上百行，且解压缓存与查询快照叠加推高M。最终采用共享元数据但独立行载荷，恢复按目录建索引，点读按直接引用读取一行。恢复更少读页也会让后续首次读取更冷，因此热读比较先显式预热，并另报预热成本与冷读反例。"
+  },
+  {
+   "id": "a56",
+   "source": "agent",
+   "title": "端到端测量的解释",
+   "content": "正式计分单位是完整JSONL请求路径与资源生命周期。单独解析、压缩、距离内核的降低幅度不能直接乘成E分数。实验使用不可变镜像、同一生成负载、交替顺序、独立结果模型、重启核验和三轮中位数；同时保留CPU、请求长尾和退化。微基准只决定是否值得做整机对照。当前判断是B/M收益明确而T增益有限，正式提测用于检验本地负载是否代表隐藏负载。"
+  },
+  {
+   "id": "a57",
+   "source": "agent",
+   "title": "材料与代码可追溯性",
+   "content": "当前源代码身份为71de1c645f32c187d15fba3e73471433227b1afc，其src/include/tests/Dockerfile/CMakeLists Git对象在发布时逐项相等核验。完整功能验证与T/B/M来自run43435183257，两份产物均通过SHA256验证。后续有界压缩缓冲、融合绑定和整字小数实验单独列为未交付，不用它们的结果说明当前提交。材料里的历史版本成绩、当前本地结果与用户提供的评审解释分别标明来源。"
+  }
+ ]
+}

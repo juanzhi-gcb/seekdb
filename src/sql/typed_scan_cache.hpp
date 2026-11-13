@@ -1,6 +1,7 @@
 #pragma once
 #include "minivectordb/row_codec.hpp"
 #include "../vector/int8_bound.hpp"
+#include "../vector/lossless_half.hpp"
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -26,6 +27,10 @@ class TypedScanCache {
     bool probation_complete_=false;
     detail::Int8BoundCache integer_cache_;
     std::unique_ptr<float[]> vectors_;
+    std::unique_ptr<std::uint16_t[]> half_vectors_;
+    bool half_=false,allow_half_=false,probation_half_exact_=true;
+    std::size_t vector_width() const noexcept {return dimension_*(half_?2:4);}
+    void* vector_data(std::size_t row) noexcept {return half_?static_cast<void*>(half_vectors_.get()+row*dimension_):static_cast<void*>(vectors_.get()+row*dimension_);}
     std::unique_ptr<std::int64_t[]> scalars_;
     std::unique_ptr<std::size_t[]> columns_;
     bool transposed_=false;
@@ -39,7 +44,7 @@ class TypedScanCache {
 
     void release() noexcept {
         integer_cache_.clear();
-        vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
+        vectors_.reset();half_vectors_.reset();half_=false;scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
         probation_rows_=probation_text_width_=allocated_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
@@ -55,7 +60,7 @@ class TypedScanCache {
         if(!text_column_ && slot==scalar_count_)return;
         std::vector<std::uint32_t> order(count_);
         std::iota(order.begin(),order.end(),0U);
-        std::vector<float> vector(dimension_);
+        std::vector<std::byte> vector(vector_width());
         std::vector<std::int64_t> scalars(scalar_count_);
         std::vector<char> text_copy(text_width_);
         std::sort(order.begin(),order.end(),[&](auto a,auto b) {
@@ -65,7 +70,7 @@ class TypedScanCache {
             return cmp<0 || (cmp==0 && key(a)<key(b));
         });
         const auto move_row=[&](std::size_t to,std::size_t from) {
-            std::memcpy(vectors_.get()+to*dimension_,vectors_.get()+from*dimension_,dimension_*sizeof(float));
+            std::memcpy(vector_data(to),vector_data(from),vector_width());
             std::memcpy(scalars_.get()+to*scalar_count_,scalars_.get()+from*scalar_count_,scalar_count_*sizeof(std::int64_t));
             if(text_column_) {
                 text_lengths_[to]=text_lengths_[from];
@@ -73,7 +78,7 @@ class TypedScanCache {
             }
         };
         for(std::size_t i=0;i<count_;++i)if(order[i]!=i) {
-            std::memcpy(vector.data(),vectors_.get()+i*dimension_,dimension_*sizeof(float));
+            std::memcpy(vector.data(),vector_data(i),vector_width());
             std::memcpy(scalars.data(),scalars_.get()+i*scalar_count_,scalar_count_*sizeof(std::int64_t));
             const auto length=text_column_?text_lengths_[i]:0;
             if(length)std::memcpy(text_copy.data(),texts_.get()+i*text_width_,length);
@@ -82,7 +87,7 @@ class TypedScanCache {
                 const auto next=order[row];move_row(row,next);
                 order[row]=static_cast<std::uint32_t>(row);row=next;
             }
-            std::memcpy(vectors_.get()+row*dimension_,vector.data(),dimension_*sizeof(float));
+            std::memcpy(vector_data(row),vector.data(),vector_width());
             std::memcpy(scalars_.get()+row*scalar_count_,scalars.data(),scalar_count_*sizeof(std::int64_t));
             if(text_column_) {
                 text_lengths_[row]=length;
@@ -112,7 +117,7 @@ public:
     void invalidate() noexcept {
         integer_cache_.clear();
         count_=0;table_=index_=0;state_=State::empty;transposed_=false;
-        probation_rows_=probation_text_width_=0;probation_complete_=false;
+        probation_rows_=probation_text_width_=0;probation_complete_=false;probation_half_exact_=true;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void clear() noexcept {release();invalidate();budget_=dimension_=scalar_count_=text_width_=text_schema_width_=0;text_column_.reset();}
@@ -122,7 +127,7 @@ public:
         return state_==State::ready && table_==table && index_==index && column_==column;
     }
     void start(const Schema& schema,std::uint64_t index,std::size_t column,
-               std::size_t budget,bool reuse=true,std::optional<std::size_t> text_column={}) {
+               std::size_t budget,bool reuse=true,std::optional<std::size_t> text_column={},bool allow_half=false) {
         budget=std::min(budget,std::size_t(64*1024*1024));
         const std::size_t dimension=schema.columns.at(column).extent;
         std::size_t scalar_count=0;
@@ -135,9 +140,9 @@ public:
            table_==schema.id && index_==index && column_==column &&
            dimension_==dimension && scalar_count_==scalar_count &&
            text_column_==text_column && text_schema_width_==text_width) {
-            const auto rows=probation_rows_,width=probation_text_width_;
+            const auto rows=probation_rows_,width=probation_text_width_;const bool half_proof=probation_half_exact_;
             release();probation_rows_=rows;probation_text_width_=width;
-            probation_complete_=true;budget_=budget;
+            probation_complete_=true;probation_half_exact_=half_proof;budget_=budget;
         }
         if(budget_!=budget || dimension_!=dimension || scalar_count_!=scalar_count ||
            text_column_!=text_column || text_schema_width_!=text_width)clear();
@@ -145,7 +150,7 @@ public:
             if(reuse)invalidate();else clear();
             table_=schema.id;index_=index;column_=column;
             dimension_=dimension;scalar_count_=scalar_count;budget_=budget;
-            text_column_=text_column;text_schema_width_=text_width;
+            text_column_=text_column;text_schema_width_=text_width;allow_half_=allow_half;
             state_=State::probation;return;
         }
         if(state_!=State::probation)return;
@@ -156,7 +161,8 @@ public:
         if(!dimension || !scalar_count || scalar_count>budget/sizeof(std::size_t)) {refuse();return;}
         const auto metadata=scalar_count*sizeof(std::size_t);
         if(dimension>(budget-metadata)/sizeof(float)) {refuse();return;}
-        const auto vector_bytes=dimension*sizeof(float);
+        const bool use_half=allow_half_&&probation_complete_&&probation_rows_>=256&&probation_half_exact_;
+        const auto vector_bytes=dimension*(use_half?sizeof(std::uint16_t):sizeof(float));
         if(scalar_count>(budget-metadata-vector_bytes)/sizeof(std::int64_t)) {refuse();return;}
         auto row_bytes=vector_bytes+scalar_count*sizeof(std::int64_t);
         if(text_column_) {
@@ -172,10 +178,12 @@ public:
         // Only a completed scan of this exact immutable identity proves the
         // needed row count. Keep the hard budget, but allocate for actual rows.
         if(probation_complete_)capacity=std::min(capacity,std::max(std::size_t(1),probation_rows_));
-        if(vectors_ && (capacity_<capacity || allocated_text_width_!=text_width_))release();
-        if(!vectors_) {
+        if((vectors_||half_vectors_) && (capacity_<capacity || allocated_text_width_!=text_width_ || half_!=use_half))release();
+        if(!vectors_&&!half_vectors_) {
             try {
-                vectors_.reset(new float[capacity*dimension]);
+                half_=use_half;
+                if(half_)half_vectors_.reset(new std::uint16_t[capacity*dimension]);
+                else vectors_.reset(new float[capacity*dimension]);
                 scalars_.reset(new std::int64_t[capacity*scalar_count]);
                 columns_.reset(new std::size_t[scalar_count]);
                 if(text_column_) {
@@ -194,10 +202,15 @@ public:
         }
         count_=0;state_=State::building;
     }
-    void observe_row(std::string_view text={}) noexcept {
+    bool observing_half() const noexcept {return state_==State::probation&&allow_half_&&probation_half_exact_;}
+    void observe_row(std::string_view text={},std::span<const float> vector={}) noexcept {
         if(state_==State::probation) {
             if(probation_rows_!=std::numeric_limits<std::size_t>::max())++probation_rows_;
             if(text_column_)probation_text_width_=std::max(probation_text_width_,text.size());
+            if(allow_half_&&probation_half_exact_) {
+                if(vector.size()!=dimension_)probation_half_exact_=false;
+                else for(float x:vector)if(!detail::half_exact(x)){probation_half_exact_=false;break;}
+            }
         }
     }
     template<class ScalarGetter> void append(std::span<const float> vector,ScalarGetter&& scalar,
@@ -210,18 +223,24 @@ public:
             if(!text.empty())std::memcpy(texts_.get()+count_*text_width_,text.data(),text.size());
             text_lengths_[count_]=static_cast<std::uint32_t>(text.size());
         }
-        std::memcpy(vectors_.get()+count_*dimension_,vector.data(),dimension_*sizeof(float));
+        if(half_) {
+            for(std::size_t d=0;d<dimension_;++d) {
+                if(!detail::half_exact(vector[d])){refuse();return;}
+                half_vectors_[count_*dimension_+d]=detail::half_encode_exact(vector[d]);
+            }
+        }else std::memcpy(vectors_.get()+count_*dimension_,vector.data(),dimension_*sizeof(float));
         for(std::size_t slot=0;slot<scalar_count_;++slot)
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
     }
-    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false) noexcept {
+    void finish(bool transpose=false,bool clustered=false,bool integer_screen=false,bool rowwise_candidates=false) noexcept {
         if(state_==State::probation) {probation_complete_=true;return;}
         if(!building())return;
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
-        if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
+        const bool rowwise=count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
+        if(!half_ && !rowwise && transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
                 for(std::size_t row=0;row+16<=count_;row+=16) {
@@ -234,10 +253,13 @@ public:
                 transposed_=true;
             } catch(const std::bad_alloc&) {} // No block changed before allocation.
         }
-        if(integer_screen && transposed_ && budget_>bytes_)
-            integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_);
+        if(integer_screen && budget_>bytes_) {
+            if(half_)integer_cache_.build_values(count_,dimension_,budget_-bytes_,[&](std::size_t row,std::size_t d){return detail::half_decode(half_vectors_[row*dimension_+d]);});
+            else if(transposed_||rowwise)integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_,false,rowwise);
+        }
         state_=State::ready;
     }
+    bool lossless_half() const noexcept {return half_;}
     bool transposed() const noexcept {return transposed_;}
     std::optional<std::pair<std::size_t,std::size_t>> ordered_bounds(
             std::size_t slot,std::int64_t value) const {
@@ -261,6 +283,7 @@ public:
         return {vectors_.get()+row*dimension_,16*dimension_};
     }
     std::span<const float> read_vector(std::size_t row,std::vector<float>& scratch) const {
+        if(half_) {scratch.resize(dimension_);for(std::size_t d=0;d<dimension_;++d)scratch[d]=detail::half_decode(half_vectors_[row*dimension_+d]);return scratch;}
         if(!transposed_ || row>=count_/16*16)return vector(row);
         scratch.resize(dimension_);
         const auto* values=vectors_.get()+(row/16*16)*dimension_;
