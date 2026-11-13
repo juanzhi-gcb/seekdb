@@ -1,0 +1,31 @@
+name: Initialized extent sync screening
+on:
+  push:
+    branches: ['codex/extent-screen-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Paired native disk sync screening
+        run: |
+          mkdir extent-results
+          lscpu > extent-results/lscpu.txt
+          df -T "$RUNNER_TEMP" > extent-results/filesystem.txt
+          g++ -std=c++20 -O2 bench/extent6000/probe.cpp -o "$RUNNER_TEMP/extent-probe"
+          "$RUNNER_TEMP/extent-probe" "$RUNNER_TEMP/extent-data" > extent-results/samples.jsonl
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: extent-${{ matrix.replica }}-${{ github.run_id }}
+          path: extent-results/
+          retention-days: 14
