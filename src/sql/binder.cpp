@@ -1,3 +1,4 @@
+#include "../types/vector_component.hpp"
 #include "minivectordb/profile.hpp"
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
@@ -151,19 +152,26 @@ namespace minivectordb::sql {
         return std::string(v.view());
       }
       if(fast_vector && v.kind==Literal::String) {
-        std::vector<double> values;
+        std::vector<float> values;
         values.reserve(std::min<std::size_t>(c.extent,v.view().size()/2));
-        std::exception_ptr numeric_error;
+        std::size_t count=0;
+        std::exception_ptr numeric_error,component_error;
         const bool plain=plain_vector(v.view(),[&](auto component,double parsed,bool out_of_range){
+          ++count;
           if(numeric_error)return;
-          try {values.push_back(out_of_range?real(component):parsed);}
-          catch(const Error&) {numeric_error=std::current_exception();}
+          try {if(out_of_range)parsed=real(component);}
+          catch(const Error&) {numeric_error=std::current_exception();return;}
+          // Dimension errors precede float32 errors, but binary64 syntax/range
+          // errors precede dimension checks. Keep checking every input token.
+          if(count>c.extent || component_error)return;
+          try {values.push_back(detail::vector_component(parsed));}
+          catch(const std::invalid_argument&) {component_error=std::current_exception();}
         });
         if(plain) {
-          // The lexer inspects the complete input before any conversion. A
-          // malformed suffix must still win over an earlier overflow error.
           if(numeric_error)std::rethrow_exception(numeric_error);
-          return make_vector(values,c.extent);
+          if(count!=c.extent)throw std::invalid_argument("VECTOR dimension mismatch");
+          if(component_error)std::rethrow_exception(component_error);
+          return values;
         }
       }
       auto components=vector_components(v);
