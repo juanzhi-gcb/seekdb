@@ -134,7 +134,8 @@ public:
     generation_=next;durable_=head_;undo_.clear();purge_empty();
   }
   // Copy into an owned cache in physical order. Completed pages can be released
-  // after the visitor retains their decoded contents. This never changes data,
+  // after the visitor retains their decoded contents. Keep the first 64 KiB
+  // resident for roots/catalog reads during later SQL binding. This never changes data,
   // durability, roots or the normal ordered scan contract.
   void release_before(std::uint64_t at,std::uint64_t& released,bool enabled,bool final=false) const noexcept {
 #if defined(POSIX_FADV_DONTNEED)
@@ -148,7 +149,7 @@ public:
   }
   void cache_scan(std::uint64_t space,const std::function<bool(std::int64_t,std::string_view)>& visitor) const {
     auto rows=snapshot(space);std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.second<b.second;});
-    std::uint64_t released=8192,last=8192;bool retain=true;
+    std::uint64_t released=65536,last=65536;bool retain=true;
     for(auto [key,at]:rows){auto value=value_at(space,key,at);retain=visitor(key,value)&&retain;release_before(at,released,retain);last=at;}
     release_before(last,released,retain,true);
   }
@@ -162,7 +163,7 @@ public:
       if(l->first.second!=r->first.second)throw Store::KeySetMismatch();rows.push_back({l->first.second,l->second,r->second});++l;++r;
     }
     std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.right<b.right;});
-    std::uint64_t released=8192,last=8192;bool retain=true;
+    std::uint64_t released=65536,last=65536;bool retain=true;
     for(auto row:rows){auto a=value_at(left_space,row.key,row.left),b=value_at(right_space,row.key,row.right);retain=visitor(row.key,a,b)&&retain;release_before(row.right,released,retain);last=row.right;}
     release_before(last,released,retain,true);
   }
