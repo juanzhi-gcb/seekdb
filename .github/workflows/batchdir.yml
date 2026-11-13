@@ -1,0 +1,33 @@
+name: Independent-row batch directory codec screen
+on:
+  push:
+    branches: ['codex/batch-directory-screen-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Corruption oracle and paired codec screen
+        run: |
+          mkdir batchdir-results
+          lscpu > batchdir-results/lscpu.txt
+          g++ -std=c++20 -O1 -g -fsanitize=address,undefined -Iinclude tests/batch_directory_tests.cpp -o "$RUNNER_TEMP/batchdir-test"
+          "$RUNNER_TEMP/batchdir-test" > batchdir-results/correctness.txt
+          g++ -std=c++20 -O3 -ffp-contract=off -Iinclude -Isrc bench/batch_directory_probe.cpp src/storage/row_codec.cpp src/types/value.cpp -o "$RUNNER_TEMP/batchdir-probe"
+          "$RUNNER_TEMP/batchdir-probe" > batchdir-results/probe.jsonl
+          printf '%s\n' 'Codec only; estimated file extents, not database physical B or complete T/M. Cached-directory case is optimistic; uncached and checked-header access are reported separately.' > batchdir-results/scope.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: batchdir-${{ matrix.replica }}-${{ github.run_id }}
+          path: batchdir-results/
+          retention-days: 14
