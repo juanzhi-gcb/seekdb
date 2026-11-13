@@ -50,7 +50,7 @@ void faults(const std::filesystem::path& dir){
 int main(){try{
  const auto dir=std::filesystem::path(std::getenv("MVDB_TEST_DIR")?std::getenv("MVDB_TEST_DIR"):"/tmp")/("page-commit-"+std::to_string(getpid()));std::filesystem::create_directories(dir);
  for(auto policy:{CommitSyncPolicy::Ordered,CommitSyncPolicy::ProcessCrash}){
-  const auto path=dir/(policy==CommitSyncPolicy::Ordered?"ordered":"process");std::mt19937 rng(912);std::string payload(12007,'\0');for(auto& c:payload)c=char(rng());payload.replace(4040,5,"JFR09");
+  const auto path=dir/(policy==CommitSyncPolicy::Ordered?"ordered":"process");std::mt19937 rng(912);std::string payload(12007,'\0');for(auto& c:payload)c=char(rng());payload.replace(4040,5,"JFR10");
   {FramedStore db(path,policy);db.begin();db.put_in(7,1,payload);CHECK(db.get_in(7,1)==payload);db.commit();CHECK(std::filesystem::file_size(path)%4096==0);}
   auto committed=std::filesystem::file_size(path);
   auto pid=fork();CHECK(pid>=0);if(!pid){FramedStore db(path,policy);db.begin();for(int i=0;i<10;++i)db.put_in(7,i+2,payload);_exit(0);}int status=0;CHECK(waitpid(pid,&status,0)==pid&&WEXITSTATUS(status)==0);
@@ -58,7 +58,7 @@ int main(){try{
   {FramedStore db(path,policy);CHECK(db.get_in(7,1)==payload);CHECK(!db.get_in(7,2));CHECK(std::filesystem::file_size(path)==committed);db.begin();db.put_in(7,2,"after orphan");db.commit();db.begin();db.commit();}
   {Store db(path);CHECK(db.get_in(7,1)==payload);CHECK(db.get_in(7,2)=="after orphan");}
   // An incomplete physical suffix can contain arbitrary marker-like bytes.
-  {std::ofstream out(path,std::ios::binary|std::ios::app);out<<"JFR09"<<std::string(133,'x');}
+  {std::ofstream out(path,std::ios::binary|std::ios::app);out<<"JFR10"<<std::string(133,'x');}
   {FramedStore db(path,policy);CHECK(db.get_in(7,1)==payload);db.begin();db.erase_in(7,1);db.commit();}
   {Store db(path);CHECK(!db.get_in(7,1));CHECK(db.get_in(7,2)=="after orphan");}
  }

@@ -14,9 +14,9 @@
 #include <fcntl.h>
 
 namespace minivectordb::detail {
-// J08 remains readable and writable. New J09 files reserve a 64-byte footer
+// J08 remains readable and writable. New J10 files reserve a 48-byte footer
 // per 4096-byte frame; a commit shares the final data frame, eliminating the
-// separate mutable root-page write. Record offsets address 4032-byte payload
+// separate mutable root-page write. Record offsets address 4048-byte payload
 // regions. Footer and payload checksums are separate so torn roots and corrupt
 // committed data are distinguishable. Rollback changes reachability, never truncates a
 // record that an in-flight scan or savepoint may still reference. The in-memory
@@ -29,7 +29,7 @@ class JournalStore {
   int fd_;
   CommitSyncPolicy policy_;
   bool framed_=false,pending_valid_=false;
-  static constexpr std::size_t frame_payload=4032;
+  static constexpr std::size_t frame_payload=4048;
   Page pending_{};
   std::uint64_t pending_block_=0;
   std::size_t pending_used_=0;
@@ -67,14 +67,14 @@ class JournalStore {
   }
   static bool frame_header(const Page& p){
     const auto* f=p.data()+frame_payload;
-    return !std::memcmp(f,"JFR09",5) && f[5]<=1 && !f[6] && !f[7] &&
+    return !std::memcmp(f,"JFR10",5) && f[5]<=1 && !f[6] && !f[7] &&
       get(f+32,4)<=frame_payload && get(f+40,4)==crc({reinterpret_cast<const char*>(f),40});
   }
   static bool frame_payload_valid(const Page& p){return get(p.data()+frame_payload+36,4)==crc({reinterpret_cast<const char*>(p.data()),frame_payload});}
   void invalidate_block(std::uint64_t block){for(auto& c:cache_)if(c.page==block)c.page=UINT64_MAX;}
   Page frame(bool commit,std::uint64_t generation) const {
     Page p=pending_valid_?pending_:Page{};
-    auto* f=p.data()+frame_payload;std::memset(f,0,64);std::memcpy(f,"JFR09",5);f[5]=commit?1:0;
+    auto* f=p.data()+frame_payload;std::memset(f,0,48);std::memcpy(f,"JFR10",5);f[5]=commit?1:0;
     if(commit){put(f+8,generation);put(f+16,head_);put(f+24,8192+(pending_block_+1)*frame_payload);}
     put(f+32,pending_used_,4);put(f+36,crc({reinterpret_cast<const char*>(p.data()),frame_payload}),4);
     put(f+40,crc({reinterpret_cast<const char*>(f),40}),4);return p;
@@ -160,17 +160,17 @@ class JournalStore {
     return result;
   }
   Page root(std::uint64_t generation)const{
-    Page p{};std::memcpy(p.data(),framed_?"MVDBJL09":"MVDBJL08",8);put(p.data()+8,generation);put(p.data()+16,head_);put(p.data()+24,end_);put(p.data()+32,page_checksum(p,32),4);return p;
+    Page p{};std::memcpy(p.data(),framed_?"MVDBJL10":"MVDBJL08",8);put(p.data()+8,generation);put(p.data()+16,head_);put(p.data()+24,end_);put(p.data()+32,page_checksum(p,32),4);return p;
   }
   static bool valid(const Page&p,std::uint64_t bytes){
-    if((std::memcmp(p.data(),"MVDBJL08",8) && std::memcmp(p.data(),"MVDBJL09",8)) || get(p.data()+32,4)!=page_checksum(p,32))return false;
-    if(!std::memcmp(p.data(),"MVDBJL09",8))return !get(p.data()+8)&&!get(p.data()+16)&&get(p.data()+24)==8192;
+    if((std::memcmp(p.data(),"MVDBJL08",8) && std::memcmp(p.data(),"MVDBJL10",8)) || get(p.data()+32,4)!=page_checksum(p,32))return false;
+    if(!std::memcmp(p.data(),"MVDBJL10",8))return !get(p.data()+8)&&!get(p.data()+16)&&get(p.data()+24)==8192;
     const auto head=get(p.data()+16),end=get(p.data()+24);return end>=8192 && end<=bytes && (!head || (head>=8192 && head<=end && header_size<=end-head));
   }
   void assign(std::uint64_t& slot,std::uint64_t value){if(!slot&&value)--empty_entries_;else if(slot&&!value)++empty_entries_;slot=value;}
   void purge_empty(){if(!empty_entries_)return;for(auto i=index_.begin();i!=index_.end();)if(!i->second){i=index_.erase(i);--empty_entries_;}else ++i;}
 public:
-  static bool magic(const unsigned char* p){return std::memcmp(p,"MVDBJL08",8)==0 || std::memcmp(p,"MVDBJL09",8)==0;}
+  static bool magic(const unsigned char* p){return std::memcmp(p,"MVDBJL08",8)==0 || std::memcmp(p,"MVDBJL10",8)==0;}
   JournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy):fd_(fd),policy_(policy){
     cache_.resize(std::min(cache_budget,std::size_t(512*1024))/sizeof(Cached));
     if(created){framed_=true;auto p=root(0);write_raw(4096,{reinterpret_cast<const char*>(p.data()),p.size()});write_raw(0,{reinterpret_cast<const char*>(p.data()),p.size()});sync();return;}
@@ -178,7 +178,7 @@ public:
     Page a{},b{};if(read_some(0,a.data(),a.size())!=a.size()||read_some(4096,b.data(),b.size())!=b.size())fail();
     const bool av=valid(a,end_),bv=valid(b,end_);if(!av&&!bv)fail();const auto& p=!av||(bv&&get(b.data()+8)>get(a.data()+8))?b:a;
     if(av&&bv&&std::memcmp(a.data(),b.data(),8))fail();
-    framed_=!std::memcmp(p.data(),"MVDBJL09",8);
+    framed_=!std::memcmp(p.data(),"MVDBJL10",8);
     if(!framed_){generation_=get(p.data()+8);head_=durable_=get(p.data()+16);index_=reconstruct(head_,get(p.data()+24));return;}
     const auto complete=(end_-8192)/4096;std::uint64_t committed_pages=0;end_=8192;
     for(auto count=complete;count;--count){Page page{};
