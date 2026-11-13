@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
         const auto args = arguments(argc, argv);
         std::filesystem::create_directories(args.directory);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
-        minivectordb::Options options{args.directory / "tmp",args.sort_memory};options.journal_store=true;
+        minivectordb::Options options{args.directory / "tmp",args.sort_memory};options.journal_store=true;options.segment_store=true;
         auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
                                 options);
         return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);

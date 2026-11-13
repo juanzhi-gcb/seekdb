@@ -2,7 +2,7 @@
 #include "page_checksum.hpp"
 #include "packed_codec.hpp"
 #include "packed_pointer.hpp"
-#include "journal_store.hpp"
+#include "journal_facade.hpp"
 #include <array>
 #include <algorithm>
 #include <vector>
@@ -548,7 +548,7 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format):impl_(std::make_unique<Impl>()) {
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format,bool segment_format):impl_(std::make_unique<Impl>()) {
   if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
     throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
@@ -571,7 +571,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created && journal_format) {
-    s.journal=std::make_unique<detail::JournalStore>(s.fd,true,data_cache_bytes,commit_sync_policy);
+    s.journal=std::make_unique<detail::JournalStore>(s.fd,true,data_cache_bytes,commit_sync_policy,segment_format);
     auto parent=path.parent_path();if(parent.empty())parent=".";
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);if(directory<0)io_error("open database directory");
     try{sync_fd(directory);}catch(...){::close(directory);throw;}::close(directory);return;

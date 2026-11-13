@@ -17,7 +17,7 @@ namespace minivectordb::detail {
 // checksummed commit roots. Rollback changes reachability, never truncates a
 // record that an in-flight scan or savepoint may still reference. The in-memory
 // ordered directory stores offsets only; no second copy of row payloads.
-class JournalStore {
+class LegacyJournalStore {
   using Key=std::pair<std::uint64_t,std::int64_t>;
   using Page=std::array<unsigned char,4096>;
   struct Undo {Key key;std::uint64_t value,head;};
@@ -85,7 +85,7 @@ class JournalStore {
   void purge_empty(){if(!empty_entries_)return;for(auto i=index_.begin();i!=index_.end();)if(!i->second){i=index_.erase(i);--empty_entries_;}else ++i;}
 public:
   static bool magic(const unsigned char* p){return std::memcmp(p,"MVDBJL08",8)==0;}
-  JournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy):fd_(fd),policy_(policy){
+  LegacyJournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy):fd_(fd),policy_(policy){
     cache_.resize(std::min(cache_budget,std::size_t(512*1024))/sizeof(Cached));
     if(created){Page zero{};write(4096,{reinterpret_cast<const char*>(zero.data()),zero.size()});auto p=root(0);write(0,{reinterpret_cast<const char*>(p.data()),p.size()});sync();return;}
     struct stat stat{};if(::fstat(fd_,&stat))io("journal fstat");if(stat.st_size<8192)fail();end_=std::uint64_t(stat.st_size);
