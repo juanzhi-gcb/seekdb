@@ -78,7 +78,14 @@ public:
       v=(v>>(bit%8))&((1U<<width_)-1);
       residual=(v&(1U<<(width_-1)))?int(v)-int(1U<<width_):int(v);
     }
-    return std::ldexp(float(int(codes_[code_offset(row,d)])*(1<<shift_)+residual),fine_);
+    const int n=int(codes_[code_offset(row,d)])*(1<<shift_)+residual;
+    if(!n)return 0.f;
+    const unsigned magnitude=unsigned(n<0?-n:n),top=31U-std::countl_zero(magnitude);
+    const std::uint32_t sign=n<0?0x80000000U:0;
+    const int exponent=fine_+int(top)+127;
+    // Exact bit reconstruction avoids a libm ldexp call for every survivor.
+    if(exponent>0)return std::bit_cast<float>(sign|(std::uint32_t(exponent)<<23)|((magnitude-(1U<<top))<<(23-top)));
+    return std::bit_cast<float>(sign|(magnitude<<unsigned(fine_+149)));
   }
   void save(std::size_t row,void* output) const noexcept {
     auto* p=static_cast<unsigned char*>(output);std::memcpy(p,codes_.get()+row*padded_,padded_);

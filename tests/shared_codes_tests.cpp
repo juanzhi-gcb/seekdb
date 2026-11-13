@@ -9,7 +9,7 @@ int main(){try{
  std::mt19937 rng(99173);
  for(int mode:{FE_TONEAREST,FE_UPWARD,FE_DOWNWARD,FE_TOWARDZERO}){
   CHECK(std::fesetround(mode)==0);
-  for(int power:{-24,-7,0,9})for(int extent:{1,63,127,255,1023,2048,4096}){
+  for(int power:{-149,-126,-24,-7,0,9,100})for(int extent:{1,63,127,255,1023,2048,4096}){
    constexpr std::size_t rows=531,dim=129;
    std::vector<float> values(rows*dim);detail::SharedCodePlan plan;
    for(auto& x:values){x=std::ldexp(float(int(rng()%unsigned(2*extent+1))-extent),power);plan.observe(x);}
