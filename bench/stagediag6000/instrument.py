@@ -10,7 +10,7 @@ assert s.count('mvdb_diag_begin();')==2 and s.count('mvdb_diag_end();')==3
 p.write_text(s)
 with (root/'CMakeLists.txt').open('a') as f:f.write('\ntarget_link_libraries(minivectordb PRIVATE Threads::Threads)\ntarget_sources(minivectordb PRIVATE src/diagnostic_trace.cpp)\ntarget_link_options(minivectordb PRIVATE -Wl,--wrap=fsync -Wl,--wrap=pwrite -Wl,--wrap=pread -Wl,--wrap=sync_file_range)\n')
 
-header='#pragma once\n#include <cstdint>\nextern "C" std::uint64_t mvdb_stage_clock();\nextern "C" void mvdb_stage_add(unsigned,std::uint64_t);\nstruct MvdbStage {unsigned id;std::uint64_t start;explicit MvdbStage(unsigned i):id(i),start(mvdb_stage_clock()){}~MvdbStage(){mvdb_stage_add(id,mvdb_stage_clock()-start);}};\n'
+header='#pragma once\n#include <cstdint>\n#include <ctime>\ninline thread_local std::uint64_t mvdb_stage_totals[8]{};\ninline std::uint64_t mvdb_stage_clock(){timespec t{};clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t);return std::uint64_t(t.tv_sec)*1000000000ULL+t.tv_nsec;}\nstruct MvdbStage {unsigned id;std::uint64_t start;explicit MvdbStage(unsigned i):id(i),start(mvdb_stage_clock()){}~MvdbStage(){mvdb_stage_totals[id]+=mvdb_stage_clock()-start;}};\n'
 (root/'src/diagnostic_stage.hpp').write_text(header)
 def rewrite(name,pairs,inc):
  p=root/name;s=p.read_text();s=inc+s
