@@ -2,6 +2,8 @@
 #include "minivectordb/store.hpp"
 #include "packed_codec.hpp"
 #include "page_checksum.hpp"
+#include "batch_worker.hpp"
+#include <memory>
 #include <map>
 #include <vector>
 #include <limits>
@@ -27,6 +29,21 @@ class JournalStore {
   struct Undo {Key key;std::uint64_t value,head;};
   struct Cached {Page bytes{};std::uint64_t page=UINT64_MAX;std::size_t size=0;};
   int fd_;
+  std::unique_ptr<BatchWorker> pack_worker_;
+  // A child after fork has no copy of the helper thread. Never touch its
+  // inherited mutex/thread handle; create fresh state lazily in that process.
+  void discard_inherited_worker() noexcept {
+    if(pack_worker_ && pack_worker_->owner()!=::getpid())(void)pack_worker_.release();
+  }
+  BatchWorker* pack_worker() {
+    discard_inherited_worker();
+    if(!pack_worker_) {
+      try {pack_worker_=std::make_unique<BatchWorker>();}
+      catch(const std::system_error&){return nullptr;}
+    }
+    return pack_worker_.get();
+  }
+
   CommitSyncPolicy policy_;
   bool framed_=false,pending_valid_=false;
   static constexpr std::size_t frame_payload=4048;
@@ -197,6 +214,7 @@ public:
     const auto committed_size=physical(committed_pages);
     if(committed_size!=std::uint64_t(stat.st_size) && ::ftruncate(fd_,off_t(committed_size)))io("framed journal truncate orphan tail");
   }
+  ~JournalStore(){discard_inherited_worker();}
   std::uint64_t head()const noexcept{return head_;}
   void begin(){undo_.clear();}
   std::optional<std::string> value(std::uint64_t space,std::int64_t key)const{
@@ -212,13 +230,40 @@ public:
     for(const auto& c:changes){if(c.value&&changes.size()>1){if(c.value->size()>Store::max_batch_bytes-bytes)throw std::length_error("batch payload exceeds byte budget");bytes+=c.value->size();}order.push_back(&c);}
     std::sort(order.begin(),order.end(),[](auto a,auto b){return a->key<b->key;});for(std::size_t i=1;i<order.size();++i)if(order[i-1]->key==order[i]->key)throw std::invalid_argument("duplicate batch key");
     if(order.empty())return;
+    struct Prepared {std::string bytes;std::uint32_t checksum=0;bool compressed=false;};
+    std::vector<Prepared> prepared;
+    BatchWorker* helper=nullptr;
+    // Small/scalar statements keep the serial path. Scratch is bounded by the
+    // existing 128-row / 512-KiB mutation limit, independent of database size.
+    if(order.size()>=16 && bytes>=32768)helper=pack_worker();
+    const auto middle=helper?order.size()/2:order.size();
+    if(helper)prepared.resize(order.size()-middle);
+    auto prepare=[&]{
+      for(std::size_t i=middle;i<order.size();++i){
+        auto& result=prepared[i-middle];const auto* c=order[i];
+        std::string_view payload=c->value?std::string_view(*c->value):std::string_view{};
+        if(c->value)result.compressed=pack_bytes(payload,result.bytes,true,true);
+        if(result.compressed)payload=result.bytes;
+        result.checksum=crc(payload);
+      }
+    };
     std::string encoded,packed;std::vector<std::pair<Key,std::uint64_t>> updates;updates.reserve(order.size());auto previous=head_;
-    for(const auto* c:order){std::string_view payload=c->value?std::string_view(*c->value):std::string_view{};unsigned flags=c->value?0:2;
-      if(c->value&&pack_bytes(payload,packed,true,true)){payload=packed;flags=1;}
+    auto append=[&](std::size_t i,bool precomputed){
+      const auto* c=order[i];std::string_view payload=c->value?std::string_view(*c->value):std::string_view{};unsigned flags=c->value?0:2;
+      std::uint32_t checksum;
+      if(precomputed){const auto& result=prepared[i-middle];if(result.compressed){payload=result.bytes;flags=1;}checksum=result.checksum;}
+      else {if(c->value&&pack_bytes(payload,packed,true,true)){payload=packed;flags=1;}checksum=crc(payload);}
       if(encoded.size()>UINT64_MAX-end_)throw std::length_error("journal size");const auto at=end_+encoded.size();std::array<unsigned char,header_size> h{};
-      std::memcpy(h.data(),"JREC",4);put(h.data()+4,flags,4);put(h.data()+8,space);put(h.data()+16,std::bit_cast<std::uint64_t>(c->key));put(h.data()+24,previous);put(h.data()+32,payload.size());put(h.data()+40,crc(payload),4);put(h.data()+44,crc({reinterpret_cast<const char*>(h.data()),44}),4);
+      std::memcpy(h.data(),"JREC",4);put(h.data()+4,flags,4);put(h.data()+8,space);put(h.data()+16,std::bit_cast<std::uint64_t>(c->key));put(h.data()+24,previous);put(h.data()+32,payload.size());put(h.data()+40,checksum,4);put(h.data()+44,crc({reinterpret_cast<const char*>(h.data()),44}),4);
       encoded.append(reinterpret_cast<const char*>(h.data()),h.size());encoded.append(payload);updates.push_back({{space,c->key},at});previous=at;
-    }
+    };
+    if(helper)helper->start(prepare);
+    std::exception_ptr first;
+    try{for(std::size_t i=0;i<middle;++i)append(i,false);}catch(...){first=std::current_exception();}
+    // Even when the caller fails, finish the helper before its references die.
+    if(helper){try{helper->finish();}catch(...){if(!first)first=std::current_exception();}}
+    if(first)std::rethrow_exception(first);
+    for(std::size_t i=middle;i<order.size();++i)append(i,true);
     // Allocate all directory/undo storage before touching disk or live offsets.
     undo_.reserve(undo_.size()+updates.size());for(const auto& u:updates)if(index_.try_emplace(u.first,0).second)++empty_entries_;
     write(end_,encoded);end_+=encoded.size();

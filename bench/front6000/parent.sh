@@ -8,7 +8,7 @@ mkdir "$scratch/parent" "$scratch/data" "$scratch/tmp"
 chmod 0777 "$scratch/data" "$scratch/tmp"
 export TMPDIR="$scratch/tmp" PYTHONDONTWRITEBYTECODE=1
 trap 'sudo chown -R "$(id -u):$(id -g)" "$result"' EXIT
-parent=d1376f67875c5c504525e0972bcdd42e6657e660
+parent=334ebac19109af2423f2621489cb778749b885a3
 git archive "$parent" Dockerfile CMakeLists.txt src include tests | tar -x -C "$scratch/parent"
 docker build -t mvdb:direct-parent "$scratch/parent" > "$result/build-parent.log" 2>&1
 base=$(docker image inspect --format '{{.Id}}' mvdb:direct-parent)
@@ -24,7 +24,7 @@ done
 sudo python3 - "$result" <<'PY'
 import json,sys
 from pathlib import Path
-root=Path(sys.argv[1]);out={'scope':'Uninstrumented native candidate vs compact-footer parent; not official score','comparisons':{}}
+root=Path(sys.argv[1]);out={'scope':'Uninstrumented native candidate vs SQL frontend parent; not official score','comparisons':{}}
 for p in sorted(root.glob('*/summary.json')):
  d=json.loads(p.read_text());ratios={}
  for phase in ['write/unindexed','query/unindexed','query/indexed']:
@@ -33,3 +33,5 @@ for p in sorted(root.glob('*/summary.json')):
 (root/'comparison.json').write_text(json.dumps(out,indent=2)+'\n');print(json.dumps({k:v['ratios'] for k,v in out['comparisons'].items()}))
 for p in root.rglob('oracle-input.bin'):p.unlink()
 PY
+
+bash bench/parallelpack6000/bytecheck.sh "$scratch/parent"

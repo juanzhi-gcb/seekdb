@@ -1,7 +1,7 @@
-name: Borrowed SQL and exact decimal frontend versus a24
+name: Parallel batch encoding versus a24
 on:
   push:
-    branches: ['codex/frontend-6000-20261113']
+    branches: ['codex/parallel-pack-6000-20261113']
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,17 +18,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Paired frontend stage screen and decimal differential
-        run: bash bench/front6000/screen.sh
       - name: Native correctness and complete T B M against a24 and direct parent
         run: bash bench/run_certified_native.sh
       - name: Preserve samples and failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: frontend-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: parallelpack-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            front-results/
+            pack-results/
             certified-results/
             parent-results/
           if-no-files-found: error
