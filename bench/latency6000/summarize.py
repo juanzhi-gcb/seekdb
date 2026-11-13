@@ -2,12 +2,14 @@ import json,sys,statistics
 from pathlib import Path
 root=Path(sys.argv[1]);result=[]
 for request_path in root.rglob('stderr.log.requests.json'):
- requests=json.loads(request_path.read_text());events=[];stages={};select_count=0
+ requests=json.loads(request_path.read_text());events=[];stages={};select_count=0;pending_stage=None
  for line in request_path.with_name('stderr.log').read_text().splitlines():
   try:x=json.loads(line)
   except ValueError:continue
-  if x.get('trace')=='request':events.append(x)
-  if x.get('trace')=='stages':stages[x['seq']]=x['values_ns']
+  if x.get('trace')=='request':
+   assert pending_stage is not None and pending_stage['seq']==x['seq']
+   stages[x['start_ns']]=pending_stage['values_ns'];pending_stage=None;events.append(x)
+  if x.get('trace')=='stages':pending_stage=x
  for h in requests:
   if h['kind']!='INSERT' and not h['distance_query']:continue
   matches=[x for x in events if h['start_ns']<=x['start_ns']<=h['end_ns']]
@@ -15,8 +17,8 @@ for request_path in root.rglob('stderr.log.requests.json'):
   e=matches[0]
   if h['kind']=='SELECT':
    select_count+=1
-   if select_count<=10:continue
-  result.append({'case':str(request_path.parent.relative_to(root)),'id':h['id'],'kind':h['kind'],'stages_ms':[x/1e6 for x in stages[e['seq']]],'client_ms':(h['end_ns']-h['start_ns'])/1e6,'server_ms':e['wall_ns']/1e6,'server_cpu_ms':e['cpu_ns']/1e6,'fsync_ms':e['fsync_ns']/1e6,'fsync_cpu_ms':e['fsync_cpu_ns']/1e6,'pwrite_ms':e['pwrite_ns']/1e6,'pread_ms':e['pread_ns']/1e6,'outside_server_ms':(h['end_ns']-h['start_ns']-e['wall_ns'])/1e6})
+   if select_count<=10 or select_count>210:continue
+  result.append({'case':str(request_path.parent.relative_to(root)),'id':h['id'],'kind':h['kind'],'stages_ms':[x/1e6 for x in stages[e['start_ns']]],'client_ms':(h['end_ns']-h['start_ns'])/1e6,'server_ms':e['wall_ns']/1e6,'server_cpu_ms':e['cpu_ns']/1e6,'fsync_ms':e['fsync_ns']/1e6,'fsync_cpu_ms':e['fsync_cpu_ns']/1e6,'pwrite_ms':e['pwrite_ns']/1e6,'pread_ms':e['pread_ns']/1e6,'outside_server_ms':(h['end_ns']-h['start_ns']-e['wall_ns'])/1e6})
 summary={'scope':'Instrumented diagnostics only; not performance score; timers identical for both versions','cases':len(result),'slowest':sorted(result,key=lambda x:x['client_ms'],reverse=True)[:40],'groups':{}}
 for version in ['reference','candidate']:
  for kind in ['INSERT','SELECT']:
@@ -31,5 +33,5 @@ for version in ['reference','candidate']:
  for kind in ['INSERT','SELECT']:
   rows=[x for x in result if version in x['case'] and x['kind']==kind]
   stage_summary[version+'/'+kind]={label:{'median_ms':statistics.median(x['stages_ms'][i] for x in rows),'sum_ms':sum(x['stages_ms'][i] for x in rows)} for i,label in enumerate(labels)}
-(root/'stages-summary.json').write_text(json.dumps({'scope':'diagnostic only, same timer overhead, first 10 distance queries excluded per case; stages are nested, do not sum them','groups':stage_summary},indent=2)+'\n')
+(root/'stages-summary.json').write_text(json.dumps({'scope':'diagnostic only, same timer overhead, only distance queries 11-210 per case; warmup and restart validation excluded; adjacent stage/request events matched by request start, avoiding sequence reuse after restart; stages are nested, do not sum them','groups':stage_summary},indent=2)+'\n')
 print(json.dumps({'stages':stage_summary}))

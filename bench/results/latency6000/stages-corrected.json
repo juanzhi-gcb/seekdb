@@ -1,0 +1,2377 @@
+{
+  "run": 43365502687,
+  "candidate": "55c6bffb4f84553e03d7fa8d30ea3fdef9986dce",
+  "scope": "Instrumented diagnostics, not benchmark score. Nested stages must not be added together. Corrected offline parser pairs adjacent stage/request events; excludes warmup and restart validation. Original CI summary reused sequence numbers across process restart and is superseded.",
+  "replicas": {
+    "1": {
+      "complete": false,
+      "limitation": "Run failed at resource drain timeout with 4096 dirty bytes; partial timing data only, not full performance or correctness result.",
+      "stages": {
+        "scope": "diagnostic only, same timer overhead, only distance queries 11-210 per case; warmup and restart validation excluded; adjacent stage/request events matched by request start, avoiding sequence reuse after restart; stages are nested, do not sum them",
+        "groups": {
+          "reference/INSERT": {
+            "json_parse": {
+              "median_ms": 0.119932,
+              "sum_ms": 85.59235800000003
+            },
+            "sql_parse": {
+              "median_ms": 0.28559500000000004,
+              "sum_ms": 203.95779499999998
+            },
+            "bind": {
+              "median_ms": 0.79169,
+              "sum_ms": 563.1257120000005
+            },
+            "select_including_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            },
+            "emit": {
+              "median_ms": 0.008434,
+              "sum_ms": 6.142360000000004
+            },
+            "db_execute": {
+              "median_ms": 2.8467339999999997,
+              "sum_ms": 2019.5437679999995
+            },
+            "format_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            }
+          },
+          "reference/SELECT": {
+            "json_parse": {
+              "median_ms": 0.005712,
+              "sum_ms": 8.80489600000001
+            },
+            "sql_parse": {
+              "median_ms": 0.011113,
+              "sum_ms": 11.664497999999988
+            },
+            "bind": {
+              "median_ms": 0.010926499999999999,
+              "sum_ms": 9.863015999999995
+            },
+            "select_including_rows": {
+              "median_ms": 0.113131,
+              "sum_ms": 82.02299900000001
+            },
+            "emit": {
+              "median_ms": 0.008725,
+              "sum_ms": 7.179879999999995
+            },
+            "db_execute": {
+              "median_ms": 0.1479905,
+              "sum_ms": 113.24253699999986
+            },
+            "format_rows": {
+              "median_ms": 0.0070465,
+              "sum_ms": 5.989996999999997
+            }
+          },
+          "candidate/INSERT": {
+            "json_parse": {
+              "median_ms": 0.119488,
+              "sum_ms": 85.77932900000006
+            },
+            "sql_parse": {
+              "median_ms": 0.28725999999999996,
+              "sum_ms": 204.28758299999996
+            },
+            "bind": {
+              "median_ms": 0.8633044999999999,
+              "sum_ms": 614.6871389999995
+            },
+            "select_including_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            },
+            "emit": {
+              "median_ms": 0.008404,
+              "sum_ms": 6.076700000000006
+            },
+            "db_execute": {
+              "median_ms": 2.877937,
+              "sum_ms": 2039.3974019999998
+            },
+            "format_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            }
+          },
+          "candidate/SELECT": {
+            "json_parse": {
+              "median_ms": 0.0054225,
+              "sum_ms": 8.63065
+            },
+            "sql_parse": {
+              "median_ms": 0.011118,
+              "sum_ms": 11.752825000000003
+            },
+            "bind": {
+              "median_ms": 0.0117135,
+              "sum_ms": 10.444917000000016
+            },
+            "select_including_rows": {
+              "median_ms": 0.08804300000000001,
+              "sum_ms": 67.316509
+            },
+            "emit": {
+              "median_ms": 0.008199999999999999,
+              "sum_ms": 6.651274000000003
+            },
+            "db_execute": {
+              "median_ms": 0.125946,
+              "sum_ms": 98.70408899999998
+            },
+            "format_rows": {
+              "median_ms": 0.006902999999999999,
+              "sum_ms": 5.71772
+            }
+          }
+        }
+      },
+      "requests": {
+        "scope": "Instrumented diagnostics only; not performance score; timers identical for both versions",
+        "cases": 3000,
+        "slowest": [
+          {
+            "case": "traced/r2-candidate-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.140482,
+              0.366624,
+              1.793174,
+              0.0,
+              0.010344,
+              4.043706,
+              0.0
+            ],
+            "client_ms": 5.679099,
+            "server_ms": 4.217646,
+            "server_cpu_ms": 3.549325,
+            "fsync_ms": 0.794656,
+            "fsync_cpu_ms": 0.126957,
+            "pwrite_ms": 0.029235,
+            "pread_ms": 0.019208,
+            "outside_server_ms": 1.461453
+          },
+          {
+            "case": "traced/r1-reference-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.125716,
+              0.325984,
+              1.727292,
+              0.0,
+              0.010518,
+              3.955161,
+              0.0
+            ],
+            "client_ms": 5.584358,
+            "server_ms": 4.11744,
+            "server_cpu_ms": 3.523194,
+            "fsync_ms": 0.738363,
+            "fsync_cpu_ms": 0.145815,
+            "pwrite_ms": 0.0457,
+            "pread_ms": 0.005432,
+            "outside_server_ms": 1.466918
+          },
+          {
+            "case": "traced/r1-reference-query-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.122732,
+              0.284271,
+              1.56475,
+              0.0,
+              0.009976,
+              3.952494,
+              0.0
+            ],
+            "client_ms": 5.448334,
+            "server_ms": 4.107396,
+            "server_cpu_ms": 3.257425,
+            "fsync_ms": 0.984272,
+            "fsync_cpu_ms": 0.134308,
+            "pwrite_ms": 0.028724,
+            "pread_ms": 0.006102,
+            "outside_server_ms": 1.340938
+          },
+          {
+            "case": "traced/r2-reference-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.132642,
+              0.267144,
+              1.513901,
+              0.0,
+              0.012283,
+              3.827558,
+              0.0
+            ],
+            "client_ms": 5.437643,
+            "server_ms": 3.997785,
+            "server_cpu_ms": 3.3056,
+            "fsync_ms": 0.797784,
+            "fsync_cpu_ms": 0.122641,
+            "pwrite_ms": 0.03274,
+            "pread_ms": 0.006402,
+            "outside_server_ms": 1.439858
+          },
+          {
+            "case": "traced/r1-candidate-query-indexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.119236,
+              0.303699,
+              1.740597,
+              0.0,
+              0.010434,
+              3.975617,
+              0.0
+            ],
+            "client_ms": 5.433844,
+            "server_ms": 4.129212,
+            "server_cpu_ms": 3.57775,
+            "fsync_ms": 0.697448,
+            "fsync_cpu_ms": 0.145921,
+            "pwrite_ms": 0.028839,
+            "pread_ms": 0.006166,
+            "outside_server_ms": 1.304632
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.141139,
+              0.341181,
+              1.865738,
+              0.0,
+              0.009022,
+              3.978888,
+              0.0
+            ],
+            "client_ms": 5.426889,
+            "server_ms": 4.149284,
+            "server_cpu_ms": 3.545532,
+            "fsync_ms": 0.688237,
+            "fsync_cpu_ms": 0.095434,
+            "pwrite_ms": 0.022793,
+            "pread_ms": 0.004615,
+            "outside_server_ms": 1.277605
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.123698,
+              0.328476,
+              1.500183,
+              0.0,
+              0.010327,
+              3.876167,
+              0.0
+            ],
+            "client_ms": 5.388366,
+            "server_ms": 4.037139,
+            "server_cpu_ms": 3.422839,
+            "fsync_ms": 0.738168,
+            "fsync_cpu_ms": 0.123925,
+            "pwrite_ms": 0.041363,
+            "pread_ms": 0.005627,
+            "outside_server_ms": 1.351227
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.116037,
+              0.289632,
+              1.539247,
+              0.0,
+              0.010031,
+              3.684433,
+              0.0
+            ],
+            "client_ms": 5.235416,
+            "server_ms": 3.831993,
+            "server_cpu_ms": 3.141689,
+            "fsync_ms": 0.816688,
+            "fsync_cpu_ms": 0.126694,
+            "pwrite_ms": 0.026107,
+            "pread_ms": 0.007136,
+            "outside_server_ms": 1.403423
+          },
+          {
+            "case": "traced/r1-candidate-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118199,
+              0.285338,
+              1.587195,
+              0.0,
+              0.010072,
+              3.755829,
+              0.0
+            ],
+            "client_ms": 5.187096,
+            "server_ms": 3.907158,
+            "server_cpu_ms": 3.2015,
+            "fsync_ms": 0.805435,
+            "fsync_cpu_ms": 0.106577,
+            "pwrite_ms": 0.026973,
+            "pread_ms": 0.008241,
+            "outside_server_ms": 1.279938
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.11324,
+              0.279681,
+              1.510294,
+              0.0,
+              0.009333,
+              3.4884,
+              0.0
+            ],
+            "client_ms": 5.154557,
+            "server_ms": 3.633099,
+            "server_cpu_ms": 3.089279,
+            "fsync_ms": 0.63751,
+            "fsync_cpu_ms": 0.093721,
+            "pwrite_ms": 0.030601,
+            "pread_ms": 0.00609,
+            "outside_server_ms": 1.521458
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 11,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.12298,
+              0.304342,
+              0.779362,
+              0.0,
+              0.0082,
+              3.575472,
+              0.0
+            ],
+            "client_ms": 5.038368,
+            "server_ms": 3.728054,
+            "server_cpu_ms": 2.397549,
+            "fsync_ms": 1.428035,
+            "fsync_cpu_ms": 0.098207,
+            "pwrite_ms": 0.033683,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.310314
+          },
+          {
+            "case": "traced/r3-reference-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.129847,
+              0.282396,
+              1.467444,
+              0.0,
+              0.009895,
+              3.460725,
+              0.0
+            ],
+            "client_ms": 5.038263,
+            "server_ms": 3.622377,
+            "server_cpu_ms": 3.048864,
+            "fsync_ms": 0.682535,
+            "fsync_cpu_ms": 0.109404,
+            "pwrite_ms": 0.031992,
+            "pread_ms": 0.006986,
+            "outside_server_ms": 1.415886
+          },
+          {
+            "case": "traced/r3-candidate-write-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.123315,
+              0.277517,
+              1.408875,
+              0.0,
+              0.011172,
+              3.503813,
+              0.0
+            ],
+            "client_ms": 5.001745,
+            "server_ms": 3.658912,
+            "server_cpu_ms": 2.861305,
+            "fsync_ms": 0.90492,
+            "fsync_cpu_ms": 0.117202,
+            "pwrite_ms": 0.024158,
+            "pread_ms": 0.005792,
+            "outside_server_ms": 1.342833
+          },
+          {
+            "case": "traced/r1-reference-query-unindexed",
+            "id": 98,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.121443,
+              0.31777,
+              0.918492,
+              0.0,
+              0.008195,
+              3.369661,
+              0.0
+            ],
+            "client_ms": 4.996264,
+            "server_ms": 3.521021,
+            "server_cpu_ms": 2.756335,
+            "fsync_ms": 0.900228,
+            "fsync_cpu_ms": 0.136114,
+            "pwrite_ms": 0.031021,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.475243
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 74,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.12018,
+              0.288875,
+              0.81618,
+              0.0,
+              0.00913,
+              2.846095,
+              0.0
+            ],
+            "client_ms": 4.970116,
+            "server_ms": 2.997981,
+            "server_cpu_ms": 2.462426,
+            "fsync_ms": 0.640944,
+            "fsync_cpu_ms": 0.106263,
+            "pwrite_ms": 0.032336,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.972135
+          },
+          {
+            "case": "traced/r2-reference-query-indexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.110021,
+              0.26958,
+              1.496905,
+              0.0,
+              0.010038,
+              3.526715,
+              0.0
+            ],
+            "client_ms": 4.958022,
+            "server_ms": 3.669904,
+            "server_cpu_ms": 3.136179,
+            "fsync_ms": 0.64691,
+            "fsync_cpu_ms": 0.113359,
+            "pwrite_ms": 0.026592,
+            "pread_ms": 0.005459,
+            "outside_server_ms": 1.288118
+          },
+          {
+            "case": "traced/r1-candidate-write-unindexed",
+            "id": 66,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.137224,
+              0.321,
+              0.951092,
+              0.0,
+              0.01144,
+              3.379371,
+              0.0
+            ],
+            "client_ms": 4.915069,
+            "server_ms": 3.5561,
+            "server_cpu_ms": 2.822402,
+            "fsync_ms": 0.850645,
+            "fsync_cpu_ms": 0.117326,
+            "pwrite_ms": 0.027249,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.358969
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 14,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.151607,
+              0.353737,
+              0.953157,
+              0.0,
+              0.008973,
+              3.346627,
+              0.0
+            ],
+            "client_ms": 4.902767,
+            "server_ms": 3.528378,
+            "server_cpu_ms": 2.90144,
+            "fsync_ms": 0.766496,
+            "fsync_cpu_ms": 0.139914,
+            "pwrite_ms": 0.035449,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.374389
+          },
+          {
+            "case": "traced/r2-candidate-write-unindexed",
+            "id": 37,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.12973,
+              0.356827,
+              0.982757,
+              0.0,
+              0.008216,
+              3.270978,
+              0.0
+            ],
+            "client_ms": 4.891541,
+            "server_ms": 3.430286,
+            "server_cpu_ms": 2.867302,
+            "fsync_ms": 0.689105,
+            "fsync_cpu_ms": 0.126428,
+            "pwrite_ms": 0.029626,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.461255
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 36,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.159626,
+              0.363419,
+              0.977954,
+              0.0,
+              0.006054,
+              3.415631,
+              0.0
+            ],
+            "client_ms": 4.878636,
+            "server_ms": 3.605501,
+            "server_cpu_ms": 2.815576,
+            "fsync_ms": 0.913065,
+            "fsync_cpu_ms": 0.123498,
+            "pwrite_ms": 0.031034,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.273135
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 30,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.139398,
+              0.376908,
+              1.003987,
+              0.0,
+              0.008347,
+              3.423463,
+              0.0
+            ],
+            "client_ms": 4.870944,
+            "server_ms": 3.593237,
+            "server_cpu_ms": 2.895579,
+            "fsync_ms": 0.82271,
+            "fsync_cpu_ms": 0.125488,
+            "pwrite_ms": 0.090099,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.277707
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 8,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.132991,
+              0.374379,
+              1.041429,
+              0.0,
+              0.007777,
+              3.369401,
+              0.0
+            ],
+            "client_ms": 4.86835,
+            "server_ms": 3.531919,
+            "server_cpu_ms": 3.045494,
+            "fsync_ms": 0.63274,
+            "fsync_cpu_ms": 0.145158,
+            "pwrite_ms": 0.030341,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.336431
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 46,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.13904,
+              0.36259,
+              0.877157,
+              0.0,
+              0.009222,
+              3.418079,
+              0.0
+            ],
+            "client_ms": 4.868288,
+            "server_ms": 3.588309,
+            "server_cpu_ms": 2.815354,
+            "fsync_ms": 0.88077,
+            "fsync_cpu_ms": 0.108115,
+            "pwrite_ms": 0.047248,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.279979
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 48,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.14908,
+              0.374934,
+              0.987813,
+              0.0,
+              0.008902,
+              3.399263,
+              0.0
+            ],
+            "client_ms": 4.856055,
+            "server_ms": 3.578769,
+            "server_cpu_ms": 2.931231,
+            "fsync_ms": 0.762885,
+            "fsync_cpu_ms": 0.115705,
+            "pwrite_ms": 0.034174,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.277286
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 56,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.133136,
+              0.347172,
+              0.853635,
+              0.0,
+              0.007019,
+              3.412511,
+              0.0
+            ],
+            "client_ms": 4.828653,
+            "server_ms": 3.575701,
+            "server_cpu_ms": 2.81793,
+            "fsync_ms": 0.888854,
+            "fsync_cpu_ms": 0.131929,
+            "pwrite_ms": 0.031485,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.252952
+          },
+          {
+            "case": "traced/r1-reference-query-unindexed",
+            "id": 86,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.125553,
+              0.331706,
+              0.866527,
+              0.0,
+              0.013423,
+              3.403835,
+              0.0
+            ],
+            "client_ms": 4.82106,
+            "server_ms": 3.571837,
+            "server_cpu_ms": 2.746075,
+            "fsync_ms": 0.942579,
+            "fsync_cpu_ms": 0.117155,
+            "pwrite_ms": 0.051504,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.249223
+          },
+          {
+            "case": "traced/r1-candidate-write-unindexed",
+            "id": 60,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.136768,
+              0.338497,
+              1.006133,
+              0.0,
+              0.00832,
+              3.399866,
+              0.0
+            ],
+            "client_ms": 4.814377,
+            "server_ms": 3.565415,
+            "server_cpu_ms": 2.864236,
+            "fsync_ms": 0.804329,
+            "fsync_cpu_ms": 0.103012,
+            "pwrite_ms": 0.030438,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.248962
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 2,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.110159,
+              0.258874,
+              1.390813,
+              0.0,
+              0.009382,
+              3.413676,
+              0.0
+            ],
+            "client_ms": 4.805409,
+            "server_ms": 3.55348,
+            "server_cpu_ms": 2.880001,
+            "fsync_ms": 0.7715,
+            "fsync_cpu_ms": 0.110969,
+            "pwrite_ms": 0.025386,
+            "pread_ms": 0.005203,
+            "outside_server_ms": 1.251929
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 100,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.152607,
+              0.337619,
+              1.064021,
+              0.0,
+              0.009283,
+              3.346879,
+              0.0
+            ],
+            "client_ms": 4.799127,
+            "server_ms": 3.528769,
+            "server_cpu_ms": 2.985415,
+            "fsync_ms": 0.6882,
+            "fsync_cpu_ms": 0.144966,
+            "pwrite_ms": 0.037302,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.270358
+          },
+          {
+            "case": "traced/r3-reference-write-unindexed",
+            "id": 56,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.153327,
+              0.386025,
+              0.869537,
+              0.0,
+              0.011177,
+              3.207679,
+              0.0
+            ],
+            "client_ms": 4.795786,
+            "server_ms": 3.395712,
+            "server_cpu_ms": 2.905304,
+            "fsync_ms": 0.638857,
+            "fsync_cpu_ms": 0.135124,
+            "pwrite_ms": 0.035885,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.400074
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 98,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.132442,
+              0.351896,
+              0.971351,
+              0.0,
+              0.008261,
+              3.306721,
+              0.0
+            ],
+            "client_ms": 4.79433,
+            "server_ms": 3.469675,
+            "server_cpu_ms": 2.783802,
+            "fsync_ms": 0.776744,
+            "fsync_cpu_ms": 0.09133,
+            "pwrite_ms": 0.036514,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.324655
+          },
+          {
+            "case": "traced/r2-candidate-write-unindexed",
+            "id": 99,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.138651,
+              0.365651,
+              0.970037,
+              0.0,
+              0.008675,
+              3.331394,
+              0.0
+            ],
+            "client_ms": 4.789385,
+            "server_ms": 3.506827,
+            "server_cpu_ms": 2.893597,
+            "fsync_ms": 0.748624,
+            "fsync_cpu_ms": 0.143176,
+            "pwrite_ms": 0.037685,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.282558
+          },
+          {
+            "case": "traced/r2-candidate-write-unindexed",
+            "id": 55,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.121311,
+              0.393371,
+              0.99008,
+              0.0,
+              0.009411,
+              3.434373,
+              0.0
+            ],
+            "client_ms": 4.780774,
+            "server_ms": 3.586762,
+            "server_cpu_ms": 2.973523,
+            "fsync_ms": 0.75041,
+            "fsync_cpu_ms": 0.137528,
+            "pwrite_ms": 0.056881,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.194012
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 88,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.11854,
+              0.28371,
+              0.859271,
+              0.0,
+              0.008777,
+              3.322963,
+              0.0
+            ],
+            "client_ms": 4.772507,
+            "server_ms": 3.46953,
+            "server_cpu_ms": 2.498214,
+            "fsync_ms": 1.072992,
+            "fsync_cpu_ms": 0.102224,
+            "pwrite_ms": 0.027815,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.302977
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 19,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.177046,
+              0.305148,
+              0.857521,
+              0.0,
+              0.008707,
+              2.940268,
+              0.0
+            ],
+            "client_ms": 4.769302,
+            "server_ms": 3.145657,
+            "server_cpu_ms": 2.518015,
+            "fsync_ms": 0.747584,
+            "fsync_cpu_ms": 0.120811,
+            "pwrite_ms": 0.027246,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.623645
+          },
+          {
+            "case": "traced/r1-candidate-write-unindexed",
+            "id": 20,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.134361,
+              0.317957,
+              0.954985,
+              0.0,
+              0.008696,
+              3.345906,
+              0.0
+            ],
+            "client_ms": 4.760023,
+            "server_ms": 3.508178,
+            "server_cpu_ms": 2.777505,
+            "fsync_ms": 0.836261,
+            "fsync_cpu_ms": 0.106188,
+            "pwrite_ms": 0.035373,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.251845
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 86,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.139867,
+              0.345739,
+              0.947875,
+              0.0,
+              0.007962,
+              3.387595,
+              0.0
+            ],
+            "client_ms": 4.756025,
+            "server_ms": 3.557939,
+            "server_cpu_ms": 2.849489,
+            "fsync_ms": 0.830031,
+            "fsync_cpu_ms": 0.121972,
+            "pwrite_ms": 0.029429,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.198086
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 84,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.143578,
+              0.341737,
+              0.940499,
+              0.0,
+              0.009604,
+              3.240705,
+              0.0
+            ],
+            "client_ms": 4.755127,
+            "server_ms": 3.421752,
+            "server_cpu_ms": 2.905611,
+            "fsync_ms": 0.639228,
+            "fsync_cpu_ms": 0.123243,
+            "pwrite_ms": 0.032343,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.333375
+          },
+          {
+            "case": "traced/r2-reference-query-indexed",
+            "id": 20,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.140457,
+              0.344589,
+              0.958016,
+              0.0,
+              0.007871,
+              3.176161,
+              0.0
+            ],
+            "client_ms": 4.749554,
+            "server_ms": 3.344306,
+            "server_cpu_ms": 2.793164,
+            "fsync_ms": 0.676257,
+            "fsync_cpu_ms": 0.125664,
+            "pwrite_ms": 0.03265,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.405248
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 8,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.138491,
+              0.32668,
+              1.038316,
+              0.0,
+              0.008794,
+              3.300379,
+              0.0
+            ],
+            "client_ms": 4.748535,
+            "server_ms": 3.467231,
+            "server_cpu_ms": 2.813457,
+            "fsync_ms": 0.765076,
+            "fsync_cpu_ms": 0.111978,
+            "pwrite_ms": 0.033964,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.281304
+          }
+        ],
+        "groups": {
+          "reference/INSERT": {
+            "client_ms": {
+              "sum": 3001.6640589999975,
+              "median": 4.259619000000001,
+              "max": 5.584358
+            },
+            "server_ms": {
+              "sum": 2126.6727079999996,
+              "median": 2.999395,
+              "max": 4.11744
+            },
+            "server_cpu_ms": {
+              "sum": 1711.9508329999999,
+              "median": 2.4188514999999997,
+              "max": 3.523194
+            },
+            "fsync_ms": {
+              "sum": 490.340043,
+              "median": 0.668857,
+              "max": 1.428035
+            },
+            "fsync_cpu_ms": {
+              "sum": 76.34487799999998,
+              "median": 0.107159,
+              "max": 0.190826
+            },
+            "pwrite_ms": {
+              "sum": 23.672325,
+              "median": 0.032285999999999995,
+              "max": 0.076222
+            },
+            "pread_ms": {
+              "sum": 0.081792,
+              "median": 0.0,
+              "max": 0.006986
+            },
+            "outside_server_ms": {
+              "sum": 874.9913510000006,
+              "median": 1.2426495,
+              "max": 1.972135
+            }
+          },
+          "reference/SELECT": {
+            "client_ms": {
+              "sum": 394.48122800000016,
+              "median": 0.49107049999999997,
+              "max": 1.676255
+            },
+            "server_ms": {
+              "sum": 140.40161500000013,
+              "median": 0.1748905,
+              "max": 0.295627
+            },
+            "server_cpu_ms": {
+              "sum": 139.69470499999986,
+              "median": 0.1737225,
+              "max": 0.295316
+            },
+            "fsync_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "fsync_cpu_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pwrite_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pread_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "outside_server_ms": {
+              "sum": 254.079613,
+              "median": 0.3140695,
+              "max": 1.501023
+            }
+          },
+          "candidate/INSERT": {
+            "client_ms": {
+              "sum": 3016.921225999999,
+              "median": 4.2808105,
+              "max": 5.679099
+            },
+            "server_ms": {
+              "sum": 2146.3886839999977,
+              "median": 3.030931,
+              "max": 4.217646
+            },
+            "server_cpu_ms": {
+              "sum": 1748.0431910000011,
+              "median": 2.467294,
+              "max": 3.57775
+            },
+            "fsync_ms": {
+              "sum": 472.8565339999997,
+              "median": 0.6491935,
+              "max": 1.168922
+            },
+            "fsync_cpu_ms": {
+              "sum": 75.40568300000001,
+              "median": 0.1062405,
+              "max": 0.153601
+            },
+            "pwrite_ms": {
+              "sum": 21.02465,
+              "median": 0.02873,
+              "max": 0.090099
+            },
+            "pread_ms": {
+              "sum": 0.10003000000000001,
+              "median": 0.0,
+              "max": 0.019208
+            },
+            "outside_server_ms": {
+              "sum": 870.5325420000003,
+              "median": 1.2346095,
+              "max": 1.79798
+            }
+          },
+          "candidate/SELECT": {
+            "client_ms": {
+              "sum": 375.1337709999998,
+              "median": 0.46804500000000004,
+              "max": 0.847177
+            },
+            "server_ms": {
+              "sum": 124.51577399999994,
+              "median": 0.1540845,
+              "max": 0.255021
+            },
+            "server_cpu_ms": {
+              "sum": 123.84874899999997,
+              "median": 0.1533825,
+              "max": 0.254909
+            },
+            "fsync_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "fsync_cpu_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pwrite_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pread_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "outside_server_ms": {
+              "sum": 250.61799700000034,
+              "median": 0.31194849999999996,
+              "max": 0.687448
+            }
+          }
+        }
+      }
+    },
+    "2": {
+      "complete": true,
+      "limitation": null,
+      "stages": {
+        "scope": "diagnostic only, same timer overhead, only distance queries 11-210 per case; warmup and restart validation excluded; adjacent stage/request events matched by request start, avoiding sequence reuse after restart; stages are nested, do not sum them",
+        "groups": {
+          "reference/INSERT": {
+            "json_parse": {
+              "median_ms": 0.12168899999999999,
+              "sum_ms": 113.07408099999986
+            },
+            "sql_parse": {
+              "median_ms": 0.296367,
+              "sum_ms": 269.8615430000001
+            },
+            "bind": {
+              "median_ms": 0.6526339999999999,
+              "sum_ms": 600.2986420000013
+            },
+            "select_including_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            },
+            "emit": {
+              "median_ms": 0.0063750000000000005,
+              "sum_ms": 6.152481000000009
+            },
+            "db_execute": {
+              "median_ms": 2.161779,
+              "sum_ms": 4190.877830000005
+            },
+            "format_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            }
+          },
+          "reference/SELECT": {
+            "json_parse": {
+              "median_ms": 0.003466,
+              "sum_ms": 8.695479000000008
+            },
+            "sql_parse": {
+              "median_ms": 0.006339,
+              "sum_ms": 10.738987999999999
+            },
+            "bind": {
+              "median_ms": 0.007461,
+              "sum_ms": 9.751535999999994
+            },
+            "select_including_rows": {
+              "median_ms": 0.070451,
+              "sum_ms": 82.266633
+            },
+            "emit": {
+              "median_ms": 0.007442,
+              "sum_ms": 9.638350000000004
+            },
+            "db_execute": {
+              "median_ms": 0.09655549999999999,
+              "sum_ms": 112.09614599999998
+            },
+            "format_rows": {
+              "median_ms": 0.0043365,
+              "sum_ms": 5.542626000000009
+            }
+          },
+          "candidate/INSERT": {
+            "json_parse": {
+              "median_ms": 0.12120800000000001,
+              "sum_ms": 112.63716200000016
+            },
+            "sql_parse": {
+              "median_ms": 0.2959615,
+              "sum_ms": 269.67507199999983
+            },
+            "bind": {
+              "median_ms": 0.676455,
+              "sum_ms": 620.9140289999993
+            },
+            "select_including_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            },
+            "emit": {
+              "median_ms": 0.005949,
+              "sum_ms": 5.931740000000005
+            },
+            "db_execute": {
+              "median_ms": 2.197147,
+              "sum_ms": 4608.570324
+            },
+            "format_rows": {
+              "median_ms": 0.0,
+              "sum_ms": 0.0
+            }
+          },
+          "candidate/SELECT": {
+            "json_parse": {
+              "median_ms": 0.0034405,
+              "sum_ms": 8.691153000000009
+            },
+            "sql_parse": {
+              "median_ms": 0.006269,
+              "sum_ms": 10.716948000000002
+            },
+            "bind": {
+              "median_ms": 0.0074815,
+              "sum_ms": 9.879022999999997
+            },
+            "select_including_rows": {
+              "median_ms": 0.06411649999999999,
+              "sum_ms": 71.23268000000002
+            },
+            "emit": {
+              "median_ms": 0.007311,
+              "sum_ms": 9.366932999999989
+            },
+            "db_execute": {
+              "median_ms": 0.08618,
+              "sum_ms": 100.98452100000007
+            },
+            "format_rows": {
+              "median_ms": 0.0043254999999999995,
+              "sum_ms": 5.515840999999997
+            }
+          }
+        }
+      },
+      "requests": {
+        "scope": "Instrumented diagnostics only; not performance score; timers identical for both versions",
+        "cases": 4200,
+        "slowest": [
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 101,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.123937,
+              0.280253,
+              0.684952,
+              0.0,
+              0.011868,
+              408.151384,
+              0.0
+            ],
+            "client_ms": 409.529746,
+            "server_ms": 408.327219,
+            "server_cpu_ms": 2.349229,
+            "fsync_ms": 406.047804,
+            "fsync_cpu_ms": 0.072306,
+            "pwrite_ms": 0.024747,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.202527
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 57,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118108,
+              0.307944,
+              0.687556,
+              0.0,
+              0.010926,
+              398.515098,
+              0.0
+            ],
+            "client_ms": 399.903787,
+            "server_ms": 398.672226,
+            "server_cpu_ms": 2.354727,
+            "fsync_ms": 396.40644,
+            "fsync_cpu_ms": 0.091906,
+            "pwrite_ms": 0.02654,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.231561
+          },
+          {
+            "case": "traced/r3-reference-write-unindexed",
+            "id": 15,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.117878,
+              0.311519,
+              0.671983,
+              0.0,
+              0.01318,
+              267.421395,
+              0.0
+            ],
+            "client_ms": 269.265609,
+            "server_ms": 267.580374,
+            "server_cpu_ms": 2.291274,
+            "fsync_ms": 265.364394,
+            "fsync_cpu_ms": 0.077715,
+            "pwrite_ms": 0.031507,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.685235
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 76,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.130557,
+              0.293933,
+              0.697622,
+              0.0,
+              0.012509,
+              255.015765,
+              0.0
+            ],
+            "client_ms": 256.490558,
+            "server_ms": 255.190018,
+            "server_cpu_ms": 2.339344,
+            "fsync_ms": 252.910702,
+            "fsync_cpu_ms": 0.062842,
+            "pwrite_ms": 0.046921,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.30054
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 69,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.131478,
+              0.350398,
+              0.744673,
+              0.0,
+              0.010536,
+              201.74709,
+              0.0
+            ],
+            "client_ms": 203.23346,
+            "server_ms": 201.917608,
+            "server_cpu_ms": 2.573512,
+            "fsync_ms": 199.423868,
+            "fsync_cpu_ms": 0.082552,
+            "pwrite_ms": 0.027761,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.315852
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 23,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118349,
+              0.280933,
+              0.66341,
+              0.0,
+              0.013089,
+              187.952708,
+              0.0
+            ],
+            "client_ms": 189.184655,
+            "server_ms": 188.11318,
+            "server_cpu_ms": 2.273127,
+            "fsync_ms": 185.951792,
+            "fsync_cpu_ms": 0.11468,
+            "pwrite_ms": 0.034252,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.071475
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 15,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120321,
+              0.286202,
+              0.658292,
+              0.0,
+              0.011177,
+              182.019565,
+              0.0
+            ],
+            "client_ms": 183.404724,
+            "server_ms": 182.179156,
+            "server_cpu_ms": 2.28174,
+            "fsync_ms": 179.988313,
+            "fsync_cpu_ms": 0.093679,
+            "pwrite_ms": 0.030476,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.225568
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 44,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120151,
+              0.312411,
+              0.635488,
+              0.0,
+              0.009975,
+              171.324304,
+              0.0
+            ],
+            "client_ms": 172.646558,
+            "server_ms": 171.481852,
+            "server_cpu_ms": 2.272236,
+            "fsync_ms": 169.286332,
+            "fsync_cpu_ms": 0.078717,
+            "pwrite_ms": 0.036405,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.164706
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 43,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.142334,
+              0.299942,
+              0.681508,
+              0.0,
+              0.011017,
+              169.232461,
+              0.0
+            ],
+            "client_ms": 170.572716,
+            "server_ms": 169.415265,
+            "server_cpu_ms": 2.347798,
+            "fsync_ms": 167.133877,
+            "fsync_cpu_ms": 0.068812,
+            "pwrite_ms": 0.025078,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.157451
+          },
+          {
+            "case": "traced/r2-reference-query-indexed",
+            "id": 28,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.132479,
+              0.329627,
+              0.654426,
+              0.0,
+              0.011497,
+              135.554937,
+              0.0
+            ],
+            "client_ms": 136.98321,
+            "server_ms": 135.726956,
+            "server_cpu_ms": 2.372385,
+            "fsync_ms": 133.429153,
+            "fsync_cpu_ms": 0.077766,
+            "pwrite_ms": 0.037436,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.256254
+          },
+          {
+            "case": "traced/r3-candidate-query-indexed",
+            "id": 32,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.11899,
+              0.325491,
+              0.662789,
+              0.0,
+              0.01319,
+              131.066685,
+              0.0
+            ],
+            "client_ms": 132.367897,
+            "server_ms": 131.227228,
+            "server_cpu_ms": 2.354117,
+            "fsync_ms": 128.943696,
+            "fsync_cpu_ms": 0.073209,
+            "pwrite_ms": 0.026981,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.140669
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 22,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.121283,
+              0.304619,
+              0.686164,
+              0.0,
+              0.011026,
+              126.321549,
+              0.0
+            ],
+            "client_ms": 127.747529,
+            "server_ms": 126.481621,
+            "server_cpu_ms": 2.307978,
+            "fsync_ms": 124.243327,
+            "fsync_cpu_ms": 0.072768,
+            "pwrite_ms": 0.027901,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.265908
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 47,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118168,
+              0.293432,
+              0.638632,
+              0.0,
+              0.012229,
+              90.929782,
+              0.0
+            ],
+            "client_ms": 92.28519,
+            "server_ms": 91.088922,
+            "server_cpu_ms": 2.292485,
+            "fsync_ms": 88.904489,
+            "fsync_cpu_ms": 0.111725,
+            "pwrite_ms": 0.034252,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.196268
+          },
+          {
+            "case": "traced/r2-reference-write-unindexed",
+            "id": 100,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.117317,
+              0.311329,
+              0.654677,
+              0.0,
+              0.012399,
+              83.599253,
+              0.0
+            ],
+            "client_ms": 84.955097,
+            "server_ms": 83.759996,
+            "server_cpu_ms": 2.374366,
+            "fsync_ms": 81.461201,
+            "fsync_cpu_ms": 0.078895,
+            "pwrite_ms": 0.03351,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.195101
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 10,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.141814,
+              0.296026,
+              0.63667,
+              0.0,
+              0.011978,
+              78.85707,
+              0.0
+            ],
+            "client_ms": 80.173905,
+            "server_ms": 79.039696,
+            "server_cpu_ms": 2.210404,
+            "fsync_ms": 76.903326,
+            "fsync_cpu_ms": 0.076553,
+            "pwrite_ms": 0.030816,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.134209
+          },
+          {
+            "case": "traced/r2-candidate-write-unindexed",
+            "id": 72,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118869,
+              0.267203,
+              0.673836,
+              0.0,
+              0.010326,
+              72.157495,
+              0.0
+            ],
+            "client_ms": 73.432376,
+            "server_ms": 72.318348,
+            "server_cpu_ms": 2.278365,
+            "fsync_ms": 70.121847,
+            "fsync_cpu_ms": 0.084515,
+            "pwrite_ms": 0.026829,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.114028
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 86,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120532,
+              0.309006,
+              0.600205,
+              0.0,
+              0.01284,
+              71.233652,
+              0.0
+            ],
+            "client_ms": 72.549726,
+            "server_ms": 71.396207,
+            "server_cpu_ms": 2.244114,
+            "fsync_ms": 69.227809,
+            "fsync_cpu_ms": 0.079157,
+            "pwrite_ms": 0.027742,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.153519
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 38,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.1324,
+              0.353483,
+              0.763301,
+              0.0,
+              0.012549,
+              69.327932,
+              0.0
+            ],
+            "client_ms": 70.72322,
+            "server_ms": 69.502535,
+            "server_cpu_ms": 2.628984,
+            "fsync_ms": 66.963447,
+            "fsync_cpu_ms": 0.092548,
+            "pwrite_ms": 0.030125,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.220685
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 37,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.117046,
+              0.313753,
+              0.64384,
+              0.0,
+              0.010777,
+              62.096513,
+              0.0
+            ],
+            "client_ms": 63.405867,
+            "server_ms": 62.25315,
+            "server_cpu_ms": 2.285434,
+            "fsync_ms": 60.045091,
+            "fsync_cpu_ms": 0.080087,
+            "pwrite_ms": 0.02664,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.152717
+          },
+          {
+            "case": "traced/r1-reference-query-unindexed",
+            "id": 34,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.128664,
+              0.319612,
+              0.72277,
+              0.0,
+              0.010386,
+              59.673235,
+              0.0
+            ],
+            "client_ms": 61.134538,
+            "server_ms": 59.838694,
+            "server_cpu_ms": 2.395317,
+            "fsync_ms": 57.514682,
+            "fsync_cpu_ms": 0.073699,
+            "pwrite_ms": 0.032259,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.295844
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 68,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.118679,
+              0.295005,
+              0.673916,
+              0.0,
+              0.011838,
+              56.867125,
+              0.0
+            ],
+            "client_ms": 58.255788,
+            "server_ms": 57.025002,
+            "server_cpu_ms": 2.30983,
+            "fsync_ms": 54.78061,
+            "fsync_cpu_ms": 0.066467,
+            "pwrite_ms": 0.028643,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.230786
+          },
+          {
+            "case": "traced/r1-candidate-write-unindexed",
+            "id": 20,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.144288,
+              0.290437,
+              0.671582,
+              0.0,
+              0.010265,
+              55.477841,
+              0.0
+            ],
+            "client_ms": 56.765101,
+            "server_ms": 55.662339,
+            "server_cpu_ms": 2.271905,
+            "fsync_ms": 53.456133,
+            "fsync_cpu_ms": 0.067108,
+            "pwrite_ms": 0.025689,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.102762
+          },
+          {
+            "case": "traced/r3-candidate-query-unindexed",
+            "id": 98,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.141664,
+              0.296046,
+              0.671242,
+              0.0,
+              0.011067,
+              48.854493,
+              0.0
+            ],
+            "client_ms": 50.309432,
+            "server_ms": 49.035085,
+            "server_cpu_ms": 2.32216,
+            "fsync_ms": 46.776832,
+            "fsync_cpu_ms": 0.066268,
+            "pwrite_ms": 0.0272,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.274347
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 26,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.135104,
+              0.297118,
+              0.615689,
+              0.0,
+              0.008423,
+              47.40146,
+              0.0
+            ],
+            "client_ms": 48.683684,
+            "server_ms": 47.570985,
+            "server_cpu_ms": 2.176014,
+            "fsync_ms": 45.472403,
+            "fsync_cpu_ms": 0.078567,
+            "pwrite_ms": 0.033251,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.112699
+          },
+          {
+            "case": "traced/r2-reference-query-indexed",
+            "id": 83,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.138489,
+              0.304118,
+              0.662589,
+              0.0,
+              0.012999,
+              46.630588,
+              0.0
+            ],
+            "client_ms": 47.97552,
+            "server_ms": 46.81124,
+            "server_cpu_ms": 2.34308,
+            "fsync_ms": 44.558215,
+            "fsync_cpu_ms": 0.093308,
+            "pwrite_ms": 0.034211,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.16428
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 39,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120001,
+              0.288545,
+              0.641247,
+              0.0,
+              0.01312,
+              46.542055,
+              0.0
+            ],
+            "client_ms": 47.904814,
+            "server_ms": 46.704229,
+            "server_cpu_ms": 2.242592,
+            "fsync_ms": 44.525384,
+            "fsync_cpu_ms": 0.066389,
+            "pwrite_ms": 0.033301,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.200585
+          },
+          {
+            "case": "traced/r3-candidate-query-unindexed",
+            "id": 93,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.125209,
+              0.30499,
+              0.678964,
+              0.0,
+              0.012419,
+              45.009342,
+              0.0
+            ],
+            "client_ms": 46.502443,
+            "server_ms": 45.176624,
+            "server_cpu_ms": 2.379663,
+            "fsync_ms": 42.875185,
+            "fsync_cpu_ms": 0.080168,
+            "pwrite_ms": 0.030125,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.325819
+          },
+          {
+            "case": "traced/r1-reference-query-indexed",
+            "id": 17,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.149996,
+              0.312992,
+              0.638994,
+              0.0,
+              0.009314,
+              44.703621,
+              0.0
+            ],
+            "client_ms": 45.943841,
+            "server_ms": 44.891294,
+            "server_cpu_ms": 2.212667,
+            "fsync_ms": 42.750617,
+            "fsync_cpu_ms": 0.074009,
+            "pwrite_ms": 0.035153,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.052547
+          },
+          {
+            "case": "traced/r1-reference-write-unindexed",
+            "id": 95,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.122575,
+              0.300423,
+              0.644301,
+              0.0,
+              0.010286,
+              42.785793,
+              0.0
+            ],
+            "client_ms": 44.102568,
+            "server_ms": 42.944492,
+            "server_cpu_ms": 2.265845,
+            "fsync_ms": 40.749503,
+            "fsync_cpu_ms": 0.072957,
+            "pwrite_ms": 0.030866,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.158076
+          },
+          {
+            "case": "traced/r2-reference-query-indexed",
+            "id": 88,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.123586,
+              0.313693,
+              0.638532,
+              0.0,
+              0.010816,
+              41.229857,
+              0.0
+            ],
+            "client_ms": 42.638591,
+            "server_ms": 41.392783,
+            "server_cpu_ms": 2.374668,
+            "fsync_ms": 39.094689,
+            "fsync_cpu_ms": 0.079799,
+            "pwrite_ms": 0.041352,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.245808
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 19,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.117647,
+              0.296027,
+              0.646074,
+              0.0,
+              0.012579,
+              40.594079,
+              0.0
+            ],
+            "client_ms": 42.010699,
+            "server_ms": 40.754692,
+            "server_cpu_ms": 2.255311,
+            "fsync_ms": 38.558101,
+            "fsync_cpu_ms": 0.061111,
+            "pwrite_ms": 0.032599,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.256007
+          },
+          {
+            "case": "traced/r1-reference-query-unindexed",
+            "id": 40,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120802,
+              0.298159,
+              0.638562,
+              0.0,
+              0.010126,
+              38.882618,
+              0.0
+            ],
+            "client_ms": 40.212734,
+            "server_ms": 39.039635,
+            "server_cpu_ms": 2.235199,
+            "fsync_ms": 36.883194,
+            "fsync_cpu_ms": 0.080658,
+            "pwrite_ms": 0.031769,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.173099
+          },
+          {
+            "case": "traced/r3-candidate-query-unindexed",
+            "id": 92,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120482,
+              0.291249,
+              0.674627,
+              0.0,
+              0.012369,
+              37.72023,
+              0.0
+            ],
+            "client_ms": 39.02092,
+            "server_ms": 37.880661,
+            "server_cpu_ms": 2.238385,
+            "fsync_ms": 35.702638,
+            "fsync_cpu_ms": 0.061921,
+            "pwrite_ms": 0.027622,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.140259
+          },
+          {
+            "case": "traced/r2-candidate-query-indexed",
+            "id": 64,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.123436,
+              0.284789,
+              0.683451,
+              0.0,
+              0.008683,
+              36.921374,
+              0.0
+            ],
+            "client_ms": 38.353728,
+            "server_ms": 37.077619,
+            "server_cpu_ms": 2.239057,
+            "fsync_ms": 34.918044,
+            "fsync_cpu_ms": 0.08073,
+            "pwrite_ms": 0.027501,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.276109
+          },
+          {
+            "case": "traced/r2-candidate-query-unindexed",
+            "id": 20,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.127402,
+              0.288314,
+              0.67002,
+              0.0,
+              0.007681,
+              36.964348,
+              0.0
+            ],
+            "client_ms": 38.23551,
+            "server_ms": 37.123819,
+            "server_cpu_ms": 2.184526,
+            "fsync_ms": 34.993027,
+            "fsync_cpu_ms": 0.055482,
+            "pwrite_ms": 0.024136,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.111691
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 48,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.124208,
+              0.340744,
+              0.622649,
+              0.0,
+              0.010396,
+              36.801102,
+              0.0
+            ],
+            "client_ms": 38.174306,
+            "server_ms": 36.964188,
+            "server_cpu_ms": 2.335649,
+            "fsync_ms": 34.710711,
+            "fsync_cpu_ms": 0.084305,
+            "pwrite_ms": 0.036725,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.210118
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 25,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.119329,
+              0.295215,
+              0.679624,
+              0.0,
+              0.008343,
+              36.671305,
+              0.0
+            ],
+            "client_ms": 37.921598,
+            "server_ms": 36.824045,
+            "server_cpu_ms": 2.258063,
+            "fsync_ms": 34.629688,
+            "fsync_cpu_ms": 0.065365,
+            "pwrite_ms": 0.028623,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.097553
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 65,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.11905,
+              0.277989,
+              0.630911,
+              0.0,
+              0.009665,
+              34.846434,
+              0.0
+            ],
+            "client_ms": 36.125813,
+            "server_ms": 35.002249,
+            "server_cpu_ms": 2.181552,
+            "fsync_ms": 32.903847,
+            "fsync_cpu_ms": 0.085798,
+            "pwrite_ms": 0.029635,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.123564
+          },
+          {
+            "case": "traced/r2-reference-query-unindexed",
+            "id": 4,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.120502,
+              0.327183,
+              0.650851,
+              0.0,
+              0.010285,
+              34.357718,
+              0.0
+            ],
+            "client_ms": 35.721553,
+            "server_ms": 34.516818,
+            "server_cpu_ms": 2.286307,
+            "fsync_ms": 32.312896,
+            "fsync_cpu_ms": 0.085427,
+            "pwrite_ms": 0.031277,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.204735
+          },
+          {
+            "case": "traced/r1-candidate-query-unindexed",
+            "id": 27,
+            "kind": "INSERT",
+            "stages_ms": [
+              0.125519,
+              0.303287,
+              0.697792,
+              0.0,
+              0.011146,
+              34.286861,
+              0.0
+            ],
+            "client_ms": 35.603986,
+            "server_ms": 34.45241,
+            "server_cpu_ms": 2.266898,
+            "fsync_ms": 32.240997,
+            "fsync_cpu_ms": 0.056113,
+            "pwrite_ms": 0.029184,
+            "pread_ms": 0.0,
+            "outside_server_ms": 1.151576
+          }
+        ],
+        "groups": {
+          "reference/INSERT": {
+            "client_ms": {
+              "sum": 5338.945563999992,
+              "median": 3.4343114999999997,
+              "max": 269.265609
+            },
+            "server_ms": {
+              "sum": 4329.792167000001,
+              "median": 2.3137679999999996,
+              "max": 267.580374
+            },
+            "server_cpu_ms": {
+              "sum": 1877.9030590000007,
+              "median": 2.0481185,
+              "max": 3.607343
+            },
+            "fsync_ms": {
+              "sum": 2502.7216800000006,
+              "median": 0.3128995,
+              "max": 265.364394
+            },
+            "fsync_cpu_ms": {
+              "sum": 51.46180000000001,
+              "median": 0.0549665,
+              "max": 0.159547
+            },
+            "pwrite_ms": {
+              "sum": 30.324659000000004,
+              "median": 0.032548999999999995,
+              "max": 0.067061
+            },
+            "pread_ms": {
+              "sum": 0.11562700000000001,
+              "median": 0.0,
+              "max": 0.008663
+            },
+            "outside_server_ms": {
+              "sum": 1009.1533970000002,
+              "median": 1.1069915,
+              "max": 2.727282
+            }
+          },
+          "reference/SELECT": {
+            "client_ms": {
+              "sum": 438.5759970000002,
+              "median": 0.3622035,
+              "max": 1.39967
+            },
+            "server_ms": {
+              "sum": 142.228312,
+              "median": 0.115549,
+              "max": 0.189826
+            },
+            "server_cpu_ms": {
+              "sum": 141.80759000000012,
+              "median": 0.11523050000000001,
+              "max": 0.189581
+            },
+            "fsync_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "fsync_cpu_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pwrite_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pread_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "outside_server_ms": {
+              "sum": 296.3476850000001,
+              "median": 0.2429105,
+              "max": 1.278057
+            }
+          },
+          "candidate/INSERT": {
+            "client_ms": {
+              "sum": 5746.090857000003,
+              "median": 3.4638809999999998,
+              "max": 409.529746
+            },
+            "server_ms": {
+              "sum": 4746.5485489999965,
+              "median": 2.3507939999999996,
+              "max": 408.327219
+            },
+            "server_cpu_ms": {
+              "sum": 1911.3249949999997,
+              "median": 2.0897544999999997,
+              "max": 3.368329
+            },
+            "fsync_ms": {
+              "sum": 2883.5382589999995,
+              "median": 0.301515,
+              "max": 406.047804
+            },
+            "fsync_cpu_ms": {
+              "sum": 48.924609999999994,
+              "median": 0.0527875,
+              "max": 0.092548
+            },
+            "pwrite_ms": {
+              "sum": 26.416142000000015,
+              "median": 0.0282525,
+              "max": 0.056915
+            },
+            "pread_ms": {
+              "sum": 0.111138,
+              "median": 0.0,
+              "max": 0.007481
+            },
+            "outside_server_ms": {
+              "sum": 999.5423079999994,
+              "median": 1.1050655,
+              "max": 1.888787
+            }
+          },
+          "candidate/SELECT": {
+            "client_ms": {
+              "sum": 421.5529030000001,
+              "median": 0.349907,
+              "max": 0.522532
+            },
+            "server_ms": {
+              "sum": 130.52499500000005,
+              "median": 0.106045,
+              "max": 0.169245
+            },
+            "server_cpu_ms": {
+              "sum": 130.11504699999995,
+              "median": 0.105662,
+              "max": 0.16862
+            },
+            "fsync_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "fsync_cpu_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pwrite_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "pread_ms": {
+              "sum": 0.0,
+              "median": 0.0,
+              "max": 0.0
+            },
+            "outside_server_ms": {
+              "sum": 291.0279080000003,
+              "median": 0.24069000000000002,
+              "max": 0.397384
+            }
+          }
+        }
+      }
+    }
+  }
+}
