@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -20,22 +21,25 @@ struct SharedCodePlan {
     fine=std::min(fine,(e?int(e)-150:-149)+int(std::countr_zero(m)));
     maximum=std::max(maximum,std::abs(double(x)));
   }
-  int shift() const noexcept {
-    if(!valid)return -1;
-    if(!maximum)return 0;
-    // Both operands are exact powers of two or binary32, independent of FENV.
-    int coarse=fine;
-    while(std::ldexp(127.0,coarse)<maximum)++coarse;
-    return coarse-fine;
+  unsigned width() const noexcept {
+    if(!valid)return 99;
+    const double units=maximum?std::ldexp(maximum,-fine):0;
+    if(units>8192)return 99;
+    if(units<=127)return 0;
+    // Nearest coarse code, then nearest lattice origin: residual magnitude
+    // is bounded by half a quantization cell plus half a fine-lattice unit.
+    const int bound=int(std::ceil(units/254+0.5));unsigned w=1;
+    while((1U<<(w-1))<=unsigned(bound))++w;
+    return w;
   }
-  unsigned width() const noexcept {const int s=shift();return s<0||s>6?99U:(s?unsigned(s+1):0U);}
   int power() const noexcept {return maximum?fine:0;}
 };
 class SharedCodes {
   std::unique_ptr<std::int8_t[]> codes_;
   std::unique_ptr<unsigned char[]> residuals_;
   std::size_t rows_=0,dim_=0,padded_=0,stride_=0;
-  int fine_=0,shift_=0;unsigned width_=0;bool transposed_=false;
+  int fine_=0;unsigned width_=0;bool transposed_=false;
+  double scale_=1;std::array<int,255> origins_{};
   std::size_t code_offset(std::size_t row,std::size_t d) const noexcept {
     return transposed_&&row<rows_/16*16?(row/16*16)*padded_+d/4*64+row%16*4+d%4:row*padded_+d;
   }
@@ -46,10 +50,13 @@ public:
   std::size_t row_bytes() const noexcept {return padded_+stride_;}
   std::size_t bytes() const noexcept {return rows_*row_bytes();}
   const std::int8_t* codes() const noexcept {return codes_.get();}
-  double scale() const noexcept {return std::ldexp(1.0,fine_+shift_);}
+  double scale() const noexcept {return scale_;}
   void allocate(std::size_t rows,std::size_t dim,const SharedCodePlan& plan) {
     clear();rows_=rows;dim_=dim;padded_=(dim+3)/4*4;width_=plan.width();
-    fine_=plan.power();shift_=plan.shift();stride_=(dim*width_+7)/8;
+    fine_=plan.power();stride_=(dim*width_+7)/8;
+    scale_=plan.maximum?plan.maximum/127:1;
+    const double units=plan.maximum?std::ldexp(plan.maximum,-fine_):0;
+    for(int code=-127;code<=127;++code)origins_[std::size_t(code+127)]=int(std::round(double(code)*units/127));
     // Do not touch the whole arena while the source file is still cached.
     codes_.reset(new std::int8_t[rows*padded_]);
     residuals_.reset(new unsigned char[rows*stride_]);
@@ -61,11 +68,12 @@ public:
       const auto x=values[d];if(!std::isfinite(x)||std::bit_cast<std::uint32_t>(x)==0x80000000U)return false;
       const double scaled=std::ldexp(double(x),-fine_);
       if(std::abs(scaled)>16384 || std::trunc(scaled)!=scaled)return false;
-      const int n=int(scaled),unit=1<<shift_;
-      const int code=n<0?-((-n+unit/2)/unit):(n+unit/2)/unit;
+      const int n=int(scaled);
+      const int code=int(std::round(double(x)/scale_));
       if(code < -127 || code > 127)return false;
-      const int residual=n-code*unit;
-      if(width_ && (residual<-(1<<shift_) || residual>=(1<<shift_)))return false;
+      const int residual=n-origins_[std::size_t(code+127)];
+      if(!width_ && residual)return false;
+      if(width_ && (residual<-(1<<int(width_-1)) || residual>=(1<<int(width_-1))))return false;
       codes_[row*padded_+d]=static_cast<std::int8_t>(code);
       const unsigned encoded=unsigned(residual)&((1U<<width_)-1);
       const auto bit=d*width_;auto* p=residuals_.get()+row*stride_;
@@ -81,7 +89,7 @@ public:
       v=(v>>(bit%8))&((1U<<width_)-1);
       residual=(v&(1U<<(width_-1)))?int(v)-int(1U<<width_):int(v);
     }
-    const int n=int(codes_[code_offset(row,d)])*(1<<shift_)+residual;
+    const int n=origins_[std::size_t(int(codes_[code_offset(row,d)])+127)]+residual;
     if(!n)return 0.f;
     const unsigned magnitude=unsigned(n<0?-n:n),top=31U-std::countl_zero(magnitude);
     const std::uint32_t sign=n<0?0x80000000U:0;
