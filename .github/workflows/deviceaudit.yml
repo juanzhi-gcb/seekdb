@@ -1,0 +1,44 @@
+name: Native data device isolation audit
+on:
+  push:
+    branches: ['codex/data-device-audit-20261113']
+permissions:
+  contents: read
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Inspect available devices and compare owned-file sync
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          mkdir device-results
+          lsblk -J -o NAME,SIZE,TYPE,MOUNTPOINTS > device-results/devices.json
+          df -T > device-results/filesystems.txt
+          g++ -std=c++20 -O2 bench/extent6000/probe.cpp -o "$RUNNER_TEMP/device-probe"
+          if [[ -d /mnt ]] && [[ "$(stat -c %d /mnt)" != "$(stat -c %d "$RUNNER_TEMP")" ]]; then
+            target=$(sudo mktemp -d /mnt/mvdb-device-XXXXXX)
+            sudo chown "$(id -u):$(id -g)" "$target"
+            printf '%s\n' 'distinct /mnt data device available' > device-results/status.txt
+            if [[ "$REPLICA" == 1 ]]; then order='root isolated';else order='isolated root';fi
+            for mode in $order; do
+              if [[ "$mode" == root ]];then location="$RUNNER_TEMP/device-data";else location="$target/data";fi
+              "$RUNNER_TEMP/device-probe" "$location" > "device-results/$mode.jsonl"
+            done
+          else
+            printf '%s\n' 'No distinct /mnt data device available; no timing comparison claimed' > device-results/status.txt
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: device-${{ matrix.replica }}-${{ github.run_id }}
+          path: device-results/
+          retention-days: 14
