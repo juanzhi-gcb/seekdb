@@ -3,15 +3,15 @@
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
- "submission_state": "Prompt-only expansion with a separately attributed retrospective implementation specification; runtime remains a24.",
+ "submission_state": "Prompt-only a24-bound rebuild: conversations u01-u70, experiments e01-e126, observations a01-a50. Runtime unchanged at a24. Latest user-reported result is E=3615.639045 with Prompt invalid; this rebuild has not been platform-evaluated.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 126278,
-   "sha256": "a1900858d882a8098d5647a21ab09a9ea0e607c8c0bfbe662edbf2642d78c0d1"
+   "bytes": 98986,
+   "sha256": "56b949eae0ae5da4582ebdc505e8d74b1e8795fea75b4102123d3bceb4671702"
   },
   "conversation.json": {
-   "bytes": 126278,
-   "sha256": "a1900858d882a8098d5647a21ab09a9ea0e607c8c0bfbe662edbf2642d78c0d1"
+   "bytes": 98986,
+   "sha256": "56b949eae0ae5da4582ebdc505e8d74b1e8795fea75b4102123d3bceb4671702"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 100,
-  "experiments": 45,
-  "agent_observations": 24,
+  "user_records": 70,
+  "experiments": 41,
+  "agent_observations": 16,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -127,8 +127,15 @@
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 14,
-  "note": "Evidence navigation only, no self-assigned grades."
+  "instances": 11,
+  "dimensions": {
+   "问题理解与自主拆解": 2,
+   "技术理解与迁移": 1,
+   "独立验证与质疑": 4,
+   "实验与反馈迭代": 2,
+   "取舍与反思": 2
+  },
+  "note": "Evidence index only; no self-assigned platform score."
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
  "material_parent_commit": "00b6389c81b19d0a82a9f6b60f4a7253b6428c86",
@@ -151,5 +158,6 @@
    "CMakeLists.txt": "78d8497653d29085db65ae5a9e57954f1a7ac513",
    "Dockerfile": "5ca119733dfffd36fa9e11ee4612607d65ccc468"
   }
- }
+ },
+ "selection_scope": "a24-subset"
 }

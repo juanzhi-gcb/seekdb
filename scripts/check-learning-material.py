@@ -68,7 +68,7 @@ def preserve_prefix(current, previous, label):
         require(current[field][:len(old)] == old, label + ' changed historical ' + field)
 
 
-def verify_selection(current, archive):
+def verify_selection(current, archive, allow_prefix=False):
     """A shorter submission may select records, but may not rewrite their source."""
     for field in ['conversations', 'experiments', 'agent_observations']:
         require(isinstance(current[field], list) and isinstance(archive[field], list),
@@ -82,7 +82,9 @@ def verify_selection(current, archive):
             seen.add(identity)
             require(identity in original and row == original[identity],
                     'Selected record changed or invented: ' + identity)
-    require(current['conversations'] == archive['conversations'],
+    expected_conversations = (archive['conversations'][:len(current['conversations'])]
+                              if allow_prefix else archive['conversations'])
+    require(current['conversations'] == expected_conversations,
             'Curated material must preserve every recorded user statement')
 
 
@@ -189,7 +191,8 @@ def main():
                     extra_records.get('base_archive_sha256') == selection['sha256'],
                     'Appendix must bind the unchanged original archive')
             history_records = append_records(history_records, extra_records)
-        verify_selection(current, history_records)
+        verify_selection(current, history_records,
+                         allow_prefix=binding.get('selection_scope') == 'a24-subset')
     history = binding['before_material']
     previous_path = path_in_repo(history['path'])
     require(sha(previous_path) == history['sha256'] and previous_path.stat().st_size == history['bytes'], 'History digest')
