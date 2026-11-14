@@ -15,6 +15,12 @@ jobs:
           mkdir hint-results
           g++ -std=c++20 -O2 -ffp-contract=off -Iinclude tests/writeback_hint_tests.cpp src/storage/store.cpp -Wl,--wrap=sync_file_range,--wrap=pwrite,--wrap=fsync -o /tmp/hint-test
           /tmp/hint-test > hint-results/result.txt 2>&1
+      - name: Inspect portable mask-count overhead
+        run: |
+          g++ -std=c++20 -O3 tests/popcount_probe.cpp -o /tmp/popcount-probe
+          /tmp/popcount-probe > hint-results/popcount.txt
+          objdump -d --disassemble=count_standard /tmp/popcount-probe > hint-results/popcount-assembly.txt
+          objdump -d --disassemble=count_table /tmp/popcount-probe >> hint-results/popcount-assembly.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
