@@ -9,12 +9,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        route: [stack, extent]
+        route: [extent]
         include:
-          - route: stack
-            candidate: e31a7e930372b593f096ee852fb7f4e62fa78ed0
           - route: extent
-            candidate: 5c8aa0683a170459c3995de8250fc3f3de82fe74
+            candidate: 400fa1ff0662a24c82d924e8f7f8ae7622795fc0
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
