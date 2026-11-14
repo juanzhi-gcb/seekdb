@@ -6,12 +6,12 @@
  "submission_state": "Self-contained Prompt experiment; runtime remains a24. No official Prompt score.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 128850,
-   "sha256": "271c4d6e1d8e7e6d239341bff80fd466599e4838e8ff60ad00961c235088618b"
+   "bytes": 128871,
+   "sha256": "a7d5cc260fb3beff6559119c309f4c4c1c7f5819da791ada2d6d4aa805a63c8a"
   },
   "conversation.json": {
-   "bytes": 128850,
-   "sha256": "271c4d6e1d8e7e6d239341bff80fd466599e4838e8ff60ad00961c235088618b"
+   "bytes": 128871,
+   "sha256": "a7d5cc260fb3beff6559119c309f4c4c1c7f5819da791ada2d6d4aa805a63c8a"
   }
  },
  "before_material": {
@@ -28,7 +28,7 @@
  },
  "counts": {
   "user_records": 100,
-  "experiments": 45,
+  "experiments": 46,
   "agent_observations": 24,
   "retrospective_cases": 0
  },
@@ -130,7 +130,7 @@
   "note": "Navigation only, no scores or score suggestions."
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "material_parent_commit": "42f69e8320dcd8c802614f10cfb0699aa7551d2c",
+ "material_parent_commit": "59f07ad28a0b0e6e379d2c1ddd59c3a3b084c081",
  "historical_source_identities": [
   {
    "original_identity": {

@@ -31,7 +31,9 @@ jobs:
           d=json.loads(Path('agent/conversation.json').read_text())
           old=json.loads(subprocess.check_output(['git','show','42f69e8320dcd8c802614f10cfb0699aa7551d2c:agent/conversation.json']))
           for field in ['conversations','experiments','agent_observations']:
-              assert d[field]==old[field],field
+              assert d[field][:len(old[field])]==old[field],field
+          supplement=json.loads(Path('bench/results/post-2882-20261113/iteration-records-appendix.json').read_text())
+          assert d['experiments'][len(old['experiments']):]==[next(e for e in supplement['experiments'] if e['id']=='e137')]
           assert d['layout_version']=='self-contained-20261114'
           assert d['source_identity']['verified_engine_commit']=='a24d2cd764027adec7371f268f99ccdca2307032'
           assert set(d['technical_appendices'])=={'algorithm','inputs','decisions'}
