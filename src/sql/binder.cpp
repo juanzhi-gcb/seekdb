@@ -15,34 +15,27 @@ namespace minivectordb::sql {
     throw Error(ErrorCode::Schema,"unknown column: "+std::string(name));
   }
   namespace {
-    // Allocation-free recognition of the lexer's plain numeric-array subset.
-    // Scan each number once. Callers defer numeric errors until the complete
-    // grammar is accepted; comments/other spellings use the original lexer.
+    // Let the numeric converter validate its complete comma-delimited token.
+    // This removes the separate per-character grammar pass for plain arrays.
+    // Anything outside the subset returns to the original lexer, preserving
+    // lexical-error precedence over an earlier numeric overflow.
     template<class F> bool plain_vector(std::string_view text,F&& consume) {
-      std::size_t i=0;
-      auto digit=[](char c){return c>='0'&&c<='9';};
-      auto skip=[&]{while(i<text.size()&&std::string_view(" \t\r\n\f").find(text[i])!=std::string_view::npos)++i;};
-      skip();if(i==text.size()||text[i++]!='[')return false;skip();
-      if(i<text.size()&&text[i]==']') {++i;skip();return i==text.size();}
+      const auto whitespace=[](char c){return c==' '||c=='\t'||c=='\r'||c=='\n'||c=='\f';};
+      const auto trim=[&](std::string_view v){while(!v.empty()&&whitespace(v.front()))v.remove_prefix(1);while(!v.empty()&&whitespace(v.back()))v.remove_suffix(1);return v;};
+      text=trim(text);if(text.size()<2||text.front()!='['||text.back()!=']')return false;
+      text=trim(text.substr(1,text.size()-2));if(text.empty())return true;
       for(;;) {
-        const auto begin=i;
-        if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
-        bool any=false;
-        while(i<text.size()&&digit(text[i])) {++i;any=true;}
-        if(i<text.size()&&text[i]=='.') {
-          ++i;while(i<text.size()&&digit(text[i])) {++i;any=true;}
-        }
-        if(!any)return false;
-        if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
-          ++i;if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
-          const auto digits=i;while(i<text.size()&&digit(text[i]))++i;
-          if(i==digits)return false;
-        }
-        consume(text.substr(begin,i-begin));skip();
-        if(i==text.size())return false;
-        if(text[i]==']') {++i;skip();return i==text.size();}
-        if(text[i++]!=',')return false;
-        skip();
+        const auto comma=text.find(',');const auto component=trim(text.substr(0,comma));
+        auto number=component;if(number.empty())return false;
+        if(number.front()=='+')number.remove_prefix(1);
+        auto unsigned_number=component;if(unsigned_number.front()=='+'||unsigned_number.front()=='-')unsigned_number.remove_prefix(1);
+        if(unsigned_number.empty()||!((unsigned_number.front()>='0'&&unsigned_number.front()<='9')||unsigned_number.front()=='.'))return false;
+        double parsed=0;
+        const auto [end,error]=std::from_chars(number.data(),number.data()+number.size(),parsed);
+        if(end!=number.data()+number.size()||(error!=std::errc{}&&error!=std::errc::result_out_of_range))return false;
+        consume(component,parsed,error==std::errc::result_out_of_range);
+        if(comma==std::string_view::npos)return true;
+        text.remove_prefix(comma+1);if(text.empty())return false;
       }
     }
     double real(std::string_view text) {
@@ -131,9 +124,9 @@ namespace minivectordb::sql {
         std::vector<double> values;
         values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
         std::exception_ptr numeric_error;
-        const bool plain=plain_vector(v.text,[&](auto component){
+        const bool plain=plain_vector(v.text,[&](auto component,double parsed,bool range){
           if(numeric_error)return;
-          try {values.push_back(real(component));}
+          try {values.push_back(range?real(component):parsed);}
           catch(const Error&) {numeric_error=std::current_exception();}
         });
         if(plain) {
