@@ -1,0 +1,22 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Final results after native two-host completion; earlier records remain immutable.",
+ "conversations": [],
+ "experiments": [
+  {
+   "id": "e143",
+   "source": "agent_tool_execution",
+   "purpose": "本轮三路线完整原生结果与淘汰决定",
+   "output": "三路线各两台Linux x86、每台5种负载各3轮，均通过71项CTest、20项公开协议检查和完整存储文件等字节比较。T/B/M是生成负载的实测中位数；范围是候选相对同机a24的百分比变化，负值代表降低：{\"directory\":{\"commit\":\"6d6192c5bb485eb9c369b9ef06ae71fd9d981ba3\",\"run\":43544073441,\"delta_percent_ranges\":{\"write/unindexed/T_ms\":[-2.043621302625964,38.48084315958802],\"write/unindexed/B_bytes\":[0.0,0.0],\"write/unindexed/M_bytes\":[-4.18101328086572,-0.09976720984369303],\"query/unindexed/T_ms\":[-1.6483124873151733,1.1523816548919985],\"query/unindexed/B_bytes\":[0.0,0.0],\"query/unindexed/M_bytes\":[-2.6997545677665657,-1.040261991909075],\"query/indexed/T_ms\":[-0.506457572540997,2.2203890852286134],\"query/indexed/B_bytes\":[0.0,0.0],\"query/indexed/M_bytes\":[-4.34146341463415,-2.6292414283176413]},\"decision\":\"reject: writing T regressions exceed small M benefit\"},\"codec\":{\"commit\":\"08caace24793b51ad1ce9a698e010b8388bd9a32\",\"run\":43544081532,\"delta_percent_ranges\":{\"write/unindexed/T_ms\":[-5.775379647942525,0.5134392762609519],\"write/unindexed/B_bytes\":[0.0,0.0],\"write/unindexed/M_bytes\":[-2.262295081967214,2.2052586938083207],\"query/unindexed/T_ms\":[-2.452676355339656,0.8158296690614852],\"query/unindexed/B_bytes\":[0.0,0.0],\"query/unindexed/M_bytes\":[-0.763150722267647,0.7766990291262044],\"query/indexed/T_ms\":[-1.2656266475862488,1.6278897334520481],\"query/indexed/B_bytes\":[0.0,0.0],\"query/indexed/M_bytes\":[-0.3391182924396552,0.7016694894749653]},\"decision\":\"retain as modest write-side candidate; no query/B breakthrough\"},\"survivors\":{\"commit\":\"eb54d878268ea077f6b5ea1b0a0deb67d6811577\",\"run\":43545450294,\"delta_percent_ranges\":{\"write/unindexed/T_ms\":[-3.7738506808661643,5.384188103847176],\"write/unindexed/B_bytes\":[0.0,0.0],\"write/unindexed/M_bytes\":[-1.781002638522422,1.806451612903226],\"query/unindexed/T_ms\":[-0.2957755992569977,2.2374175524028095],\"query/unindexed/B_bytes\":[0.0,0.0],\"query/unindexed/M_bytes\":[-0.21093000958772867,1.315068493150684],\"query/indexed/T_ms\":[0.2848848718616903,2.4082436408920715],\"query/indexed/B_bytes\":[0.0,0.0],\"query/indexed/M_bytes\":[-0.1598401598401633,1.5440289505428195]},\"decision\":\"reject: query T regressed in 19/20 profile/host/index combinations; no B benefit\"}}。宽字编码10组写入T有9组改善，仍只是小幅候选；三条路线都没有正式新E。"
+  }
+ ],
+ "agent_observations": [
+  {
+   "id": "a67",
+   "source": "agent",
+   "title": "按完整结果淘汰，不把微内核加速包装成提分",
+   "content": "两台确认：目录M略降，但写入T存在明显退化；跨块存活候选合批在20组查询对照中19组退化，额外拷贝、延迟阈值更新和代码生成变化的各自贡献尚未单独拆分，不能断言唯一原因。两者均不进入正式版本。宽字编码只保留为写入侧小幅候选，不代表取得大幅突破。比特平面试探也因没有压缩收益而停止。正式分支仍是007146cd，历史最高正式性能仍是a24的3977.995012；本轮没有新正式分数，也没有新Prompt分数。"
+  }
+ ]
+}

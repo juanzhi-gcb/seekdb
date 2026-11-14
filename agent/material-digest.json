@@ -6,12 +6,12 @@
  "submission_state": "Experimental material; current implementation map a24; independent candidates measured separately; not a formal release.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 123789,
-   "sha256": "9af759b25b97d335ab6f00785d4a7d8dfaa945a4d6864e2cce6cbbd67422cf72"
+   "bytes": 127182,
+   "sha256": "0850fdd4d46f09f232694979ee35524cb7c4d04c564f6f207f317fd4edc0e8da"
   },
   "conversation.json": {
-   "bytes": 123789,
-   "sha256": "9af759b25b97d335ab6f00785d4a7d8dfaa945a4d6864e2cce6cbbd67422cf72"
+   "bytes": 127182,
+   "sha256": "0850fdd4d46f09f232694979ee35524cb7c4d04c564f6f207f317fd4edc0e8da"
   }
  },
  "before_material": {
@@ -28,8 +28,8 @@
  },
  "counts": {
   "user_records": 93,
-  "experiments": 52,
-  "agent_observations": 26,
+  "experiments": 53,
+  "agent_observations": 27,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -103,6 +103,11 @@
    "path": "bench/results/new-a24-20261114/iteration-records-appendix.json",
    "bytes": 5477,
    "sha256": "14b511d3030f49056b442b41d32c7cc1b5a2b47e8f4d1368be9eee90d4bc73bc"
+  },
+  {
+   "path": "bench/results/new-a24-20261114/completed-records-appendix.json",
+   "bytes": 3636,
+   "sha256": "581648c190841e499a69b40154858afd4e4fa825e0f26d6a8f22d4368f170294"
   }
  ],
  "prompt_rubric": {

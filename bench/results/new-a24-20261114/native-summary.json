@@ -1170,6 +1170,714 @@
       "ctest_passed": 71,
       "storage_bytes_identical": true,
       "decision": "retain as modest write-side candidate; no query/B breakthrough"
+    },
+    "survivors": {
+      "commit": "eb54d878268ea077f6b5ea1b0a0deb67d6811577",
+      "run": 43545450294,
+      "replicas": 2,
+      "rounds": 3,
+      "profiles": 5,
+      "full_metrics": {
+        "1": {
+          "cluster-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 302.066786,
+                "B_bytes": 6770688,
+                "M_bytes": 9748480
+              },
+              "candidate": {
+                "T_ms": 301.748531,
+                "B_bytes": 6770688,
+                "M_bytes": 9809920
+              },
+              "ratio": {
+                "T_ms": 0.9989464084939151,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0063025210084033
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 393.756883,
+                "B_bytes": 6770688,
+                "M_bytes": 18767872
+              },
+              "candidate": {
+                "T_ms": 398.255275,
+                "B_bytes": 6770688,
+                "M_bytes": 18784256
+              },
+              "ratio": {
+                "T_ms": 1.0114242879152413,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0008729812309036
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 390.419583,
+                "B_bytes": 7540736,
+                "M_bytes": 20561920
+              },
+              "candidate": {
+                "T_ms": 395.184724,
+                "B_bytes": 7540736,
+                "M_bytes": 20557824
+              },
+              "ratio": {
+                "T_ms": 1.0122051792673525,
+                "B_bytes": 1.0,
+                "M_bytes": 0.999800796812749
+              }
+            }
+          },
+          "continuous-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 332.541205,
+                "B_bytes": 9285632,
+                "M_bytes": 12288000
+              },
+              "candidate": {
+                "T_ms": 350.445849,
+                "B_bytes": 9285632,
+                "M_bytes": 12410880
+              },
+              "ratio": {
+                "T_ms": 1.0538418810384718,
+                "B_bytes": 1.0,
+                "M_bytes": 1.01
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 326.196202,
+                "B_bytes": 9285632,
+                "M_bytes": 21377024
+              },
+              "candidate": {
+                "T_ms": 333.180182,
+                "B_bytes": 9285632,
+                "M_bytes": 21381120
+              },
+              "ratio": {
+                "T_ms": 1.0214103657773428,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0001916075876605
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 325.859561,
+                "B_bytes": 10051584,
+                "M_bytes": 23060480
+              },
+              "candidate": {
+                "T_ms": 331.205432,
+                "B_bytes": 10051584,
+                "M_bytes": 23101440
+              },
+              "ratio": {
+                "T_ms": 1.0164054446755975,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0017761989342806
+              }
+            }
+          },
+          "grid-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 244.951594,
+                "B_bytes": 5648384,
+                "M_bytes": 8310784
+              },
+              "candidate": {
+                "T_ms": 244.774932,
+                "B_bytes": 5648384,
+                "M_bytes": 8183808
+              },
+              "ratio": {
+                "T_ms": 0.9992787881184395,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9847215377033022
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 309.249127,
+                "B_bytes": 5648384,
+                "M_bytes": 15020032
+              },
+              "candidate": {
+                "T_ms": 315.342423,
+                "B_bytes": 5648384,
+                "M_bytes": 15085568
+              },
+              "ratio": {
+                "T_ms": 1.019703518839683,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0043632397054814
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 311.01599,
+                "B_bytes": 6414336,
+                "M_bytes": 16674816
+              },
+              "candidate": {
+                "T_ms": 317.628098,
+                "B_bytes": 6414336,
+                "M_bytes": 16883712
+              },
+              "ratio": {
+                "T_ms": 1.0212597043643963,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0125276344878409
+              }
+            }
+          },
+          "grid-varchar": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 246.447754,
+                "B_bytes": 5763072,
+                "M_bytes": 8282112
+              },
+              "candidate": {
+                "T_ms": 247.008628,
+                "B_bytes": 5763072,
+                "M_bytes": 8306688
+              },
+              "ratio": {
+                "T_ms": 1.0022758332786428,
+                "B_bytes": 1.0,
+                "M_bytes": 1.002967359050445
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 307.921648,
+                "B_bytes": 5763072,
+                "M_bytes": 15216640
+              },
+              "candidate": {
+                "T_ms": 314.811141,
+                "B_bytes": 5763072,
+                "M_bytes": 15384576
+              },
+              "ratio": {
+                "T_ms": 1.022374175524028,
+                "B_bytes": 1.0,
+                "M_bytes": 1.011036339165545
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 310.676124,
+                "B_bytes": 6529024,
+                "M_bytes": 16977920
+              },
+              "candidate": {
+                "T_ms": 318.157962,
+                "B_bytes": 6529024,
+                "M_bytes": 17240064
+              },
+              "ratio": {
+                "T_ms": 1.0240824364089207,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0154402895054282
+              }
+            }
+          },
+          "outlier-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 326.999367,
+                "B_bytes": 9281536,
+                "M_bytes": 12255232
+              },
+              "candidate": {
+                "T_ms": 334.97062,
+                "B_bytes": 9281536,
+                "M_bytes": 12378112
+              },
+              "ratio": {
+                "T_ms": 1.0243769676777386,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0100267379679144
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 387.712364,
+                "B_bytes": 9281536,
+                "M_bytes": 21352448
+              },
+              "candidate": {
+                "T_ms": 395.726006,
+                "B_bytes": 9281536,
+                "M_bytes": 21409792
+              },
+              "ratio": {
+                "T_ms": 1.0206690390714495,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0026855937080377
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 394.255052,
+                "B_bytes": 10051584,
+                "M_bytes": 23138304
+              },
+              "candidate": {
+                "T_ms": 401.151834,
+                "B_bytes": 10051584,
+                "M_bytes": 23150592
+              },
+              "ratio": {
+                "T_ms": 1.0174931987935567,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0005310674455656
+              }
+            }
+          }
+        },
+        "2": {
+          "cluster-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 532.483038,
+                "B_bytes": 6770688,
+                "M_bytes": 9523200
+              },
+              "candidate": {
+                "T_ms": 542.882566,
+                "B_bytes": 6770688,
+                "M_bytes": 9695232
+              },
+              "ratio": {
+                "T_ms": 1.019530252154248,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0180645161290323
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 475.045272,
+                "B_bytes": 6770688,
+                "M_bytes": 18759680
+              },
+              "candidate": {
+                "T_ms": 473.640204,
+                "B_bytes": 6770688,
+                "M_bytes": 18792448
+              },
+              "ratio": {
+                "T_ms": 0.99704224400743,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0017467248908296
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 475.843098,
+                "B_bytes": 7540736,
+                "M_bytes": 20500480
+              },
+              "candidate": {
+                "T_ms": 477.198703,
+                "B_bytes": 7540736,
+                "M_bytes": 20467712
+              },
+              "ratio": {
+                "T_ms": 1.002848848718617,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9984015984015984
+              }
+            }
+          },
+          "continuous-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 553.668882,
+                "B_bytes": 9285632,
+                "M_bytes": 12419072
+              },
+              "candidate": {
+                "T_ms": 552.9291,
+                "B_bytes": 9285632,
+                "M_bytes": 12197888
+              },
+              "ratio": {
+                "T_ms": 0.9986638548344494,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9821899736147758
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 447.903866,
+                "B_bytes": 9285632,
+                "M_bytes": 21381120
+              },
+              "candidate": {
+                "T_ms": 454.820676,
+                "B_bytes": 9285632,
+                "M_bytes": 21356544
+              },
+              "ratio": {
+                "T_ms": 1.015442621787953,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9988505747126437
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 450.343973,
+                "B_bytes": 10051584,
+                "M_bytes": 23121920
+              },
+              "candidate": {
+                "T_ms": 457.682033,
+                "B_bytes": 10051584,
+                "M_bytes": 23199744
+              },
+              "ratio": {
+                "T_ms": 1.0162943448562594,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0033658104517271
+              }
+            }
+          },
+          "grid-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 399.94413,
+                "B_bytes": 5648384,
+                "M_bytes": 8204288
+              },
+              "candidate": {
+                "T_ms": 406.298902,
+                "B_bytes": 5648384,
+                "M_bytes": 8208384
+              },
+              "ratio": {
+                "T_ms": 1.0158891493169309,
+                "B_bytes": 1.0,
+                "M_bytes": 1.000499251123315
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 422.478805,
+                "B_bytes": 5648384,
+                "M_bytes": 14950400
+              },
+              "candidate": {
+                "T_ms": 430.964982,
+                "B_bytes": 5648384,
+                "M_bytes": 15147008
+              },
+              "ratio": {
+                "T_ms": 1.0200866336951506,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0131506849315068
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 427.349712,
+                "B_bytes": 6414336,
+                "M_bytes": 16785408
+              },
+              "candidate": {
+                "T_ms": 434.702701,
+                "B_bytes": 6414336,
+                "M_bytes": 16834560
+              },
+              "ratio": {
+                "T_ms": 1.017206023061506,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0029282576866765
+              }
+            }
+          },
+          "grid-varchar": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 413.616411,
+                "B_bytes": 5763072,
+                "M_bytes": 8282112
+              },
+              "candidate": {
+                "T_ms": 415.897577,
+                "B_bytes": 5763072,
+                "M_bytes": 8253440
+              },
+              "ratio": {
+                "T_ms": 1.0055151728493674,
+                "B_bytes": 1.0,
+                "M_bytes": 0.996538081107814
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 419.482086,
+                "B_bytes": 5763072,
+                "M_bytes": 15192064
+              },
+              "candidate": {
+                "T_ms": 424.535911,
+                "B_bytes": 5763072,
+                "M_bytes": 15327232
+              },
+              "ratio": {
+                "T_ms": 1.0120477731199229,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0088972768940416
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 425.441134,
+                "B_bytes": 6529024,
+                "M_bytes": 17014784
+              },
+              "candidate": {
+                "T_ms": 431.666902,
+                "B_bytes": 6529024,
+                "M_bytes": 17137664
+              },
+              "ratio": {
+                "T_ms": 1.0146336766768773,
+                "B_bytes": 1.0,
+                "M_bytes": 1.007221954742417
+              }
+            }
+          },
+          "outlier-bigint": {
+            "write/unindexed": {
+              "reference": {
+                "T_ms": 569.512358,
+                "B_bytes": 9281536,
+                "M_bytes": 12492800
+              },
+              "candidate": {
+                "T_ms": 548.019812,
+                "B_bytes": 9281536,
+                "M_bytes": 12353536
+              },
+              "ratio": {
+                "T_ms": 0.9622614931913384,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9888524590163934
+              }
+            },
+            "query/unindexed": {
+              "reference": {
+                "T_ms": 472.602735,
+                "B_bytes": 9281536,
+                "M_bytes": 21360640
+              },
+              "candidate": {
+                "T_ms": 477.48084,
+                "B_bytes": 9281536,
+                "M_bytes": 21315584
+              },
+              "ratio": {
+                "T_ms": 1.0103217874945223,
+                "B_bytes": 1.0,
+                "M_bytes": 0.9978906999041227
+              }
+            },
+            "query/indexed": {
+              "reference": {
+                "T_ms": 472.533561,
+                "B_bytes": 10051584,
+                "M_bytes": 23060480
+              },
+              "candidate": {
+                "T_ms": 476.989893,
+                "B_bytes": 10051584,
+                "M_bytes": 23134208
+              },
+              "ratio": {
+                "T_ms": 1.0094307206255768,
+                "B_bytes": 1.0,
+                "M_bytes": 1.0031971580817052
+              }
+            }
+          }
+        }
+      },
+      "delta_percent_ranges": {
+        "write/unindexed/T_ms": [
+          -3.7738506808661643,
+          5.384188103847176
+        ],
+        "write/unindexed/B_bytes": [
+          0.0,
+          0.0
+        ],
+        "write/unindexed/M_bytes": [
+          -1.781002638522422,
+          1.806451612903226
+        ],
+        "query/unindexed/T_ms": [
+          -0.2957755992569977,
+          2.2374175524028095
+        ],
+        "query/unindexed/B_bytes": [
+          0.0,
+          0.0
+        ],
+        "query/unindexed/M_bytes": [
+          -0.21093000958772867,
+          1.315068493150684
+        ],
+        "query/indexed/T_ms": [
+          0.2848848718616903,
+          2.4082436408920715
+        ],
+        "query/indexed/B_bytes": [
+          0.0,
+          0.0
+        ],
+        "query/indexed/M_bytes": [
+          -0.1598401598401633,
+          1.5440289505428195
+        ]
+      },
+      "ctest_passed": 71,
+      "storage_bytes_identical": true,
+      "decision": "reject: query T regressed in 19/20 profile/host/index combinations; no B benefit"
     }
-  }
+  },
+  "artifact_manifests": [
+    [
+      {
+        "id": 14092834541,
+        "name": "newa24-directory-2-43544073441",
+        "size_in_bytes": 1463008,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14092834541",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14092834541/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:11:43Z",
+        "expires_at": "2026-11-28T02:11:43Z",
+        "updated_at": "2026-11-14T02:11:43Z",
+        "digest": "sha256:d92ae03a8738743edf0d2b18a28c0d6b86173e56dcf24fb39a638b8cbe01d189",
+        "workflow_run": {
+          "id": 43544073441,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-directory-20261114",
+          "head_sha": "6d6192c5bb485eb9c369b9ef06ae71fd9d981ba3"
+        }
+      },
+      {
+        "id": 14093965357,
+        "name": "newa24-codec-2-43544081532",
+        "size_in_bytes": 1445188,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093965357",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093965357/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:11:28Z",
+        "expires_at": "2026-11-28T02:11:26Z",
+        "updated_at": "2026-11-14T02:11:28Z",
+        "digest": "sha256:af7240407062d85f40d7e47db30def1551120187540086c952f3f56f13335f1b",
+        "workflow_run": {
+          "id": 43544081532,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-codec-20261114",
+          "head_sha": "08caace24793b51ad1ce9a698e010b8388bd9a32"
+        }
+      }
+    ],
+    [
+      {
+        "id": 14093821070,
+        "name": "newa24-directory-1-43544073441",
+        "size_in_bytes": 1422612,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093821070",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093821070/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:13:07Z",
+        "expires_at": "2026-11-28T02:13:05Z",
+        "updated_at": "2026-11-14T02:13:07Z",
+        "digest": "sha256:d82130c0734edfc0a1055504671a1a4d4b207c8b504eec0f52a32106c465922b",
+        "workflow_run": {
+          "id": 43544073441,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-directory-20261114",
+          "head_sha": "6d6192c5bb485eb9c369b9ef06ae71fd9d981ba3"
+        }
+      },
+      {
+        "id": 14093821290,
+        "name": "newa24-codec-1-43544081532",
+        "size_in_bytes": 1438625,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093821290",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093821290/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:14:41Z",
+        "expires_at": "2026-11-28T02:14:39Z",
+        "updated_at": "2026-11-14T02:14:41Z",
+        "digest": "sha256:c64b3254cdc8ffd52a27211d22d727254216227d740046edfbb33724e74b9052",
+        "workflow_run": {
+          "id": 43544081532,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-codec-20261114",
+          "head_sha": "08caace24793b51ad1ce9a698e010b8388bd9a32"
+        }
+      }
+    ],
+    [
+      {
+        "id": 14094406519,
+        "name": "newa24-survivors-1-43545450294",
+        "size_in_bytes": 1448406,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14094406519",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14094406519/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:25:31Z",
+        "expires_at": "2026-11-28T02:25:30Z",
+        "updated_at": "2026-11-14T02:25:31Z",
+        "digest": "sha256:b9edc2877e0bbe23eb2fb65c5e028f8c265aa6de6b35a92b7f347d17f7009f12",
+        "workflow_run": {
+          "id": 43545450294,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-survivors-20261114",
+          "head_sha": "eb54d878268ea077f6b5ea1b0a0deb67d6811577"
+        }
+      }
+    ],
+    [
+      {
+        "id": 14093249859,
+        "name": "newa24-survivors-2-43545450294",
+        "size_in_bytes": 1439493,
+        "url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093249859",
+        "archive_download_url": "https://api.github.com/repos/juanzhi-gcb/seekdb/actions/artifacts/14093249859/zip",
+        "expired": false,
+        "created_at": "2026-11-14T02:29:07Z",
+        "expires_at": "2026-11-28T02:29:06Z",
+        "updated_at": "2026-11-14T02:29:07Z",
+        "digest": "sha256:50b8c218b62ce69b407cc62ae71f179aaa27674b7ac487f0ae4a16a7f4d9002f",
+        "workflow_run": {
+          "id": 43545450294,
+          "repository_id": 1433994590,
+          "head_repository_id": 1433994590,
+          "head_branch": "codex/a24-survivors-20261114",
+          "head_sha": "eb54d878268ea077f6b5ea1b0a0deb67d6811577"
+        }
+      }
+    ]
+  ]
 }
