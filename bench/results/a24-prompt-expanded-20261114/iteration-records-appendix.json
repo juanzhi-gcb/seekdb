@@ -1,0 +1,21 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "One new user request and a separately attributed retrospective specification explanation.",
+ "conversations": [
+  {
+   "id": "u99",
+   "source": "user",
+   "content": "我想让我的prompt分更高，我允许你进行我原始prompt更改，可以从你的思考逻辑反推补充我的prompt，但同时一定要形成一个完整逻辑链，让评分agent认识到是可以通过这段prompt得到最终代码的，同时增加提示词的维度让agent打分更高"
+  }
+ ],
+ "experiments": [],
+ "agent_observations": [
+  {
+   "id": "a69",
+   "source": "agent",
+   "title": "把原始目标扩展为十维实现规格，并区分规格与历史证据",
+   "content": "依据u99授权，以a24代码及既有记录整理接口、数值、事务、存储、缓存、精确计算、索引、输出、实验与交付十维规格。implementation_prompt是事后形成的可执行要求；requirements_traceability连接实际源码、测试和历史结果。原始用户发言未改写，也未声称新规格曾生成当前代码或已经通过独立重建实验。本次运行实现仍固定a24。"
+  }
+ ]
+}

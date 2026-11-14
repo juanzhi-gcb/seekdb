@@ -36,5 +36,13 @@ jobs:
           for step in d['a24_development_chain']:
               for name in step.get('code',[])+step.get('tests',[]):
                   assert Path(name).is_file(),name
-          print('a24 implementation hashes and evidence paths passed')
+          prompt=d['implementation_prompt']
+          assert prompt['status']=='retrospective_specification_not_historical_dialogue'
+          assert prompt['independent_reconstruction']=='not_performed'
+          assert prompt['content']==Path('agent/implementation-prompt.txt').read_text()
+          assert {r['requirement'] for r in d['requirements_traceability']}=={'R'+str(i) for i in range(1,11)}
+          for requirement in d['requirements_traceability']:
+              for name in requirement['code']+requirement['tests']:
+                  assert Path(name).is_file(),name
+          print('a24 implementation hashes, ten-dimension specification and evidence paths passed')
           PYCODE

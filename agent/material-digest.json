@@ -3,15 +3,15 @@
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
- "submission_state": "Prompt-only candidate; runtime, build and tests fixed to a24d2cd764027adec7371f268f99ccdca2307032.",
+ "submission_state": "Prompt-only expansion with a separately attributed retrospective implementation specification; runtime remains a24.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 106150,
-   "sha256": "057eba6a52192178c78d421fc67568717e23ff4c97ca425d9fa389804af7b3ca"
+   "bytes": 121355,
+   "sha256": "860154c2ac8e3caad63469b40384ede1b76aee66673f35cc98870bca6d7b1a03"
   },
   "conversation.json": {
-   "bytes": 106150,
-   "sha256": "057eba6a52192178c78d421fc67568717e23ff4c97ca425d9fa389804af7b3ca"
+   "bytes": 121355,
+   "sha256": "860154c2ac8e3caad63469b40384ede1b76aee66673f35cc98870bca6d7b1a03"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 98,
+  "user_records": 99,
   "experiments": 45,
-  "agent_observations": 22,
+  "agent_observations": 23,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -113,6 +113,11 @@
    "path": "bench/results/a24-prompt-only-20261114/iteration-records-appendix.json",
    "bytes": 1891,
    "sha256": "8259f26b100d006d739026224165db3fe55d921ab3f38e081a828485a3f3fdbd"
+  },
+  {
+   "path": "bench/results/a24-prompt-expanded-20261114/iteration-records-appendix.json",
+   "bytes": 1281,
+   "sha256": "682524d7d40bbdee1ed9664f7f8068d97659ce6caa23ee30e35459cf1fa2a873"
   }
  ],
  "prompt_rubric": {
@@ -126,5 +131,5 @@
   "scope": "src/include/tests/CMakeLists/Dockerfile为本次原生测试源码，材料整理不改变运行源码。"
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "material_parent_commit": "0ded7746f469cab2f41cf99e207b1df6a941c695"
+ "material_parent_commit": "fc10f40a37957eaa3484df68a692224b855df2e7"
 }
