@@ -2,7 +2,7 @@
  "kind": "local-material-integrity-manifest",
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
- "base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
+ "base_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
  "submission_state": "Prompt-only candidate; runtime, build and tests fixed to a24d2cd764027adec7371f268f99ccdca2307032.",
  "material_files": {
   "agent/conversation.json": {
@@ -124,5 +124,7 @@
   "verified_engine_commit": "eab4636980f4e5878e7c793298423e1772716a68",
   "native_run_id": 43453551018,
   "scope": "src/include/tests/CMakeLists/Dockerfile为本次原生测试源码，材料整理不改变运行源码。"
- }
+ },
+ "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
+ "material_parent_commit": "0ded7746f469cab2f41cf99e207b1df6a941c695"
 }
