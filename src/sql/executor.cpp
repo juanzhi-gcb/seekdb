@@ -162,6 +162,7 @@ namespace minivectordb {
       std::size_t literal_count=0;
     };
     std::unordered_map<std::string,SelectPlan> select_plans;
+    std::vector<Row> insert_rows_;
     bool active=false,poisoned=false,busy=false;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -728,7 +729,8 @@ namespace minivectordb {
       sql::Bound bound;
       if(statement.kind!=sql::Statement::Create) {
         schema=lookup_table(store,statement.table);
-        if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
+        if(statement.kind==sql::Statement::Insert)sql::bind_insert_rows_into(statement,schema,insert_rows_);
+        else if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
       }
       if(statement.kind==sql::Statement::Select) {
         sql::NormalizedSql normalized;
@@ -750,7 +752,7 @@ namespace minivectordb {
         return select(statement,schema,bound,sink);
       }
       // Binding and existing-key checks finish before any statement mutation.
-      if(statement.kind==sql::Statement::Insert)for(const auto&r:bound.insert_rows)if(store.get_in(schema.id,std::get<std::int64_t>(r[schema.primary])))throw Error(ErrorCode::Constraint,"duplicate primary key");
+      if(statement.kind==sql::Statement::Insert)for(const auto&r:insert_rows_)if(store.get_in(schema.id,std::get<std::int64_t>(r[schema.primary])))throw Error(ErrorCode::Constraint,"duplicate primary key");
       const bool automatic=!active;
       if(automatic) {
         store.begin();
@@ -783,7 +785,7 @@ namespace minivectordb {
           entries.flush();
         }
         else if(statement.kind==sql::Statement::Insert) {
-          for(const auto&r:bound.insert_rows) {
+          for(const auto&r:insert_rows_) {
             batch.add(std::get<std::int64_t>(r[schema.primary]),encode_row(schema,r));
             maintain(std::get<std::int64_t>(r[schema.primary]),&r);
             ++info.affected_rows;

@@ -153,6 +153,76 @@ namespace minivectordb::sql {
       throw Error(ErrorCode::Type,e.what());
     }
   }
+  void bind_literal_into(const Literal&v,const Column&c,Cell& out) {
+    try {
+      if(c.type==ColumnType::Bigint) {
+        if(v.kind!=Literal::Number)throw Error(ErrorCode::Type,"expected BIGINT literal");
+        out=parse_bigint(v.text);
+        return;
+      }
+      if(c.type==ColumnType::Varchar) {
+        if(v.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VARCHAR literal");
+        validate_text(v.text,c.extent);
+        if(auto* text=std::get_if<std::string>(&out))text->assign(v.text);
+        else out=v.text;
+        return;
+      }
+      auto* vec=std::get_if<std::vector<float>>(&out);
+      if(!vec) {
+        out.emplace<std::vector<float>>();
+        vec=std::get_if<std::vector<float>>(&out);
+      }
+      static thread_local std::vector<double> values;
+      values.clear();
+      if(v.kind==Literal::String) {
+        std::exception_ptr numeric_error;
+        const bool plain=plain_vector(v.text,[&](auto component) {
+          if(numeric_error)return;
+          try {values.push_back(real(component));}
+          catch(const Error&) {numeric_error=std::current_exception();}
+        });
+        if(plain) {
+          if(numeric_error)std::rethrow_exception(numeric_error);
+          make_vector_into(values,c.extent,*vec);
+          return;
+        }
+      }
+      auto components=vector_components(v);
+      values.clear();
+      values.reserve(components.size());
+      for(const auto&part:components)values.push_back(real(part));
+      make_vector_into(values,c.extent,*vec);
+    }
+    catch(const std::invalid_argument&e) {
+      throw Error(ErrorCode::Type,e.what());
+    }
+  }
+  void bind_insert_rows_into(const Statement&s,const Schema&schema,std::vector<Row>& rows) {
+    std::vector<std::size_t> indexes;
+    std::set<std::size_t> seen;
+    if(s.insert_columns.empty()) {
+      for(std::size_t i=0;i<schema.columns.size();++i)indexes.push_back(i);
+    }
+    else {
+      for(const auto&name:s.insert_columns) {
+        auto index=column_index(schema,name);
+        if(!seen.insert(index).second)throw Error(ErrorCode::Schema,"duplicate INSERT column");
+        indexes.push_back(index);
+      }
+      if(indexes.size()!=schema.columns.size())throw Error(ErrorCode::Type,"all columns must be provided; NULL and defaults are unsupported");
+    }
+    std::set<std::int64_t> keys;
+    rows.resize(s.values.size());
+    for(std::size_t r=0;r<s.values.size();++r) {
+      const auto&values=s.values[r];
+      if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
+      Row& row=rows[r];
+      row.resize(schema.columns.size());
+      for(std::size_t i=0;i<values.size();++i)bind_literal_into(values[i],schema.columns[indexes[i]],row[indexes[i]]);
+      auto pk=std::get<std::int64_t>(row[schema.primary]);
+      if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+    }
+  }
   Bound bind(const Statement&s,const Schema&schema) {
     Bound b;
     for(const auto&p:s.predicates) {

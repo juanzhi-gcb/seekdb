@@ -72,8 +72,13 @@ int compare_text(std::string_view a,std::string_view b) {
   return a.size()==b.size()?0:(a.size()<b.size()?-1:1);
 }
 std::vector<float> make_vector(std::span<const double> values,std::size_t dimension) {
+  std::vector<float> result;
+  make_vector_into(values,dimension,result);
+  return result;
+}
+void make_vector_into(std::span<const double> values,std::size_t dimension,std::vector<float>& out) {
   if(values.size()!=dimension) throw std::invalid_argument("VECTOR dimension mismatch");
-  std::vector<float> result; result.reserve(values.size());
+  out.clear();out.reserve(values.size());
   for(double value:values) {
     // IEEE binary32 round-to-nearest overflow begins half an ULP above
     // FLT_MAX. Decimal literals such as 3.4028235e38 still round to FLT_MAX.
@@ -88,8 +93,7 @@ std::vector<float> make_vector(std::span<const double> values,std::size_t dimens
         ? (std::signbit(value)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max())
         : static_cast<float>(value);
     if(!std::isfinite(converted)) throw std::invalid_argument("VECTOR component is not finite float32");
-    result.push_back(converted);
+    out.push_back(converted);
   }
-  return result;
 }
 }
