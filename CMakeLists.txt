@@ -302,3 +302,10 @@ add_executable(insert_literal_tests tests/insert_literal_tests.cpp)
 target_link_libraries(insert_literal_tests PRIVATE minivectordb_core)
 add_test(NAME core_insert_literal COMMAND insert_literal_tests)
 set_tests_properties(core_insert_literal PROPERTIES TIMEOUT 120)
+
+# Bulk binding may use one worker; downstream executables inherit thread flags.
+target_link_libraries(minivectordb_core PUBLIC Threads::Threads)
+add_executable(parallel_bind_tests tests/parallel_bind_tests.cpp)
+target_link_libraries(parallel_bind_tests PRIVATE minivectordb_core)
+add_test(NAME core_parallel_bind COMMAND parallel_bind_tests)
+set_tests_properties(core_parallel_bind PROPERTIES TIMEOUT 120)

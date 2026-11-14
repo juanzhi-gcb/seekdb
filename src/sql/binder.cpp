@@ -9,6 +9,9 @@
 #include <cstdlib>
 #include <new>
 #include <exception>
+#include <thread>
+#include <cfenv>
+#include <system_error>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -244,14 +247,50 @@ namespace minivectordb::sql {
         }
         if(indexes.size()!=schema.columns.size())throw Error(ErrorCode::Type,"all columns must be provided; NULL and defaults are unsupported");
       }
-      std::set<std::int64_t> keys;
-      for(const auto&values:s.values) {
-        if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
-        Row row(schema.columns.size());
-        for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_insert_literal(values[i],schema.columns[indexes[i]]);
-        auto pk=std::get<std::int64_t>(row[schema.primary]);
-        if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
-        b.insert_rows.push_back(std::move(row));
+      const auto count=s.values.size();
+      std::size_t dimensions=0;
+      for(const auto& column:schema.columns)if(column.type==ColumnType::Vector)dimensions+=column.extent;
+      static const bool multiple_cores=std::thread::hardware_concurrency()>1;
+      std::fenv_t environment;
+      if(count>=64 && dimensions>=64 && multiple_cores && std::fegetenv(&environment)==0) {
+        // Only immutable AST/schema reads and independent row construction run
+        // in the worker. Storage mutations and commit barriers remain serial.
+        // Publish errors and duplicate-key checks in original statement order.
+        b.insert_rows.resize(count);
+        std::vector<std::exception_ptr> errors(count);
+        const auto build=[&](std::size_t first,std::size_t last) noexcept {
+          for(auto row_index=first;row_index<last;++row_index)try {
+            const auto& values=s.values[row_index];
+            if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
+            Row row(schema.columns.size());
+            for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_insert_literal(values[i],schema.columns[indexes[i]]);
+            b.insert_rows[row_index]=std::move(row);
+          }catch(...){errors[row_index]=std::current_exception();}
+        };
+        const auto middle=count/2;bool worker_environment=false;
+        try {
+          std::jthread worker([&]{
+            if(std::fesetenv(&environment)==0){worker_environment=true;build(middle,count);}
+          });
+          build(0,middle);worker.join();
+          if(!worker_environment)build(middle,count);
+        }catch(const std::system_error&){build(0,count);}
+        std::set<std::int64_t> keys;
+        for(std::size_t row_index=0;row_index<count;++row_index) {
+          if(errors[row_index])std::rethrow_exception(errors[row_index]);
+          const auto pk=std::get<std::int64_t>(b.insert_rows[row_index][schema.primary]);
+          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+        }
+      } else {
+        std::set<std::int64_t> keys;
+        for(const auto&values:s.values) {
+          if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
+          Row row(schema.columns.size());
+          for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_insert_literal(values[i],schema.columns[indexes[i]]);
+          auto pk=std::get<std::int64_t>(row[schema.primary]);
+          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+          b.insert_rows.push_back(std::move(row));
+        }
       }
     }
     std::set<std::size_t> assigned;
