@@ -8,6 +8,13 @@
 #include <stdexcept>
 #include "lossless_words.hpp"
 namespace minivectordb::detail {
+inline bool no_three_equal(std::string_view input,std::size_t i) {
+  std::uint64_t a,b,c;
+  std::memcpy(&a,input.data()+i,8);std::memcpy(&b,input.data()+i+1,8);std::memcpy(&c,input.data()+i+2,8);
+  const auto different=(a^b)|(b^c);
+  return ((different-UINT64_C(0x0101010101010101))&~different&UINT64_C(0x8080808080808080))==0;
+}
+
 // Bounded lossless byte runs, independent of SQL/types/workload contents.
 // 4-byte decoded size; control <128 = 1..128 literals, else 3..130 repeats.
 // Maximum encoded size is 4 + n + ceil(n/128), n <= 4064.
@@ -17,12 +24,18 @@ inline std::size_t pack_run_frame(std::string_view input,char* output) {
   std::size_t i=0;
   while(i<input.size()) {
     auto end=i+1;
-    while(end<input.size() && end-i<130 && input[end]==input[i])++end;
+    const auto limit=std::min(input.size(),i+130);
+    const auto repeated=UINT64_C(0x0101010101010101)*static_cast<unsigned char>(input[i]);
+    while(limit-end>=8) {std::uint64_t word;std::memcpy(&word,input.data()+end,8);if(word!=repeated)break;end+=8;}
+    while(end<limit && input[end]==input[i])++end;
     if(end-i>=3) {
       *to++=static_cast<char>(128+end-i-3);*to++=input[i];i=end;
     } else {
       const auto begin=i;i=end;
       while(i<input.size() && i-begin<128) {
+        // Ten bounded input bytes cover eight possible triplet starts. The
+        // zero-byte test may conservatively stop early, but never skips a run.
+        if(input.size()-i>=10 && begin+128-i>=8 && no_three_equal(input,i)){i+=8;continue;}
         end=i+1;while(end<input.size() && end-i<3 && input[end]==input[i])++end;
         if(end-i>=3)break;
         i=std::min(end,begin+128);

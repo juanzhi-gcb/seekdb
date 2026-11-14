@@ -7,8 +7,8 @@
 #include <stdexcept>
 int main(int argc,char**){try{
   std::mt19937 rng(20261114);std::size_t checks=0;
-  auto check=[&](const std::string& s){for(bool plane:{false,true}){
-    std::string a,b;const bool x=frozen_codec::pack_bytes(s,a,plane),y=minivectordb::detail::pack_bytes(s,b,plane);
+  auto check=[&](const std::string& s){for(bool plane:{false,true})for(bool compact:{false,true}){
+    std::string a,b;const bool x=frozen_codec::pack_bytes(s,a,plane,compact),y=minivectordb::detail::pack_bytes(s,b,plane,compact);
     if(x!=y||a!=b)throw std::runtime_error("encoded bytes differ at length "+std::to_string(s.size()));
     if(y&&minivectordb::detail::unpack_bytes(b,4064,plane)!=s)throw std::runtime_error("round trip differs");++checks;
   }};
@@ -22,6 +22,7 @@ int main(int argc,char**){try{
     std::string s(64+rng()%4001,'\0');for(auto& c:s)c=char(rng());
     for(unsigned j=0;j<10;++j){auto i=rng()%s.size(),n=std::min<std::size_t>(rng()%150,s.size()-i);std::fill_n(s.begin()+i,n,char(rng()));}check(s);
   }
+  for(unsigned round=0;round<2000;++round){std::string s(1+round%4,'x');for(unsigned j=0;j<128;++j){float x=float(int(rng()%1024)-512)/32; s.append(reinterpret_cast<const char*>(&x),4);}s.append(256,char('a'+round%26));check(s);}
   std::cout<<"wide codec exact-byte and roundtrip checks="<<checks<<" passed\n";
   if(argc>1){
     for(int shape=0;shape<4;++shape){std::vector<std::string> rows(3000,std::string(768,'\0'));
