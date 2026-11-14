@@ -1,6 +1,4 @@
-#define main existing_journal_suite
-#include "journal_batch_tests.cpp"
-#undef main
+#include "journal_batch_test_support.hpp"
 #include <fcntl.h>
 #if !defined(__linux__) || !defined(SYNC_FILE_RANGE_WRITE)
 #error Native validation must exercise the Linux writeback hint
@@ -14,7 +12,6 @@ extern "C" int __wrap_sync_file_range(int fd,off_t off,off_t n,unsigned flags){
  return __real_sync_file_range(fd,off,n,flags);
 }
 int main(){try{
- CHECK(existing_journal_suite()==0);
  std::mt19937 gen(20261115);std::vector<Store::Mutation> batch;
  for(int i=0;i<128;++i){std::string value(2048,'\0');for(auto&c:value)c=char(gen());batch.push_back({i,value});}
  const auto dir=std::filesystem::path("/tmp")/("hint-fault-"+std::to_string(getpid()));std::filesystem::create_directories(dir);
