@@ -24,6 +24,7 @@ class Int8BoundCache {
   std::unique_ptr<double[]> errors_,scales_;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
+  unsigned block_shift_=0;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -165,7 +166,7 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();scales_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;
+    source_=nullptr;rows_=dimension_=padded_=0;block_shift_=0;
   }
   std::size_t bytes() const noexcept {return rows_*(padded_+16)+(rows_/16)*sizeof(double);}
   bool ready() const noexcept {return source_!=nullptr;}
@@ -206,7 +207,10 @@ public:
       errors_[block+lane]=finish_error(error,padded);
     }
     }
-    rows_=count;dimension_=dimension;padded_=padded;source_=source.data();return true;
+    rows_=count;dimension_=dimension;padded_=padded;source_=source.data();
+    const auto block_bytes=16*dimension*sizeof(float);
+    block_shift_=std::has_single_bit(block_bytes)?std::countr_zero(block_bytes):0;
+    return true;
   }
   Query query(std::span<const float> vector) const {
     Query result;
@@ -232,8 +236,18 @@ public:
     const auto address=reinterpret_cast<std::uintptr_t>(original.data());
     if(address<begin || address-begin>=rows_*dimension_*sizeof(float))return mask;
     const auto offset=address-begin;
-    if(offset%(16*dimension_*sizeof(float)))return mask;
-    const auto row=offset/(dimension_*sizeof(float));
+    // Preserve the ownership/alignment proof while avoiding two variable
+    // divisions per screened block. Power-of-two strides use exact bit tests;
+    // every other dimension uses one quotient and checks the full remainder.
+    std::size_t row;
+    if(block_shift_) {
+      if(offset&((std::size_t(1)<<block_shift_)-1))return mask;
+      row=(offset>>block_shift_)*16;
+    } else {
+      const auto stride=16*dimension_*sizeof(float),block=offset/stride;
+      if(block*stride!=offset)return mask;
+      row=block*16;
+    }
     std::array<std::int32_t,16> dots{};
 #if defined(__x86_64__) && defined(__GNUC__)
     if(native&&native_vnni()&&!force_avx2)dots_native(codes_.get()+row*padded_,query.words.data(),padded_/4,dots.data());

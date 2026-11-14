@@ -85,6 +85,8 @@ void run_case(std::size_t dimension,unsigned mode) {
     std::vector<float> copy(storage.begin(),storage.begin()+16*dimension);
     CHECK(cache.survivors(encoded,0,copy,65535)==65535);
     CHECK(cache.survivors(encoded,0,{storage.data()+1,16*dimension},65535)==65535);
+    for(std::size_t lane=1;lane<16;++lane)
+      CHECK(cache.survivors(encoded,0,{storage.data()+lane*dimension,16*dimension},65535)==65535);
     const auto round=std::fegetround();CHECK(std::fesetround(FE_DOWNWARD)==0);
     CHECK(!cache.query(q).valid);CHECK(std::fesetround(round)==0);
   }
