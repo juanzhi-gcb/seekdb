@@ -6,7 +6,7 @@
 namespace {
 std::uint64_t compared=0,rejections=0,native_masks=0;
 float component(std::mt19937& gen,unsigned mode) {
-  if(mode==0)return float(int(gen()%131071)-65535)/4096.f;
+  if(mode==0||mode>=6)return float(int(gen()%131071)-65535)/4096.f;
   if(mode==1)return arbitrary_finite(gen);
   if(mode==2)return std::bit_cast<float>((std::uint32_t(gen())&0x807fffffu)|0x7f000000u);
   if(mode==3)return std::bit_cast<float>(std::uint32_t(gen())&0x807fffffu);
@@ -20,6 +20,8 @@ void run_case(std::size_t dimension,unsigned mode) {
   for(std::size_t i=0;i<rows;++i) {
     std::vector<float> values(dimension);
     for(auto& v:values)v=component(gen,mode);
+    if(mode==6 && i==112)std::fill(values.begin(),values.end(),1000000.f);
+    if(mode==7)for(auto& v:values)v=std::ldexp(v,int((i/16)%5)*12-24);
     data.push_back({std::int64_t(rows-i)-20,std::move(values)});
   }
   const auto full=rows/16*16;
@@ -91,7 +93,7 @@ void run_case(std::size_t dimension,unsigned mode) {
 }
 int main(){try{
   for(std::size_t dimension:{32u,127u,128u,129u,1024u,4096u})
-    for(unsigned mode=0;mode<6;++mode)run_case(dimension,mode);
+    for(unsigned mode=0;mode<8;++mode)run_case(dimension,mode);
   CHECK(rejections>1000);
   std::cout<<"{\"native_vnni\":"<<(detail::Int8BoundCache::native_vnni()?"true":"false")
            <<",\"native_avx2\":"<<(detail::Int8BoundCache::available()?"true":"false")

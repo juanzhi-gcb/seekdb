@@ -6,8 +6,9 @@ linux=general.linux
 continuous=general.continuous
 def generate(rows,queries,seed,filter_type):
     shape=os.environ['MVDB_SCREEN_SHAPE']
-    if shape=='grid':return general.original(rows,queries,seed,filter_type)
-    w=continuous(rows,queries,seed,filter_type)
+    w=general.original(rows,queries,seed,filter_type) if shape=='grid' else continuous(rows,queries,seed,filter_type)
+    body=int(os.environ.get('MVDB_SCREEN_BODY','256'))
+    if body!=256:w['bodies']=['record-'+str(i)+'-'+chr(97+i%26)*body for i in range(rows)]
     rng=random.Random(seed^0x61e5)
     def f32(x): return struct.unpack('<f',struct.pack('<f',x))[0]
     if shape=='positive':
@@ -18,7 +19,7 @@ def generate(rows,queries,seed,filter_type):
         w['query_vectors']=[[f32(1+rng.random()*0.001) for _ in range(128)] for _ in range(queries)]
     elif shape=='outlier':
         w['vectors'][-1]=[f32(1000000) for _ in range(128)]
-    elif shape!='continuous': raise ValueError(shape)
+    elif shape not in ('continuous','grid'): raise ValueError(shape)
     order=list(range(rows));rng.shuffle(order)
     literal=lambda v:json.dumps(v,separators=(',',':'))
     group=lambda g:str(g) if filter_type=='bigint' else "'category-"+str(g)+"'"

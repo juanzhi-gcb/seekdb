@@ -28,9 +28,14 @@ sudo sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" >
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test > "$result/ctest.log" 2>&1
 python3 -B bench/vendor/seekdb-round2-f4d4e26/protocol_check/run.py --image mvdb:newa24-candidate --output "$result/public" > "$result/public.log" 2>&1
 g++ -std=c++20 -O2 -ffp-contract=off bench/jsonl_oracle.cpp -o "$scratch/oracle"
-for profile in grid-bigint grid-varchar continuous-bigint cluster-bigint outlier-bigint; do
-  shape=${profile%-*};schema=${profile#*-}
-  sudo env MVDB_SCREEN_SHAPE="$shape" PYTHONPATH="$repo/bench" python3 -B bench/newa24/distribution.py --reference-image "$(cat "$result/a24-image.txt")" --candidate-image "$(cat "$result/candidate-image.txt")" --oracle-bin "$scratch/oracle" --output "$result/$profile" --data-root "$scratch/data/contract" --temp-root "$scratch/tmp/contract" --rounds 3 --rows 10000 --queries 1000 --warmup 10 --filter-type "$schema" > "$result/$profile.log" 2>&1
+for profile in grid-bigint grid-varchar continuous-bigint cluster-bigint outlier-bigint small-short-bigint large-grid-bigint large-outlier-bigint; do
+  shape=${profile%-*};schema=${profile##*-};rows=10000;queries=1000;body=256
+  case "$profile" in
+    small-short-*) shape=grid;rows=1000;body=0;;
+    large-grid-*) shape=grid;rows=50000;queries=300;;
+    large-outlier-*) shape=outlier;rows=50000;queries=300;;
+  esac
+  sudo env MVDB_SCREEN_SHAPE="$shape" MVDB_SCREEN_BODY="$body" PYTHONPATH="$repo/bench" python3 -B bench/newa24/distribution.py --reference-image "$(cat "$result/a24-image.txt")" --candidate-image "$(cat "$result/candidate-image.txt")" --oracle-bin "$scratch/oracle" --output "$result/$profile" --data-root "$scratch/data/contract" --temp-root "$scratch/tmp/contract" --rounds 3 --rows "$rows" --queries "$queries" --warmup 10 --filter-type "$schema" > "$result/$profile.log" 2>&1
 done
 sudo find "$result" -name oracle-input.bin -delete
 python3 - "$result" <<'PY'
