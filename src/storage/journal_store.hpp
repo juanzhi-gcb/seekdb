@@ -69,7 +69,16 @@ class JournalStore {
   static std::uint64_t get(const unsigned char* p,unsigned n=8){std::uint64_t v=0;for(unsigned i=0;i<n;++i)v|=std::uint64_t(p[i])<<(8*i);return v;}
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
-  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
+  // Data and metadata needed to retrieve it (including file length) reach
+  // stable storage before a successful commit. Directory creation still uses
+  // the store's fsync path. Preserve both Ordered barriers and EINTR retries.
+  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);
+#if defined(__linux__)
+    const int result=::fdatasync(fd_);
+#else
+    const int result=::fsync(fd_);
+#endif
+    if(result==0)return;if(errno!=EINTR)io("journal data sync");}}
   void write_raw(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
     if(!framed_&&!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;

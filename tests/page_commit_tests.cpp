@@ -74,3 +74,8 @@ int main(){try{
 #endif
  std::filesystem::remove_all(dir);std::cout<<"page commit: both policies, pending reads, orphan/torn-tail recovery, reopen, legacy read/write and corruption passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+#if defined(__linux__)
+extern "C" int __real_fdatasync(int);
+extern "C" int __wrap_fdatasync(int fd){if(armed&&++syncs==fail_sync){errno=EIO;return -1;}return __real_fdatasync(fd);}
+#endif
