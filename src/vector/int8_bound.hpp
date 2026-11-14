@@ -22,6 +22,7 @@ class Int8BoundCache {
   std::unique_ptr<std::int8_t[]> codes_;
   std::unique_ptr<std::int32_t[]> norms_,sums_;
   std::unique_ptr<double[]> errors_,scales_;
+  double shared_scale_=1;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
@@ -165,9 +166,9 @@ public:
   }
   void clear() noexcept {
     codes_.reset();norms_.reset();sums_.reset();errors_.reset();scales_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;
+    source_=nullptr;rows_=dimension_=padded_=0;shared_scale_=1;
   }
-  std::size_t bytes() const noexcept {return rows_*(padded_+16)+(rows_/16)*sizeof(double);}
+  std::size_t bytes() const noexcept {return rows_*(padded_+16)+(scales_?(rows_/16)*sizeof(double):0);}
   bool ready() const noexcept {return source_!=nullptr;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
              std::size_t budget,bool portable_test=false) {
@@ -184,6 +185,10 @@ public:
       errors_=std::make_unique<double[]>(count);
       scales_=std::make_unique<double[]>(count/16);
     }catch(const std::bad_alloc&){clear();return false;}
+    // Homogeneous magnitudes use the original shared quantizer. Only
+    // heterogeneous blocks pay for local scales. This chooses a quantizer,
+    // never an approximate search: each row's error is recomputed below.
+    double largest=0,smallest=std::numeric_limits<double>::infinity();
     for(std::size_t block=0;block<count;block+=16) {
       double maximum=0;
       for(std::size_t i=0;i<16*dimension;++i) {
@@ -191,8 +196,16 @@ public:
         if(!std::isfinite(value)){clear();return false;}
         maximum=std::max(maximum,std::abs(static_cast<double>(value)));
       }
-      const double scale=maximum>0?maximum/127:1;
-      scales_[block/16]=scale;
+      scales_[block/16]=maximum;
+      largest=std::max(largest,maximum);smallest=std::min(smallest,maximum);
+    }
+    const bool shared=largest==0 || (smallest>0 && largest/smallest<=1.25);
+    shared_scale_=largest>0?largest/127:1;
+    if(shared)scales_.reset();
+    else for(std::size_t block=0;block<count/16;++block)
+      scales_[block]=scales_[block]>0?scales_[block]/127:1;
+    for(std::size_t block=0;block<count;block+=16) {
+      const double scale=scales_?scales_[block/16]:shared_scale_;
       for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
@@ -245,7 +258,8 @@ public:
     for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
       for(std::size_t k=0;k<4;++k)
         dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
-    const double scale=scales_[row/16],scale_square=scale*scale,cross=2*scale*query.scale;
+    const double scale=scales_?scales_[row/16]:shared_scale_;
+    const double scale_square=scale*scale,cross=2*scale*query.scale;
     // Upward radius expansion covers original sequential-double subtraction,
     // square/add, sqrt rounding and equality/tie ordering, n <= 4096.
     const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
