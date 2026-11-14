@@ -1,0 +1,21 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Actual current user hypothesis and previously completed runtime identity check; no new formal result asserted.",
+ "conversations": [
+  {
+   "id": "u101",
+   "source": "user",
+   "content": "这个差300分y应该是机器bbi波动\n继续在这些方向优化性能\n同时改好prompt",
+   "scope": "本轮真实消息末段原文；同条平台三项结果见formal_feedback。保留输入中的原有文字。"
+  }
+ ],
+ "experiments": [
+  {
+   "id": "e142",
+   "source": "agent_actual_check_summary",
+   "output": "42f69e8320dcd8c802614f10cfb0699aa7551d2c的CI43568532070通过a24运行身份核验：src、include、tests、Dockerfile、CMakeLists.txt与a24d2cd764027adec7371f268f99ccdca2307032一致。用户随后报告E3615.639045，对历史3977.995012为-9.109%。该条反馈没有再次给SHA；按此前交付上下文关联42f69e8。在上述版本关联成立时，相同源码排除了源码差异这一解释，不能据此证明机器波动；CPU能力、正式输入和分项T/B/M未提供。后续候选采用同机交替三轮比较，目前不把未完成运行写成结果。"
+  }
+ ],
+ "agent_observations": []
+}

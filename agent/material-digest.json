@@ -6,12 +6,12 @@
  "submission_state": "Self-contained Prompt experiment; runtime remains a24. No official Prompt score.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 128871,
-   "sha256": "a7d5cc260fb3beff6559119c309f4c4c1c7f5819da791ada2d6d4aa805a63c8a"
+   "bytes": 130338,
+   "sha256": "5a152ef14a4ef7724d16cdbb890dd7277f0dd49c6eb0686cd3362895abf9eb71"
   },
   "conversation.json": {
-   "bytes": 128871,
-   "sha256": "a7d5cc260fb3beff6559119c309f4c4c1c7f5819da791ada2d6d4aa805a63c8a"
+   "bytes": 130338,
+   "sha256": "5a152ef14a4ef7724d16cdbb890dd7277f0dd49c6eb0686cd3362895abf9eb71"
   }
  },
  "before_material": {
@@ -27,8 +27,8 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 100,
-  "experiments": 46,
+  "user_records": 101,
+  "experiments": 47,
   "agent_observations": 24,
   "retrospective_cases": 0
  },
@@ -122,15 +122,20 @@
    "path": "bench/results/a24-prompt-audit-20261114/iteration-records-appendix.json",
    "bytes": 1135,
    "sha256": "f4e8544e9a9f54bc4d33f56bf4d850d0c4996924c0537b61f9de21d046aa97f8"
+  },
+  {
+   "path": "bench/results/post-3615-20261114/prompt-feedback-appendix.json",
+   "bytes": 1306,
+   "sha256": "8c0ed61d25c04c46d5680bbf1338f23acf4ebe902127fc7b934709cc8f27c995"
   }
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 12,
+  "instances": 13,
   "note": "Navigation only, no scores or score suggestions."
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "material_parent_commit": "59f07ad28a0b0e6e379d2c1ddd59c3a3b084c081",
+ "material_parent_commit": "f3bdd126cdf6576808cc62afb087a2bd46c549ec",
  "historical_source_identities": [
   {
    "original_identity": {

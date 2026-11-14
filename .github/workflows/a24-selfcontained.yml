@@ -33,7 +33,9 @@ jobs:
           for field in ['conversations','experiments','agent_observations']:
               assert d[field][:len(old[field])]==old[field],field
           supplement=json.loads(Path('bench/results/post-2882-20261113/iteration-records-appendix.json').read_text())
-          assert d['experiments'][len(old['experiments']):]==[next(e for e in supplement['experiments'] if e['id']=='e137')]
+          current=json.loads(Path('bench/results/post-3615-20261114/prompt-feedback-appendix.json').read_text())
+          assert d['conversations'][len(old['conversations']):]==current['conversations']
+          assert d['experiments'][len(old['experiments']):]==[next(e for e in supplement['experiments'] if e['id']=='e137')]+current['experiments']
           assert d['layout_version']=='self-contained-20261114'
           assert d['source_identity']['verified_engine_commit']=='a24d2cd764027adec7371f268f99ccdca2307032'
           assert set(d['technical_appendices'])=={'algorithm','inputs','decisions'}
