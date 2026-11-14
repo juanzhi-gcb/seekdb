@@ -74,7 +74,7 @@ bool has_avx512() noexcept {
 }
 std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     std::span<const float> query,std::size_t k,const BlockVectorSource& source,bool allow_wide,
-    bool allow_lower_bound,BoundScreenStats* screen_stats,const Int8BoundCache* integer_cache) {
+    bool allow_lower_bound,BoundScreenStats* screen_stats,const Int8BoundCache* integer_cache,const BlockKeyReader& key_reader) {
   for(float component:query)if(!std::isfinite(component))throw std::invalid_argument("non-finite query component");
   if(k==0)return {};
   auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance || (a.distance==b.distance&&a.key<b.key);};
@@ -160,7 +160,7 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
         }
     }
     for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
-      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
+      Neighbor candidate{key_reader?key_reader(lane):keys[lane],std::sqrt(sums[lane])};
       if(heap.size()<k)heap.push(candidate);
       else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
     }

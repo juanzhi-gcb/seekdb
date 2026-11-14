@@ -330,6 +330,7 @@ namespace minivectordb {
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
+        std::size_t key_base=0;
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
           std::array<std::int64_t,16> keys{};
           std::vector<float> tail;
@@ -344,7 +345,7 @@ namespace minivectordb {
               mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
               info.rows_examined+=selected;info.typed_rows_examined+=selected;
               info.distances_computed+=selected;++info.certified_blocks_examined;
-              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+              // Certified predicates need no per-lane keys before distance screening.
             } else
             for(std::size_t lane=0;lane<count;++lane) {
               if(r+lane<begin || r+lane>=end)continue;
@@ -363,10 +364,12 @@ namespace minivectordb {
               }
               block=tail;
             } else block=typed_snapshot.block(r);
+            key_base=r;
             visit({keys.data(),count},block,mask);
           }
         },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
-          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
+          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr,
+          bulk?detail::BlockKeyReader([&](std::size_t lane){return typed_snapshot.key(key_base+lane);}):detail::BlockKeyReader{});
         info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
