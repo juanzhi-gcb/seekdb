@@ -2,7 +2,7 @@
 #include "minivectordb/store.hpp"
 #include "packed_codec.hpp"
 #include "page_checksum.hpp"
-#include <map>
+#include "offset_directory.hpp"
 #include <vector>
 #include <limits>
 #include <bit>
@@ -25,7 +25,7 @@ class JournalStore {
   int fd_;
   CommitSyncPolicy policy_;
   std::uint64_t head_=0,durable_=0,end_=8192,generation_=0;
-  std::map<Key,std::uint64_t> index_;
+  OffsetDirectory index_;
   std::size_t empty_entries_=0;
   std::vector<Undo> undo_;
   mutable std::vector<Cached> cache_;
@@ -70,8 +70,8 @@ class JournalStore {
   auto reconstruct(std::uint64_t head,std::uint64_t extent)const{
     std::vector<std::uint64_t> positions;
     for(auto at=head;at;){positions.push_back(at);at=record(at,extent).previous;}
-    std::map<Key,std::uint64_t> result;
-    for(auto i=positions.rbegin();i!=positions.rend();++i){auto r=record(*i,extent);if(r.flags==2)result.erase(r.key);else result[r.key]=*i;}
+    OffsetDirectory result;
+    for(auto i=positions.rbegin();i!=positions.rend();++i){auto r=record(*i,extent);if(r.flags==2)result.erase(r.key);else result.set(r.key,*i);}
     return result;
   }
   Page root(std::uint64_t generation)const{
@@ -82,7 +82,7 @@ class JournalStore {
     const auto head=get(p.data()+16),end=get(p.data()+24);return end>=8192 && end<=bytes && (!head || (head>=8192 && head<=end && header_size<=end-head));
   }
   void assign(std::uint64_t& slot,std::uint64_t value){if(!slot&&value)--empty_entries_;else if(slot&&!value)++empty_entries_;slot=value;}
-  void purge_empty(){if(!empty_entries_)return;for(auto i=index_.begin();i!=index_.end();)if(!i->second){i=index_.erase(i);--empty_entries_;}else ++i;}
+  void purge_empty(){if(!empty_entries_)return;index_.purge_zero();empty_entries_=0;}
 public:
   static bool magic(const unsigned char* p){return std::memcmp(p,"MVDBJL08",8)==0;}
   JournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy):fd_(fd),policy_(policy){
@@ -96,7 +96,7 @@ public:
   std::uint64_t head()const noexcept{return head_;}
   void begin(){undo_.clear();}
   std::optional<std::string> value(std::uint64_t space,std::int64_t key)const{
-    const auto it=index_.find({space,key});if(it==index_.end()||!it->second)return {};return value_at(space,key,it->second);
+    const auto it=index_.find({space,key});if(!it||!*it)return {};return value_at(space,key,*it);
   }
   std::string value_at(std::uint64_t space,std::int64_t key,std::uint64_t at)const{
     const auto r=record(at,end_);if(r.key!=Key{space,key}||r.flags==2)fail();auto payload=read(at+header_size,std::size_t(r.length));
@@ -116,15 +116,15 @@ public:
       encoded.append(reinterpret_cast<const char*>(h.data()),h.size());encoded.append(payload);updates.push_back({{space,c->key},at});previous=at;
     }
     // Allocate all directory/undo storage before touching disk or live offsets.
-    undo_.reserve(undo_.size()+updates.size());for(const auto& u:updates)if(index_.try_emplace(u.first,0).second)++empty_entries_;
+    undo_.reserve(undo_.size()+updates.size());for(const auto& u:updates)if(index_.ensure(u.first))++empty_entries_;
     write(end_,encoded);end_+=encoded.size();
-    for(std::size_t i=0;i<updates.size();++i){auto& current=index_.find(updates[i].first)->second;undo_.push_back({updates[i].first,current,head_});assign(current,order[i]->value?updates[i].second:0);head_=updates[i].second;}
+    for(std::size_t i=0;i<updates.size();++i){auto& current=*index_.find(updates[i].first);undo_.push_back({updates[i].first,current,head_});assign(current,order[i]->value?updates[i].second:0);head_=updates[i].second;}
   }
   void restore(std::uint64_t target){
     if(target==head_)return;
     const bool ancestor=std::any_of(undo_.begin(),undo_.end(),[&](auto&u){return u.head==target;});
     if(!ancestor){auto rebuilt=reconstruct(target,end_);index_.swap(rebuilt);empty_entries_=0;head_=target;undo_.clear();return;}
-    while(head_!=target){auto u=undo_.back();undo_.pop_back();assign(index_.find(u.key)->second,u.value);head_=u.head;}
+    while(head_!=target){auto u=undo_.back();undo_.pop_back();assign(*index_.find(u.key),u.value);head_=u.head;}
   }
   void rollback(){restore(durable_);undo_.clear();purge_empty();}
   void commit(){
@@ -133,8 +133,7 @@ public:
     generation_=next;durable_=head_;undo_.clear();purge_empty();
   }
   auto snapshot(std::uint64_t space)const{
-    std::vector<std::pair<std::int64_t,std::uint64_t>> rows;
-    for(auto it=index_.lower_bound({space,INT64_MIN});it!=index_.end()&&it->first.first==space;++it)if(it->second)rows.push_back({it->first.second,it->second});return rows;
+    return index_.snapshot(space);
   }
 };
 }

@@ -271,3 +271,7 @@ add_executable(projection_probation_tests tests/projection_probation_tests.cpp)
 target_link_libraries(projection_probation_tests PRIVATE minivectordb_core)
 add_test(NAME core_projection_probation COMMAND projection_probation_tests)
 set_tests_properties(core_projection_probation PROPERTIES TIMEOUT 120)
+
+add_executable(offset_directory_tests tests/offset_directory_tests.cpp)
+add_test(NAME core_offset_directory COMMAND offset_directory_tests)
+set_tests_properties(core_offset_directory PROPERTIES TIMEOUT 120)
