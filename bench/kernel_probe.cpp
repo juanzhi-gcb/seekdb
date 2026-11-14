@@ -15,7 +15,8 @@ int main(){
  for(unsigned round=0;round<3;++round){uint64_t checked=0,rejected=0,exact=0,hash=0;const auto start=std::chrono::steady_clock::now();
  for(auto&query:queries){minivectordb::detail::BoundScreenStats stats;size_t base=0;
  auto result=minivectordb::detail::exact_top_k_transposed_validated_candidates(query,10,[&](const auto&visit){
-   for(size_t r=0;r<n;r+=16){std::array<int64_t,16> keys{};base=r;
+   std::array<int64_t,16> keys{};
+   for(size_t r=0;r<n;r+=16){base=r;
 #ifndef LAZY_KEYS
      for(size_t k=0;k<16;++k)keys[k]=scalar[2*(r+k)];
 #endif
