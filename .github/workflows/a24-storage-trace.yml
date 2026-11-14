@@ -1,0 +1,35 @@
+name: A24 storage request and sync attribution
+on:
+  push:
+    branches: ['codex/a24-storage-trace-20261114']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        route: [stack, extent]
+        include:
+          - route: stack
+            candidate: e31a7e930372b593f096ee852fb7f4e62fa78ed0
+          - route: extent
+            candidate: 5c8aa0683a170459c3995de8250fc3f3de82fe74
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Instrumented attribution only; never official score evidence
+        env:
+          CANDIDATE_REF: ${{ matrix.candidate }}
+        run: bash bench/storage-latency/run.sh
+      - name: Preserve diagnostics including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: storage-trace-${{ matrix.route }}-${{ github.run_id }}
+          path: storage-trace-results/
+          retention-days: 14
