@@ -103,6 +103,50 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
   // deliberately loose absolute allowance for gradual float underflow.
   const double error_factor=1+std::ldexp(static_cast<double>(query.size()+8),wide?-49:-20);
   const double absolute_allowance=wide?0:static_cast<double>(query.size()+8)*std::numeric_limits<float>::min();
+  const bool compact_sparse=has_avx2();
+  std::array<std::int64_t,16> pending_keys{};
+  std::vector<float> pending;
+  std::size_t pending_count=0;
+  auto evaluate=[&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
+    if(screen_stats)screen_stats->exact_lanes+=std::popcount(mask);
+    std::array<double,16> sums{};
+    {
+      profile::detail::Scope timer(&profile::Snapshot::vector_distance);
+      const auto count=std::popcount(mask);
+      for(int i=1;i<count;++i)profile::detail::count(&profile::Snapshot::vector_distance);
+#if defined(__x86_64__) && defined(__GNUC__)
+      if(count>=4 && has_avx2()) {
+        if(wide)batch16_transposed_avx512(values.data(),query.data(),query.size(),sums.data());
+        else batch16_transposed_avx2(values.data(),query.data(),query.size(),sums.data());
+      }
+      else
+#endif
+      for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane))
+        for(std::size_t d=0;d<query.size();++d) {
+          const double delta=static_cast<double>(query[d])-static_cast<double>(values[d*16+lane]);
+          sums[lane]+=delta*delta;
+        }
+    }
+    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
+      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
+      if(heap.size()<k)heap.push(candidate);
+      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    }
+    if(screen && heap.size()==k) {
+      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
+      // Outward rounding of its square also protects sqrt-rounding ties.
+      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
+    }
+  };
+  auto flush_pending=[&]() {
+    if(!pending_count)return;
+    evaluate({pending_keys.data(),pending_count},pending,
+             static_cast<std::uint16_t>((1u<<pending_count)-1));
+    pending_count=0;
+  };
   source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
@@ -140,39 +184,22 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
 #endif
     }
     if(!mask)return;
-    if(screen_stats)screen_stats->exact_lanes+=std::popcount(mask);
-    std::array<double,16> sums{};
-    {
-      profile::detail::Scope timer(&profile::Snapshot::vector_distance);
-      const auto count=std::popcount(mask);
-      for(int i=1;i<count;++i)profile::detail::count(&profile::Snapshot::vector_distance);
-#if defined(__x86_64__) && defined(__GNUC__)
-      if(count>=4 && has_avx2()) {
-        if(wide)batch16_transposed_avx512(values.data(),query.data(),query.size(),sums.data());
-        else batch16_transposed_avx2(values.data(),query.data(),query.size(),sums.data());
+    const auto survivors=std::popcount(mask);
+    // Deferred winners can only leave the current threshold too permissive.
+    // Copy callback-owned values, then evaluate complete SIMD batches exactly.
+    if(compact_sparse && survivors<8 && heap.size()==k) {
+      if(pending.empty())pending.resize(16*query.size(),0.f);
+      for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
+        pending_keys[pending_count]=keys[lane];
+        for(std::size_t d=0;d<query.size();++d)
+          pending[d*16+pending_count]=values[d*16+lane];
+        if(++pending_count==16)flush_pending();
       }
-      else
-#endif
-      for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane))
-        for(std::size_t d=0;d<query.size();++d) {
-          const double delta=static_cast<double>(query[d])-static_cast<double>(values[d*16+lane]);
-          sums[lane]+=delta*delta;
-        }
+      return;
     }
-    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
-      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
-      if(heap.size()<k)heap.push(candidate);
-      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
-    }
-    if(screen && heap.size()==k) {
-      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
-      // Outward rounding of its square also protects sqrt-rounding ties.
-      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
-    }
+    evaluate(keys,values,mask);
   });
+  flush_pending();
   std::vector<Neighbor> result;result.reserve(heap.size());
   while(!heap.empty()){result.push_back(heap.top());heap.pop();}
   std::reverse(result.begin(),result.end());return result;

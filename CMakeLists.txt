@@ -271,3 +271,8 @@ add_executable(projection_probation_tests tests/projection_probation_tests.cpp)
 target_link_libraries(projection_probation_tests PRIVATE minivectordb_core)
 add_test(NAME core_projection_probation COMMAND projection_probation_tests)
 set_tests_properties(core_projection_probation PROPERTIES TIMEOUT 120)
+
+add_executable(survivor_batch_tests tests/survivor_batch_tests.cpp)
+target_link_libraries(survivor_batch_tests PRIVATE minivectordb_core)
+add_test(NAME core_survivor_batch COMMAND survivor_batch_tests)
+set_tests_properties(core_survivor_batch PROPERTIES TIMEOUT 120)
