@@ -136,6 +136,8 @@ class Int8BoundCache {
   }
 #endif
 public:
+  // Per-search state owned by the caller, never shared by cached vectors.
+  struct Radius {double value=-1,expanded=0;};
   struct Query {
     std::vector<std::uint32_t> words;
     double scale=1,error=0,norm_scaled=0;
@@ -226,7 +228,7 @@ public:
     result.valid=true;return result;
   }
   std::uint16_t survivors(const Query& query,double radius,std::span<const float> original,
-                          std::uint16_t mask,bool native=true,bool force_avx2=false) const {
+                          std::uint16_t mask,bool native=true,bool force_avx2=false,Radius* reuse=nullptr) const {
     if(!query.valid || !std::isfinite(radius) || radius<0 || original.size()!=16*dimension_)return mask;
     const auto begin=reinterpret_cast<std::uintptr_t>(source_);
     const auto address=reinterpret_cast<std::uintptr_t>(original.data());
@@ -248,7 +250,12 @@ public:
     const double scale=scales_[row/16],scale_square=scale*scale,cross=2*scale*query.scale;
     // Upward radius expansion covers original sequential-double subtraction,
     // square/add, sqrt rounding and equality/tie ordering, n <= 4096.
-    const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
+    double expanded;
+    if(reuse && reuse->value==radius)expanded=reuse->expanded;
+    else {
+      expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
+      if(reuse){reuse->value=radius;reuse->expanded=expanded;}
+    }
 #if defined(__x86_64__) && defined(__GNUC__)
     if(native&&native_vnni()&&!force_avx2)return mask&std::uint16_t(~reject_native(dots.data(),norms_.get()+row,sums_.get()+row,
                       errors_.get()+row,scale_square,cross,query.norm_scaled,expanded));

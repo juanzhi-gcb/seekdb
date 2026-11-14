@@ -37,6 +37,16 @@ void run_case(std::size_t dimension,unsigned mode) {
     if(trial==0)q=data[0].value;
     else for(auto& v:q)v=component(gen,mode);
     auto encoded=cache.query(q);CHECK(encoded.valid);
+    detail::Int8BoundCache::Radius reused;
+    // Repeated, increasing and decreasing radii must match uncached bounds.
+    for(double radius:{0.,1.,1.,1000.,1.,0.,10000000.}) {
+      for(std::size_t at=0;at<full;at+=16) {
+        const std::span<const float> block(storage.data()+at*dimension,16*dimension);
+        CHECK(cache.survivors(encoded,radius,block,0xffff,true,false,&reused)==
+              cache.survivors(encoded,radius,block,0xffff));
+      }
+    }
+
     auto predicate=[&](std::int64_t key){return trial%2==0 || key%3!=0;};
     detail::BlockVectorSource blocks=[&](const detail::BlockVectorVisitor& visit) {
       std::array<std::int64_t,16> keys{};std::vector<float> tail(dimension*16,0);

@@ -94,6 +94,8 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
   Int8BoundCache::Query integer_query;
   if(allow_lower_bound && allow_wide && integer_cache)try {integer_query=integer_cache->query(query);}catch(const std::bad_alloc&) {}
   bool integer_screen=integer_query.valid;
+  Int8BoundCache::Radius integer_radius;
+  double fp_radius=-1;
   if(screen_stats)screen_stats->environment_supported=screen||integer_screen;
   unsigned trial_lanes=0,trial_rejected=0;
   double rejection_bound=std::numeric_limits<double>::infinity();
@@ -109,7 +111,7 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     if(!mask)return;
     if(integer_screen && heap.size()==k && std::popcount(mask)>=8) {
       const auto before=std::popcount(mask);
-      mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask);
+      mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask,true,false,&integer_radius);
       const auto removed=before-std::popcount(mask);
       trial_lanes+=static_cast<unsigned>(before);trial_rejected+=static_cast<unsigned>(removed);
       if(screen_stats){screen_stats->integer_screened+=before;screen_stats->integer_rejected+=removed;}
@@ -119,6 +121,17 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       }
     } else if(screen && heap.size()==k && std::popcount(mask)>=8) {
 #if defined(__x86_64__) && defined(__GNUC__)
+      // Update only when this FP screen is actually used and the radius changes.
+      // Heap membership/tie-key changes at the same distance leave the bound identical.
+      if(fp_radius!=heap.top().distance) {
+        fp_radius=heap.top().distance;
+      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
+      // Outward rounding of its square also protects sqrt-rounding ties.
+      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
+      }
       std::array<float,16> lower{};
       if(wide)batch16_lower_bound_avx512(values.data(),query.data(),query.size(),lower.data());
       else batch16_estimate_avx2(values.data(),query.data(),query.size(),lower.data());
@@ -164,14 +177,7 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       if(heap.size()<k)heap.push(candidate);
       else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
     }
-    if(screen && heap.size()==k) {
-      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
-      // Outward rounding of its square also protects sqrt-rounding ties.
-      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
-    }
+
   });
   std::vector<Neighbor> result;result.reserve(heap.size());
   while(!heap.empty()){result.push_back(heap.top());heap.pop();}
