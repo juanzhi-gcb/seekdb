@@ -103,10 +103,52 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
   // deliberately loose absolute allowance for gradual float underflow.
   const double error_factor=1+std::ldexp(static_cast<double>(query.size()+8),wide?-49:-20);
   const double absolute_allowance=wide?0:static_cast<double>(query.size()+8)*std::numeric_limits<float>::min();
+  // A selective filter often leaves only one or two lanes in each block.
+  // Keep the immutable transposed cache, but coalesce those survivors into a
+  // bounded scratch tile before exact SIMD evaluation. No candidate is omitted
+  // and each row retains the reference dimension-by-dimension FP64 sum.
+  std::vector<float> sparse_values;
+  std::array<std::int64_t,16> sparse_keys{};
+  std::size_t sparse_count=0;
+  bool sparse_enabled=has_avx2() && query.size()>=32 && query.size()<=4096;
+  const auto update_bound=[&]{
+    if(screen && heap.size()==k) {
+      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
+      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
+    }
+  };
+  const auto flush_sparse=[&]{
+    if(!sparse_count)return;
+    std::array<double,16> sums{};
+    {
+      profile::detail::Scope timer(&profile::Snapshot::vector_distance);
+      for(std::size_t i=1;i<sparse_count;++i)profile::detail::count(&profile::Snapshot::vector_distance);
+#if defined(__x86_64__) && defined(__GNUC__)
+      if(sparse_count>=4) {
+        if(wide)batch16_transposed_avx512(sparse_values.data(),query.data(),query.size(),sums.data());
+        else batch16_transposed_avx2(sparse_values.data(),query.data(),query.size(),sums.data());
+      } else
+#endif
+      for(std::size_t lane=0;lane<sparse_count;++lane)
+        for(std::size_t d=0;d<query.size();++d) {
+          const double delta=static_cast<double>(query[d])-static_cast<double>(sparse_values[d*16+lane]);
+          sums[lane]+=delta*delta;
+        }
+    }
+    for(std::size_t lane=0;lane<sparse_count;++lane) {
+      Neighbor candidate{sparse_keys[lane],std::sqrt(sums[lane])};
+      if(heap.size()<k)heap.push(candidate);
+      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    }
+    sparse_count=0;update_bound();
+  };
   source([&](std::span<const std::int64_t> keys,std::span<const float> values,std::uint16_t mask) {
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
     if(!mask)return;
+    if(sparse_count && std::popcount(mask)>=4)flush_sparse();
     if(integer_screen && heap.size()==k && std::popcount(mask)>=8) {
       const auto before=std::popcount(mask);
       mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask);
@@ -141,6 +183,17 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     }
     if(!mask)return;
     if(screen_stats)screen_stats->exact_lanes+=std::popcount(mask);
+    if(sparse_enabled && std::popcount(mask)<4) {
+      if(sparse_values.empty())try {sparse_values.resize(query.size()*16);}catch(const std::bad_alloc&) {sparse_enabled=false;}
+      if(sparse_enabled) {
+        for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
+          sparse_keys[sparse_count]=keys[lane];
+          for(std::size_t d=0;d<query.size();++d)sparse_values[d*16+sparse_count]=values[d*16+lane];
+          if(++sparse_count==16)flush_sparse();
+        }
+        return;
+      }
+    }
     std::array<double,16> sums{};
     {
       profile::detail::Scope timer(&profile::Snapshot::vector_distance);
@@ -164,15 +217,10 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
       if(heap.size()<k)heap.push(candidate);
       else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
     }
-    if(screen && heap.size()==k) {
-      // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).
-      // Outward rounding of its square also protects sqrt-rounding ties.
-      const double next=std::nextafter(heap.top().distance,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(next*next,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound*error_factor,std::numeric_limits<double>::infinity());
-      rejection_bound=std::nextafter(rejection_bound+absolute_allowance,std::numeric_limits<double>::infinity());
-    }
+    // Outward squared threshold protects ties in the exposed sqrt distance.
+    update_bound();
   });
+  flush_sparse();
   std::vector<Neighbor> result;result.reserve(heap.size());
   while(!heap.empty()){result.push_back(heap.top());heap.pop();}
   std::reverse(result.begin(),result.end());return result;

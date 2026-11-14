@@ -294,3 +294,8 @@ add_test(NAME core_stream_cache COMMAND stream_cache_tests)
 
 add_executable(block_scale_tests tests/block_scale_tests.cpp)
 add_test(NAME core_block_scale COMMAND block_scale_tests)
+
+add_executable(sparse_batch_tests tests/sparse_batch_tests.cpp)
+target_link_libraries(sparse_batch_tests PRIVATE minivectordb_core)
+add_test(NAME core_sparse_batch COMMAND sparse_batch_tests)
+set_tests_properties(core_sparse_batch PROPERTIES TIMEOUT 120)
