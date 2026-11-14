@@ -483,6 +483,22 @@ namespace minivectordb {
       return literals;
     }
     std::optional<ExecutionInfo> try_cached_select(std::string_view text,const QuerySink&sink) {
+      // Only SELECT can hit the plan cache. Gate on a cheap keyword prefix so a
+      // multi-row INSERT never pays a full normalize_sql scan of its large text.
+      std::size_t pos=0;
+      while(pos<text.size()&&(text[pos]==' '||text[pos]=='\t'||text[pos]=='\n'||text[pos]=='\r'))++pos;
+      constexpr std::string_view keyword="select";
+      if(text.size()-pos<keyword.size())return {};
+      for(std::size_t i=0;i<keyword.size();++i) {
+        const char c=text[pos+i];
+        const char lower=(c>='A'&&c<='Z')?static_cast<char>(c-'A'+'a'):c;
+        if(lower!=keyword[i])return {};
+      }
+      const auto after=pos+keyword.size();
+      if(after<text.size()) {
+        const char c=text[after];
+        if(!(c==' '||c=='\t'||c=='\n'||c=='\r'||c=='('))return {};
+      }
       sql::NormalizedSql normalized;
       if(!sql::normalize_sql(text,normalized))return {};
       auto it=select_plans.find(normalized.key);
