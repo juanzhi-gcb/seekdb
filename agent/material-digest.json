@@ -3,15 +3,15 @@
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "submission_state": "Prompt expression recovery only; runtime identical to formally evaluated007146cd. New material not formally evaluated.",
+ "submission_state": "Experimental material; current implementation map a24; independent candidates measured separately; not a formal release.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 123305,
-   "sha256": "6f3ff9a1a182e85b494aea9336edd0a02d6b0fba52d8dc453a6773f9f6c807b2"
+   "bytes": 123789,
+   "sha256": "9af759b25b97d335ab6f00785d4a7d8dfaa945a4d6864e2cce6cbbd67422cf72"
   },
   "conversation.json": {
-   "bytes": 123305,
-   "sha256": "6f3ff9a1a182e85b494aea9336edd0a02d6b0fba52d8dc453a6773f9f6c807b2"
+   "bytes": 123789,
+   "sha256": "9af759b25b97d335ab6f00785d4a7d8dfaa945a4d6864e2cce6cbbd67422cf72"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 91,
-  "experiments": 56,
-  "agent_observations": 28,
+  "user_records": 93,
+  "experiments": 52,
+  "agent_observations": 26,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -98,6 +98,11 @@
    "path": "bench/results/prompt-recovery-20261114/iteration-records-appendix.json",
    "bytes": 2087,
    "sha256": "37f2f34ff66f25069275370dc41053a0e2837abb01f2ab312038cb2782cdf649"
+  },
+  {
+   "path": "bench/results/new-a24-20261114/iteration-records-appendix.json",
+   "bytes": 5477,
+   "sha256": "14b511d3030f49056b442b41d32c7cc1b5a2b47e8f4d1368be9eee90d4bc73bc"
   }
  ],
  "prompt_rubric": {

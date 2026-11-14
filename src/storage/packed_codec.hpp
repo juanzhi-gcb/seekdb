@@ -6,7 +6,6 @@
 #include <string>
 #include <string_view>
 #include <stdexcept>
-#include "lossless_words.hpp"
 namespace minivectordb::detail {
 // Bounded lossless byte runs, independent of SQL/types/workload contents.
 // 4-byte decoded size; control <128 = 1..128 literals, else 3..130 repeats.
@@ -33,24 +32,8 @@ inline std::size_t pack_run_frame(std::string_view input,char* output) {
   }
   return static_cast<std::size_t>(to-output);
 }
-inline bool pack_bytes(std::string_view input,std::string& output,bool planes=false,bool compact_words=false) {
+inline bool pack_bytes(std::string_view input,std::string& output,bool planes=false) {
   output.clear();if(input.size()<64 || input.size()>4064)return false;
-  if(planes && compact_words) {
-    std::string compact;
-    if(halfwords::transform(input,compact)) {
-      std::array<char,4104> frame;
-      const auto encoded_size=pack_run_frame(compact,frame.data());
-      const bool runs=compact.size()>=64 && encoded_size+8<=compact.size();
-      const auto size=runs?encoded_size:compact.size();
-      if(size+5+8<=input.size()) {
-        const auto header=std::uint32_t(input.size())|0x40000000U;
-        for(unsigned k=0;k<4;++k)output+=char(header>>(k*8));
-        output+=char(runs);
-        if(runs)output.append(frame.data(),encoded_size);else output+=compact;
-        return true;
-      }
-    }
-  }
   std::array<char,4104> ordinary;
   const auto normal_size=pack_run_frame(input,ordinary.data());
   const bool normal=normal_size+8<=input.size();
@@ -73,16 +56,6 @@ inline std::string unpack_bytes(std::string_view input,std::size_t maximum=4064,
   if(input.size()<4)bad();
   std::size_t expected=0;
   for(unsigned k=0;k<4;++k)expected|=std::size_t(static_cast<unsigned char>(input[k]))<<(k*8);
-  const bool words=(expected&0x40000000U)!=0;
-  if(words) {
-    if(!planes || (expected&0x80000000U))bad();
-    expected&=0x3fffffffU;
-    if(expected<64 || expected>maximum || input.size()+8>expected || input.size()<6)bad();
-    const auto method=static_cast<unsigned char>(input[4]);if(method>1)bad();
-    const auto body=input.substr(5);
-    const auto compact=method?unpack_bytes(body,4064,false):std::string(body);
-    return halfwords::inverse(compact,expected);
-  }
   const bool shuffled=(expected&0x80000000U)!=0;
   if(shuffled&&!planes)bad();
   expected&=0x7fffffffU;

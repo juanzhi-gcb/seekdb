@@ -1,0 +1,14 @@
+{
+  "bytes": 123789,
+  "sha256": "9af759b25b97d335ab6f00785d4a7d8dfaa945a4d6864e2cce6cbbd67422cf72",
+  "references": 81,
+  "counts": {
+    "user_records": 93,
+    "experiments": 52,
+    "agent_observations": 26,
+    "retrospective_cases": 2
+  },
+  "archive_selection_passed": true,
+  "valid6_5_original_unchanged": true,
+  "status": "experimental_not_formal"
+}

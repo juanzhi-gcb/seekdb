@@ -1,0 +1,8 @@
+shape=0 mode=0 bytes=5427975 wins=0 ms=5.37642
+shape=0 mode=1 bytes=5427975 wins=0 ms=10.0222
+shape=1 mode=0 bytes=5435500 wins=0 ms=4.69146
+shape=1 mode=1 bytes=5435500 wins=0 ms=9.79758
+shape=2 mode=0 bytes=2987523 wins=0 ms=3.00096
+shape=2 mode=1 bytes=2987523 wins=0 ms=8.21221
+shape=3 mode=0 bytes=5435543 wins=0 ms=3.26571
+shape=3 mode=1 bytes=5435543 wins=0 ms=7.48879

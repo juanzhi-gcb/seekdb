@@ -1,9 +1,6 @@
 #include "../src/protocol/jsonl.hpp"
 #include <iostream>
 #include <random>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <cstring>
 using namespace minivectordb;
 #define CHECK(x) do{if(!(x))throw std::runtime_error(std::string(#x)+" line "+std::to_string(__LINE__));}while(false)
 std::size_t scalar_prefix(std::string_view s) {
@@ -25,20 +22,6 @@ int main(){try{
         std::string s(33,'a');s[position]=char(first);s[position+1]=char(second);
         CHECK(jsonl::plain_string_prefix(s)==scalar_prefix(s));++cases;
       }
-    for(unsigned offset=0;offset<32;++offset)for(unsigned at=0;at<129;++at)for(unsigned byte=0;byte<256;++byte){
-      std::string storage(offset+160,'a');storage[offset+at]=char(byte);
-      const auto view=std::string_view(storage).substr(offset,129);
-      CHECK(jsonl::plain_string_prefix(view)==scalar_prefix(view));++cases;
-    }
-    const auto page=static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
-    auto* guard=static_cast<char*>(mmap(nullptr,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0));
-    CHECK(guard!=MAP_FAILED);CHECK(mprotect(guard+page,page,PROT_NONE)==0);
-    std::memset(guard,'a',page);
-    for(std::size_t length=1;length<=257;++length)for(unsigned byte=0;byte<256;++byte){
-      guard[page-1]=char(byte);auto view=std::string_view(guard+page-length,length);
-      CHECK(jsonl::plain_string_prefix(view)==scalar_prefix(view));++cases;
-    }
-    CHECK(munmap(guard,page*2)==0);
     for(unsigned trial=0;trial<2000;++trial) {
         std::string s;for(unsigned i=0,n=random()%4096;i<n;++i)s+=char(random());
         CHECK(jsonl::plain_string_prefix(s)==scalar_prefix(s));

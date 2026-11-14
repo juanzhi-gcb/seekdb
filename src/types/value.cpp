@@ -1,10 +1,6 @@
 #include "minivectordb/value.hpp"
 #include "text_validation.hpp"
 #include <charconv>
-#include <bit>
-#if defined(__x86_64__) && defined(__GNUC__)
-#include <immintrin.h>
-#endif
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -60,35 +56,9 @@ std::size_t validate_text_impl(std::string_view text,std::size_t limit) {
   return count;
 }
 }
-namespace {
-#if defined(__x86_64__) && defined(__GNUC__)
-__attribute__((target("avx2"),noinline))
-std::size_t ascii_prefix_wide(std::string_view text) noexcept {
-  std::size_t n=0;
-  while(text.size()-n>=32) {
-    auto bytes=_mm256_loadu_si256(reinterpret_cast<const __m256i*>(text.data()+n));
-    auto mask=static_cast<unsigned>(_mm256_movemask_epi8(bytes));
-    if(mask)return n+std::countr_zero(mask);
-    n+=32;
-  }
-  while(n<text.size() && static_cast<unsigned char>(text[n])<128)++n;
-  return n;
-}
-#endif
-}
 std::size_t validate_text(std::string_view text,std::size_t limit) {
   if(detail::text_validation_mode==detail::TextValidationMode::scalar)
     return validate_text_impl<false>(text,limit);
-#if defined(__x86_64__) && defined(__GNUC__)
-  static const bool wide=__builtin_cpu_supports("avx2");
-  // Only scan the initial ASCII run: mixed Unicode retains the original loop.
-  if(text.size()>=64 && static_cast<unsigned char>(text.front())<128 && wide) {
-    const auto n=ascii_prefix_wide(text);
-    if(n>limit)throw std::invalid_argument("text exceeds scalar length");
-    if(n==text.size())return n;
-    return n+validate_text_impl<true>(text.substr(n),limit-n);
-  }
-#endif
   return validate_text_impl<true>(text,limit);
 }
 int compare_text(std::string_view a,std::string_view b) {

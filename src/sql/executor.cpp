@@ -7,7 +7,6 @@
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include "../vector/validated.hpp"
-#include "../vector/certified_candidates.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
@@ -323,32 +322,12 @@ namespace minivectordb {
         const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
         const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
       if(!transpose_enabled() || !typed_eligible(s,b,index) ||
-          !typed_snapshot.ready(s.id,index?index->id:0,e.column) ||
-          (!typed_snapshot.transposed() && (!options.certified_candidate_search||!typed_snapshot.integer_cache())) ||
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
       bool certified=false;
       const auto [begin,end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
-      if(options.certified_candidate_search && !profile::enabled()) {
-        if(const auto* integer=typed_snapshot.integer_cache()) {
-          detail::CandidateStats attempt;
-          try {
-            auto result=detail::certified_candidates(*integer,*e.query,begin,end,k,
-              [&](std::size_t row){return certified||typed_matches(row,predicates);},
-              [&](std::size_t row){return typed_snapshot.key(row);},
-              [&](std::size_t row,std::vector<float>& scratch){return typed_snapshot.read_vector(row,scratch);},attempt,certified);
-            if(result) {
-              info.rows_examined+=attempt.examined;info.typed_rows_examined+=attempt.examined;
-              info.distances_computed+=attempt.selected;
-              if(bulk)info.certified_blocks_examined+=(end+15)/16-begin/16;
-              info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
-              return result;
-            }
-          } catch(const std::bad_alloc&) {} // Optional bounded query scratch.
-        }
-      }
-      if(!typed_snapshot.transposed())return {};
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -414,7 +393,7 @@ namespace minivectordb {
           }
         } else {
           projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column,options.certified_candidate_search&&transpose_enabled()&&options.bounded_int8_screen&&options.bounded_fp32_screen&&options.wide_simd_vector_kernel);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column);
           if(typed_snapshot.refused())projection_snapshot.clear();
           else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
@@ -428,36 +407,31 @@ namespace minivectordb {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            } else {
-              if(typed_snapshot.observing_half()&&vector.empty())vector=row.vector_for_distance(e.column,scratch);
-              typed_snapshot.observe_row(text_column?
-                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{},vector);
-            }
+            } else typed_snapshot.observe_row(text_column?
+                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);
             }
           };
-          const bool streaming=options.streaming_cache_build&&typed_snapshot.building()&&projection_snapshot.building();
           if(index) {
-            const auto read=[&](auto key,auto bytes,auto base) {
+            store.scan_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
               ++info.vector_index_entries_examined;++info.rows_examined;
               SelectRow row(s,key,base,options.selective_decode,info);
-              auto vector=index_candidate(bytes,s,*index,key,row,scratch);consume(key,row,vector);
-            };
-            if(streaming)store.scan_cache_equal_in(index->id,s.id,[&](auto key,auto bytes,auto base){read(key,bytes,base);return typed_snapshot.building()&&projection_snapshot.building();});
-            else store.scan_equal_in(index->id,s.id,read);
+              auto vector=index_candidate(bytes,s,*index,key,row,scratch);
+              consume(key,row,vector);
+            });
           } else {
-            const auto read=[&](auto key,auto bytes) {
+            store.scan_in(s.id,[&](auto key,auto bytes) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
-              ++info.rows_examined;SelectRow row(s,key,bytes,options.selective_decode,info);consume(key,row,{});
-            };
-            if(streaming)store.scan_cache_in(s.id,[&](auto key,auto bytes){read(key,bytes);return typed_snapshot.building()&&projection_snapshot.building();});
-            else store.scan_in(s.id,read);
+              ++info.rows_examined;
+              SelectRow row(s,key,bytes,options.selective_decode,info);
+              consume(key,row,{});
+            });
           }
           projection_snapshot.finish();
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search&&transpose_enabled());
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
@@ -632,7 +606,7 @@ namespace minivectordb {
       reset {
         busy
       };
-      auto statement=options.streaming_sql_tokens?sql::parse_stream(text,true):sql::parse(text);
+      auto statement=sql::parse(text);
       store.set_write_cache_hint(statement.kind!=sql::Statement::Select);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.

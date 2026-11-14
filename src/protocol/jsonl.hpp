@@ -2,10 +2,6 @@
 #include "minivectordb/database.hpp"
 #include "minivectordb/value.hpp"
 #include <array>
-#include <bit>
-#if defined(__x86_64__) && defined(__GNUC__)
-#include <immintrin.h>
-#endif
 #include <algorithm>
 #include <charconv>
 #include <cerrno>
@@ -22,7 +18,7 @@ namespace minivectordb::jsonl {
 // Preserve raw validated JSON identifiers, avoiding any conversion through double.
 // Raw lexemes borrow the immutable input frame until the response is finished.
 struct Value { char kind = 0; std::string text; std::string_view raw; };
-inline std::size_t plain_string_prefix_portable(std::string_view input) noexcept {
+inline std::size_t plain_string_prefix(std::string_view input) noexcept {
     constexpr std::uint64_t ones=0x0101010101010101ULL,high=0x8080808080808080ULL;
     const auto zero=[](std::uint64_t x){return (x-ones)&~x&high;};
     std::size_t size=0;
@@ -40,30 +36,6 @@ inline std::size_t plain_string_prefix_portable(std::string_view input) noexcept
         ++size;
     }
     return size;
-}
-#if defined(__x86_64__) && defined(__GNUC__)
-__attribute__((target("avx2"),noinline))
-inline std::size_t plain_string_prefix_avx2(std::string_view input) noexcept {
-    const auto quote=_mm256_set1_epi8('"'),slash=_mm256_set1_epi8('\\');
-    const auto top=_mm256_set1_epi8(static_cast<char>(0xe0)),zero=_mm256_setzero_si256();
-    std::size_t size=0;
-    while(input.size()-size>=32){
-        const auto bytes=_mm256_loadu_si256(reinterpret_cast<const __m256i*>(input.data()+size));
-        const auto control=_mm256_cmpeq_epi8(_mm256_and_si256(bytes,top),zero);
-        const auto special=_mm256_or_si256(control,_mm256_or_si256(_mm256_cmpeq_epi8(bytes,quote),_mm256_cmpeq_epi8(bytes,slash)));
-        const auto mask=static_cast<unsigned>(_mm256_movemask_epi8(special));
-        if(mask)return size+std::countr_zero(mask);
-        size+=32;
-    }
-    return size+plain_string_prefix_portable(input.substr(size));
-}
-#endif
-inline std::size_t plain_string_prefix(std::string_view input) noexcept {
-#if defined(__x86_64__) && defined(__GNUC__)
-    static const bool available=__builtin_cpu_supports("avx2");
-    if(input.size()>=64 && available)return plain_string_prefix_avx2(input);
-#endif
-    return plain_string_prefix_portable(input);
 }
 class Parser {
     std::string_view input;

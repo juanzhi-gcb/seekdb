@@ -9,63 +9,40 @@
 #include <cstdlib>
 #include <new>
 #include <exception>
-#include <cfenv>
-#if defined(__x86_64__)
-#include <xmmintrin.h>
-#endif
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
     throw Error(ErrorCode::Schema,"unknown column: "+std::string(name));
   }
   namespace {
-    // Clinger's exact-operand fast path: at most 15 token bytes keeps the
-    // integer significand exactly representable in binary64. Powers 10^0..22
-    // are exact binary64 integers, so a single multiply/divide rounds the exact
-    // decimal once. Longer/range/rounding-mode cases retain from_chars + real().
-    bool short_decimal(std::string_view text,bool nearest,double& value) {
-      if(!nearest || text.empty() || text.size()>15)return false;
-      std::size_t i=0;bool negative=false;if(text[i]=='+'||text[i]=='-'){negative=text[i]=='-';if(++i==text.size())return false;}
-      std::uint64_t significand=0;unsigned digits=0,fraction=0;
-      const auto digit=[](char c){return c>='0'&&c<='9';};
-      while(i<text.size()&&digit(text[i])){significand=significand*10+unsigned(text[i++]-'0');++digits;}
-      if(i<text.size()&&text[i]=='.'){++i;while(i<text.size()&&digit(text[i])){significand=significand*10+unsigned(text[i++]-'0');++digits;++fraction;}}
-      if(!digits)return false;
-      int exponent=0;bool minus=false;
-      if(i<text.size()&&(text[i]=='e'||text[i]=='E')){
-        ++i;if(i<text.size()&&(text[i]=='+'||text[i]=='-'))minus=text[i++]=='-';const auto begin=i;
-        while(i<text.size()&&digit(text[i])){exponent=std::min(1000,exponent*10+int(text[i++]-'0'));}
-        if(i==begin)return false;
-      }
-      if(i!=text.size())return false;if(minus)exponent=-exponent;exponent-=int(fraction);
-      if(exponent< -22 || exponent>22)return false;
-      static constexpr double power[]{1.,1e1,1e2,1e3,1e4,1e5,1e6,1e7,1e8,1e9,1e10,1e11,1e12,1e13,1e14,1e15,1e16,1e17,1e18,1e19,1e20,1e21,1e22};
-      value=exponent<0?double(significand)/power[-exponent]:double(significand)*power[exponent];
-      if(negative)value=-value;return true;
-    }
+    // Allocation-free recognition of the lexer's plain numeric-array subset.
+    // Scan each number once. Callers defer numeric errors until the complete
+    // grammar is accepted; comments/other spellings use the original lexer.
     template<class F> bool plain_vector(std::string_view text,F&& consume) {
-      const auto whitespace=[](char c){return c==' '||c=='\t'||c=='\r'||c=='\n'||c=='\f';};
-      const auto trim=[&](std::string_view value){while(!value.empty()&&whitespace(value.front()))value.remove_prefix(1);while(!value.empty()&&whitespace(value.back()))value.remove_suffix(1);return value;};
-      text=trim(text);if(text.size()<2 || text.front()!='[' || text.back()!=']')return false;
-      text=trim(text.substr(1,text.size()-2));if(text.empty())return true;
-      bool nearest=std::fegetround()==FE_TONEAREST;
-#if defined(__x86_64__)
-      nearest=nearest && (_mm_getcsr()&0xffc0u)==0x1f80u;
-#endif
-      for(;;){
-        const auto comma=text.find(',');const auto component=trim(text.substr(0,comma));
-        auto numeric=component;if(numeric.empty())return false;
-        if(numeric.front()=='+'||numeric.front()=='-')numeric.remove_prefix(1);
-        if(numeric.empty()||!((numeric.front()>='0'&&numeric.front()<='9')||numeric.front()=='.'))return false;
-        double value=0;bool range=false;
-        if(!short_decimal(component,nearest,value)){
-          auto number=component;if(number.front()=='+')number.remove_prefix(1);
-          const auto [end,error]=std::from_chars(number.data(),number.data()+number.size(),value);
-          if(end!=number.data()+number.size() || (error!=std::errc{} && error!=std::errc::result_out_of_range))return false;
-          range=error==std::errc::result_out_of_range;
+      std::size_t i=0;
+      auto digit=[](char c){return c>='0'&&c<='9';};
+      auto skip=[&]{while(i<text.size()&&std::string_view(" \t\r\n\f").find(text[i])!=std::string_view::npos)++i;};
+      skip();if(i==text.size()||text[i++]!='[')return false;skip();
+      if(i<text.size()&&text[i]==']') {++i;skip();return i==text.size();}
+      for(;;) {
+        const auto begin=i;
+        if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
+        bool any=false;
+        while(i<text.size()&&digit(text[i])) {++i;any=true;}
+        if(i<text.size()&&text[i]=='.') {
+          ++i;while(i<text.size()&&digit(text[i])) {++i;any=true;}
         }
-        consume(component,value,range);
-        if(comma==std::string_view::npos)return true;text.remove_prefix(comma+1);if(text.empty())return false;
+        if(!any)return false;
+        if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
+          ++i;if(i<text.size()&&(text[i]=='+'||text[i]=='-'))++i;
+          const auto digits=i;while(i<text.size()&&digit(text[i]))++i;
+          if(i==digits)return false;
+        }
+        consume(text.substr(begin,i-begin));skip();
+        if(i==text.size())return false;
+        if(text[i]==']') {++i;skip();return i==text.size();}
+        if(text[i++]!=',')return false;
+        skip();
       }
     }
     double real(std::string_view text) {
@@ -95,7 +72,7 @@ namespace minivectordb::sql {
     std::vector<std::string> vector_components(const Literal&v) {
       if(v.kind==Literal::Vector)return v.components;
       if(v.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VECTOR literal");
-      auto t=lex(v.view());
+      auto t=lex(v.text);
       std::size_t i=0;
       auto take=[&](std::string_view s) {
         if(t.at(i).kind==TokenKind::Symbol&&t[i].text==s) {
@@ -122,11 +99,11 @@ namespace minivectordb::sql {
       if(value.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VARCHAR literal");
       // Comparison constants are not stored in the column, so its width does not apply.
       try {
-        validate_text(value.view(),std::numeric_limits<std::size_t>::max());
+        validate_text(value.text,std::numeric_limits<std::size_t>::max());
       } catch(const std::invalid_argument& error) {
         throw Error(ErrorCode::Type,error.what());
       }
-      return std::string(value.view());
+      return value.text;
     }
     BoundExpr bind_expr(const Expr&e,const Schema&s) {
       BoundExpr b;
@@ -143,20 +120,20 @@ namespace minivectordb::sql {
     try {
       if(c.type==ColumnType::Bigint) {
         if(v.kind!=Literal::Number)throw Error(ErrorCode::Type,"expected BIGINT literal");
-        return parse_bigint(v.view());
+        return parse_bigint(v.text);
       }
       if(c.type==ColumnType::Varchar) {
         if(v.kind!=Literal::String)throw Error(ErrorCode::Type,"expected VARCHAR literal");
-        validate_text(v.view(),c.extent);
-        return std::string(v.view());
+        validate_text(v.text,c.extent);
+        return v.text;
       }
       if(fast_vector && v.kind==Literal::String) {
         std::vector<double> values;
-        values.reserve(std::min<std::size_t>(c.extent,v.view().size()/2));
+        values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
         std::exception_ptr numeric_error;
-        const bool plain=plain_vector(v.view(),[&](auto component,double parsed,bool out_of_range){
+        const bool plain=plain_vector(v.text,[&](auto component){
           if(numeric_error)return;
-          try {values.push_back(out_of_range?real(component):parsed);}
+          try {values.push_back(real(component));}
           catch(const Error&) {numeric_error=std::current_exception();}
         });
         if(plain) {

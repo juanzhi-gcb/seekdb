@@ -1,0 +1,48 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Actual user instruction and separately attributed Agent experiments and technical explanation.",
+ "conversations": [
+  {
+   "id": "u92",
+   "source": "user",
+   "excerpt": true,
+   "content": "以这些为优化方向，在这些方面进行大幅优化，尝试新方案，因为改动这些优化幅度很大，我们就继续以这些为优化方向，同时我们要保留6.5有效分的那次",
+   "context": "用户在复盘ff117199至a24的正式提分后要求沿这些方向继续实验，并保留历史有效6.5分材料。此处节选性能目标与保留原件要求；技术机制由Agent实现并解释。"
+  },
+  {
+   "id": "u93",
+   "source": "user",
+   "content": "一切解释归属我",
+   "context": "用户要求技术解释以参赛者视角表达；新增参赛说明另列为草稿，原始对话和实验作者归属保留。"
+  }
+ ],
+ "experiments": [
+  {
+   "id": "e142",
+   "source": "agent_tool_execution",
+   "purpose": "a24独立新路线的正确性与原生对照",
+   "output": "连续分块目录在Mac主机ASan/UBSan下通过2556757次独立std::map模型检查和现有日志存储测试；宽字RLE通过44808次与冻结旧编码器的等字节及往返检查。主机压缩微内核加速约2.3–5.2倍，不能视为端到端T或正式E。原生结果：{\"directory\":{\"commit\":\"6d6192c5bb485eb9c369b9ef06ae71fd9d981ba3\",\"replicas\":2,\"rounds\":3,\"profiles\":5,\"delta_percent_ranges\":{\"write/unindexed/T_ms\":[-2.043621302625964,38.48084315958802],\"write/unindexed/B_bytes\":[0.0,0.0],\"write/unindexed/M_bytes\":[-4.18101328086572,-0.09976720984369303],\"query/unindexed/T_ms\":[-1.6483124873151733,1.1523816548919985],\"query/unindexed/B_bytes\":[0.0,0.0],\"query/unindexed/M_bytes\":[-2.6997545677665657,-1.040261991909075],\"query/indexed/T_ms\":[-0.506457572540997,2.2203890852286134],\"query/indexed/B_bytes\":[0.0,0.0],\"query/indexed/M_bytes\":[-4.34146341463415,-2.6292414283176413]},\"decision\":\"reject: writing T regressions exceed small M benefit\"},\"codec\":{\"commit\":\"08caace24793b51ad1ce9a698e010b8388bd9a32\",\"replicas\":2,\"rounds\":3,\"profiles\":5,\"delta_percent_ranges\":{\"write/unindexed/T_ms\":[-5.775379647942525,0.5134392762609519],\"write/unindexed/B_bytes\":[0.0,0.0],\"write/unindexed/M_bytes\":[-2.262295081967214,2.2052586938083207],\"query/unindexed/T_ms\":[-2.452676355339656,0.8158296690614852],\"query/unindexed/B_bytes\":[0.0,0.0],\"query/unindexed/M_bytes\":[-0.763150722267647,0.7766990291262044],\"query/indexed/T_ms\":[-1.2656266475862488,1.6278897334520481],\"query/indexed/B_bytes\":[0.0,0.0],\"query/indexed/M_bytes\":[-0.3391182924396552,0.7016694894749653]},\"decision\":\"retain as modest write-side candidate; no query/B breakthrough\"}}"
+  }
+ ],
+ "agent_observations": [
+  {
+   "id": "a64",
+   "source": "agent",
+   "title": "a24的已验证路径与本轮两个独立变量",
+   "content": "正式成绩ff117199的2576.778405到a24的3977.995012提高54.378623%，但平台没有T/B/M分项，不能把1401.216607分分配给单项改动。源码树核验表明a24运行实现与4ffb3656一致，历史两台原生对照显示写入T、查询T、B及M同时改善。关键路径是J08追加记录减少写放大、按实际行数分配有界缓存、保守筛选、投影复用及响应缓冲复用。本轮直接从a24做连续分块偏移目录和等字节宽字RLE扫描两个独立实验，避免把后续正式退化代码作为默认基线。"
+  },
+  {
+   "id": "a65",
+   "source": "agent",
+   "title": "用可检查的不变量解释专业术语",
+   "content": "写放大（write amplification）是为了同一逻辑变更触发更多物理写入；J08追加记录减少整页重写，但仍保留提交同步。持久确认（durable acknowledgement）要求成功响应之前完成约定持久化，不能通过省略fsync制造低T。失败原子性（failure atomicity）要求语句失败恢复保存点，异常提交不能错误回滚已发布根。空间局部性（spatial locality）是连续目录减少逐节点分配和指针追踪，随机插入分块分裂的代价必须实测。SWAR宽字检测把多个字节条件并行计算，边界检查、保守回退和旧编码逐字节一致性共同限制优化。摊销成本（amortized cost）只解释多次查询复用；首次构建、失效重建和峰值内存仍计入结果。保守剪枝（conservative pruning）只排除能够证明不可能进入TopK的候选，其余保留原精确距离与主键并列规则。以上是Agent对实际实现的解释，不是用户的独立推导或额外评分结果。"
+  },
+  {
+   "id": "a66",
+   "source": "agent",
+   "title": "低收益路线止损与精确计算的新实验",
+   "content": "连续分块目录两台原生写入T存在明显退化，B不变而M只小幅下降，暂不采用。宽字编码只作为小幅写入候选。额外比特平面试探在四类各一万行的主机样本中没有选出更小编码，反而增加CPU，未进入运行实现。当前新实验eb54d878将筛选后稀疏候选跨块拷贝进16路SIMD缓冲，保持逐维double运算和sqrt后排序；延迟处理只会让已知TopK阈值更宽松，不得造成错误排除。主机960次oracle检查通过，但主机无AVX2，真正紧凑路径仍需原生验证。"
+  }
+ ]
+}

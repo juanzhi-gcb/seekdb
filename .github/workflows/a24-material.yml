@@ -1,0 +1,25 @@
+name: A24 learning material provenance
+on:
+  push:
+    branches: ['codex/a24-material-20261114']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify a24 baseline identity
+        run: git diff --exit-code a24d2cd764027adec7371f268f99ccdca2307032 HEAD -- src include tests Dockerfile CMakeLists.txt
+      - name: Verify material and archived provenance
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          python3 -B scripts/check-submission-contract.py --check-internal-references
+          python3 -B scripts/check-learning-material.py
+          python3 -B tests/learning_selection_tests.py
+          python3 -B tests/submission_contract_tests.py
