@@ -110,7 +110,7 @@ public:
     if(order.empty())return;
     std::string encoded,packed;std::vector<std::pair<Key,std::uint64_t>> updates;updates.reserve(order.size());auto previous=head_;
     for(const auto* c:order){std::string_view payload=c->value?std::string_view(*c->value):std::string_view{};unsigned flags=c->value?0:2;
-      if(c->value&&pack_bytes(payload,packed,true)){payload=packed;flags=1;}
+      if(c->value&&pack_bytes(payload,packed,true,true)){payload=packed;flags=1;}
       if(encoded.size()>UINT64_MAX-end_)throw std::length_error("journal size");const auto at=end_+encoded.size();std::array<unsigned char,header_size> h{};
       std::memcpy(h.data(),"JREC",4);put(h.data()+4,flags,4);put(h.data()+8,space);put(h.data()+16,std::bit_cast<std::uint64_t>(c->key));put(h.data()+24,previous);put(h.data()+32,payload.size());put(h.data()+40,crc(payload),4);put(h.data()+44,crc({reinterpret_cast<const char*>(h.data()),44}),4);
       encoded.append(reinterpret_cast<const char*>(h.data()),h.size());encoded.append(payload);updates.push_back({{space,c->key},at});previous=at;

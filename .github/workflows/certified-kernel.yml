@@ -1,0 +1,46 @@
+name: Exact certificate native kernel screening
+on:
+  push:
+    branches: ['codex/certified-kernel-20261113']
+permissions:
+  contents: read
+jobs:
+  screen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare scalar bounds and SIMD bounds with exact oracle
+        run: |
+          set -euo pipefail
+          mkdir kernel-results previous
+          lscpu > kernel-results/lscpu.txt
+          git archive d1f2e9ab192876a3f8f336441cc9f5fecbf4e7b0 src include bench/certified_kernel_probe.cpp | tar -x -C previous
+          g++ -std=c++20 -O3 -ffp-contract=off -Iprevious/include -Iprevious/src previous/bench/certified_kernel_probe.cpp previous/src/vector/exact.cpp -o kernel-results/previous
+          g++ -std=c++20 -O3 -ffp-contract=off -Iinclude -Isrc tests/certified_candidates_tests.cpp src/vector/exact.cpp -o kernel-results/tests
+          kernel-results/tests > kernel-results/tests.json
+          kernel-results/previous > kernel-results/previous.jsonl
+          for cap in 32 64 128; do
+            g++ -std=c++20 -O3 -ffp-contract=off -DMVDB_CERTIFICATE_CAPACITY=$cap -Iinclude -Isrc bench/certified_kernel_probe.cpp src/vector/exact.cpp -o kernel-results/cap-$cap
+            kernel-results/cap-$cap > kernel-results/cap-$cap.jsonl
+          done
+          python3 - <<'PYCODE'
+          import json,pathlib,statistics
+          for p in pathlib.Path('kernel-results').glob('*.jsonl'):
+              rows=[json.loads(x) for x in p.read_text().splitlines()]
+              for name in ['grid','continuous','equal']:
+                  a=[x for x in rows if x.get('distribution')==name]
+                  if not a:continue
+                  base=statistics.median(x['ms'] for x in a if not x['candidate'])
+                  new=statistics.median(x['ms'] for x in a if x['candidate'])
+                  print(json.dumps({'variant':p.stem,'distribution':name,'ratio':new/base,'certified':[x['certified'] for x in a if x['candidate']], 'exact_per_query':[x['attempted_exact']/x['queries'] for x in a if x['candidate']]}))
+          PYCODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: certified-kernel-${{ github.run_id }}
+          path: kernel-results/
+          retention-days: 14

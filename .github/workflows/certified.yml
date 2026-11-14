@@ -1,0 +1,30 @@
+name: Certified exact candidate search versus a24
+on:
+  push:
+    branches: ['codex/certified-halfwords-20261113']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Native correctness, proof success and full T B M
+        run: bash bench/run_certified_native.sh
+      - name: Preserve all samples and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: certified-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: certified-results/
+          if-no-files-found: error
+          retention-days: 14

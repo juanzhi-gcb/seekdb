@@ -7,6 +7,7 @@
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
 #include "../vector/validated.hpp"
+#include "../vector/certified_candidates.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
@@ -322,12 +323,32 @@ namespace minivectordb {
         const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
         const std::optional<VectorIndex>& index,std::size_t k,ExecutionInfo& info) {
       if(!transpose_enabled() || !typed_eligible(s,b,index) ||
-          !typed_snapshot.ready(s.id,index?index->id:0,e.column) || !typed_snapshot.transposed() ||
+          !typed_snapshot.ready(s.id,index?index->id:0,e.column) ||
+          (!typed_snapshot.transposed() && (!options.certified_candidate_search||!typed_snapshot.integer_cache())) ||
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
       bool certified=false;
       const auto [begin,end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
+      if(options.certified_candidate_search && !profile::enabled()) {
+        if(const auto* integer=typed_snapshot.integer_cache()) {
+          detail::CandidateStats attempt;
+          try {
+            auto result=detail::certified_candidates(*integer,*e.query,begin,end,k,
+              [&](std::size_t row){return certified||typed_matches(row,predicates);},
+              [&](std::size_t row){return typed_snapshot.key(row);},
+              [&](std::size_t row,std::vector<float>& scratch){return typed_snapshot.read_vector(row,scratch);},attempt,certified);
+            if(result) {
+              info.rows_examined+=attempt.examined;info.typed_rows_examined+=attempt.examined;
+              info.distances_computed+=attempt.selected;
+              if(bulk)info.certified_blocks_examined+=(end+15)/16-begin/16;
+              info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
+              return result;
+            }
+          } catch(const std::bad_alloc&) {} // Optional bounded query scratch.
+        }
+      }
+      if(!typed_snapshot.transposed())return {};
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
@@ -393,7 +414,7 @@ namespace minivectordb {
           }
         } else {
           projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
-          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column);
+          typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column,options.certified_candidate_search&&transpose_enabled()&&options.bounded_int8_screen&&options.bounded_fp32_screen&&options.wide_simd_vector_kernel);
           if(typed_snapshot.refused())projection_snapshot.clear();
           else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
@@ -407,8 +428,11 @@ namespace minivectordb {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               typed_snapshot.append(vector,[&](std::size_t column) {return std::get<std::int64_t>(row[column]);},
                   text_column?std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
-            } else typed_snapshot.observe_row(text_column?
-                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{});
+            } else {
+              if(typed_snapshot.observing_half()&&vector.empty())vector=row.vector_for_distance(e.column,scratch);
+              typed_snapshot.observe_row(text_column?
+                std::string_view(std::get<std::string>(row[*text_column])):std::string_view{},vector);
+            }
             if(row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);
@@ -431,7 +455,7 @@ namespace minivectordb {
             });
           }
           projection_snapshot.finish();
-          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
+          typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel,options.certified_candidate_search&&transpose_enabled());
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
