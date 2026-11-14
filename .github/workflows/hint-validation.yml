@@ -1,0 +1,22 @@
+name: Linux writeback hint fault validation
+on:
+  push:
+    branches: ['codex/exact-hint-validation-20261115']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Compile and exercise real hints and injected failures
+        run: |
+          mkdir hint-results
+          g++ -std=c++20 -O2 -ffp-contract=off -Iinclude tests/writeback_hint_tests.cpp src/storage/store.cpp -Wl,--wrap=sync_file_range,--wrap=pwrite,--wrap=fsync -o /tmp/hint-test
+          /tmp/hint-test > hint-results/result.txt 2>&1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: hint-validation-${{ github.run_id }}
+          path: hint-results/
