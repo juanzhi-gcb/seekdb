@@ -1,4 +1,5 @@
 #pragma once
+#include "write_vectors.hpp"
 #include "minivectordb/database.hpp"
 #include "minivectordb/value.hpp"
 #include <array>
@@ -189,6 +190,15 @@ public:
         // Echo the validated identifier only after the complete payload is ready.
         // An arbitrarily long ID must not make a small mutation acknowledgement
         // spill after the mutation/COMMIT has already succeeded.
+        if(!file) {
+            std::cout.flush();
+            iovec parts[]={{const_cast<char*>("{\"id\":"),6},
+                           {const_cast<char*>(id.data()),id.size()},
+                           {buffer.data(),buffer.size()},
+                           {const_cast<char*>("\n"),1}};
+            detail::write_vectors(parts,4,[](const iovec* p,int n){return ::writev(STDOUT_FILENO,p,n);});
+            return;
+        }
         std::cout<<"{\"id\":"<<id;
         if(file) {
             std::array<char,65536> chunk{};

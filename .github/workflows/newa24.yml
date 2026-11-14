@@ -1,7 +1,7 @@
-name: A24 independent codec experiment
+name: A24 independent responseonce experiment
 on:
   push:
-    branches: ['codex/a24-codec-20261114']
+    branches: ['codex/a24-responseonce-20261114']
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: newa24-codec-${{ matrix.replica }}-${{ github.run_id }}
+          name: newa24-responseonce-${{ matrix.replica }}-${{ github.run_id }}
           path: newa24-results/
           retention-days: 14

@@ -275,3 +275,7 @@ set_tests_properties(core_projection_probation PROPERTIES TIMEOUT 120)
 add_executable(wide_codec_tests tests/wide_codec_tests.cpp)
 add_test(NAME core_wide_codec COMMAND wide_codec_tests)
 set_tests_properties(core_wide_codec PROPERTIES TIMEOUT 120)
+
+add_executable(write_vectors_tests tests/write_vectors_tests.cpp)
+add_test(NAME core_write_vectors COMMAND write_vectors_tests)
+set_tests_properties(core_write_vectors PROPERTIES TIMEOUT 120)

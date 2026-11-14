@@ -23,6 +23,11 @@ for item in a24 candidate; do
   docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/newa24/storage_bytes_probe.cpp,dst=/probe.cpp,readonly" --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh "mvdb:newa24-$item-test" -c "g++ -std=c++20 -O2 -ffp-contract=off -I/src/include -I/src/tests /probe.cpp /build/libminivectordb_core.a -o /out/probe-$item" > "$result/bytes-build-$item.log" 2>&1
   docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/probe,dst=/out,readonly" --entrypoint "/out/probe-$item" "mvdb:newa24-$item-test" "/data/bytes-$item.db" > "$result/bytes-$item.log" 2>&1
 done
+for item in a24 candidate; do
+  docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/newa24/frame_probe.cpp,dst=/frame.cpp,readonly" --mount "type=bind,src=$repo/bench/newa24/write_trace.c,dst=/trace.c,readonly" --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh "mvdb:newa24-$item-test" -c "g++ -std=c++20 -O2 -I/src/include -I/src/src /frame.cpp /build/libminivectordb_core.a -o /out/frame-$item && gcc -shared -fPIC /trace.c -ldl -o /out/trace.so" > "$result/frame-build-$item.log" 2>&1
+  docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/probe,dst=/out,readonly" -e LD_PRELOAD=/out/trace.so --entrypoint "/out/frame-$item" "mvdb:newa24-$item-test" /data > "$result/frame-$item.jsonl" 2> "$result/frame-$item.trace"
+done
+cmp "$result/frame-a24.jsonl" "$result/frame-candidate.jsonl"
 sudo cmp "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db"
 sudo sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" > "$result/identical-storage-bytes.txt"
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test > "$result/ctest.log" 2>&1
