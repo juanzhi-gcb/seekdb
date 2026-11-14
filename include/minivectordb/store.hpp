@@ -10,10 +10,11 @@
 #include <stdexcept>
 namespace minivectordb {
 // Ordered persists data before publishing the root. ProcessCrash targets a
-// process-only crash with the kernel/filesystem alive; it still fsyncs the whole
-// file before acknowledging commit, but does not order an unacknowledged root
-// against its data across power loss or a kernel/device failure.
-enum class CommitSyncPolicy { Ordered, ProcessCrash };
+// process-only crash with the kernel/filesystem alive and fsyncs before ACK.
+// ProcessCrashDataSync uses fdatasync for the same page-cache crash model.
+// ProcessCrashNoSync relies on the kernel page cache surviving SIGKILL; it is
+// an experiment policy, not the default durability contract.
+enum class CommitSyncPolicy { Ordered, ProcessCrash, ProcessCrashDataSync, ProcessCrashNoSync };
 struct CacheStats {
   std::uint64_t hits=0, misses=0, evictions=0;
   std::size_t capacity_bytes=0, resident_pages=0;

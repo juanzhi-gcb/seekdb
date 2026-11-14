@@ -549,7 +549,8 @@ struct Store::Impl {
 };
 
 Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format):impl_(std::make_unique<Impl>()) {
-  if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
+  if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash &&
+     commit_sync_policy!=CommitSyncPolicy::ProcessCrashDataSync && commit_sync_policy!=CommitSyncPolicy::ProcessCrashNoSync)
     throw std::invalid_argument("invalid commit synchronization policy");
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);

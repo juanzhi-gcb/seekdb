@@ -18,4 +18,5 @@ FROM alpine:3.22.8@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b
 RUN apk add --no-cache libstdc++=14.2.0-r6
 COPY --from=build /build/minivectordb /usr/local/bin/minivectordb
 WORKDIR /data
+ENV MVDB_COMMIT_SYNC=nosync
 ENTRYPOINT ["/usr/local/bin/minivectordb", "--protocol", "jsonl", "--data-dir", "/data"]

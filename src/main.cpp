@@ -2,6 +2,7 @@
 #include "protocol/jsonl.hpp"
 #include <charconv>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -173,6 +174,12 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(args.directory);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
         minivectordb::Options options{args.directory / "tmp",args.sort_memory};options.journal_store=true;
+        if(const char* mode=std::getenv("MVDB_COMMIT_SYNC")) {
+            const std::string_view sync_mode(mode);
+            if(sync_mode=="ordered")options.commit_sync_policy=minivectordb::CommitSyncPolicy::Ordered;
+            else if(sync_mode=="fdatasync")options.commit_sync_policy=minivectordb::CommitSyncPolicy::ProcessCrashDataSync;
+            else if(sync_mode=="nosync")options.commit_sync_policy=minivectordb::CommitSyncPolicy::ProcessCrashNoSync;
+        }
         auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
                                 options);
         return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);

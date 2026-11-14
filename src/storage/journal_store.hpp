@@ -36,6 +36,17 @@ class JournalStore {
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
   void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
+  void sync_data(){
+    for(;;){
+      profile::detail::Scope timer(&profile::Snapshot::fsync);
+#if defined(__linux__)
+      if(::fdatasync(fd_)==0)return;
+#else
+      if(::fsync(fd_)==0)return;
+#endif
+      if(errno!=EINTR)io("journal data sync");
+    }
+  }
   void write(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
     if(!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
@@ -129,7 +140,10 @@ public:
   void rollback(){restore(durable_);undo_.clear();purge_empty();}
   void commit(){
     if(generation_==UINT64_MAX)throw std::overflow_error("generation exhausted");const auto next=generation_+1;
-    if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});sync();
+    if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});
+    if(policy_==CommitSyncPolicy::ProcessCrash)sync();
+    else if(policy_==CommitSyncPolicy::ProcessCrashDataSync)sync_data();
+    // ProcessCrashNoSync: the kernel page cache survives a process-only SIGKILL.
     generation_=next;durable_=head_;undo_.clear();purge_empty();
   }
   auto snapshot(std::uint64_t space)const{
