@@ -148,7 +148,11 @@ class JournalStore {
       const auto n=std::min(size-done,frame_payload-inside);
       if(pending_valid_ && block==pending_block_){if(inside+n>pending_used_)fail();std::memcpy(out.data()+done,pending_.data()+inside,n);}
       else {
-        Page scratch{};const Page* page=nullptr;
+        // On a cache hit no temporary page is read at all. On a miss,
+        // read_some must fill all 4096 bytes before either checksum is tested;
+        // the short-circuit size guard rejects partial reads first.
+        // Do not clear 4 KiB on every cached header/payload lookup.
+        Page scratch;const Page* page=nullptr;
         if(cache_.empty()){if(read_some(physical(block),scratch.data(),scratch.size())!=scratch.size() || !frame_header(scratch) || !frame_payload_valid(scratch))fail();page=&scratch;}
         else {auto& entry=cache_[block%cache_.size()];
           if(entry.page!=block){entry.page=UINT64_MAX;if(read_some(physical(block),entry.bytes.data(),entry.bytes.size())!=entry.bytes.size() || !frame_header(entry.bytes) || !frame_payload_valid(entry.bytes))fail();entry.page=block;}
