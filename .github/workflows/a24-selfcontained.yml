@@ -1,0 +1,50 @@
+name: A24 single-file evidence validation
+on:
+  push:
+    branches: ['codex/a24-selfcontained-20261114']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify unchanged a24 runtime
+        run: git diff --exit-code a24d2cd764027adec7371f268f99ccdca2307032 HEAD -- src include tests Dockerfile CMakeLists.txt
+      - name: Verify material format and provenance
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          python3 -B scripts/check-submission-contract.py --check-internal-references
+          python3 -B scripts/check-learning-material.py
+          python3 -B tests/learning_selection_tests.py
+          python3 -B tests/submission_contract_tests.py
+      - name: Verify evidence contained in one JSON
+        run: |
+          python3 - <<'PYCODE'
+          import json, subprocess
+          from pathlib import Path
+          d=json.loads(Path('agent/conversation.json').read_text())
+          old=json.loads(subprocess.check_output(['git','show','42f69e8320dcd8c802614f10cfb0699aa7551d2c:agent/conversation.json']))
+          for field in ['conversations','experiments','agent_observations']:
+              assert d[field]==old[field],field
+          assert d['layout_version']=='self-contained-20261114'
+          assert d['source_identity']['verified_engine_commit']=='a24d2cd764027adec7371f268f99ccdca2307032'
+          assert set(d['technical_appendices'])=={'algorithm','inputs','decisions'}
+          for item in d['technical_appendices'].values():
+              assert item['source']=='agent_retrospective_explanation'
+              assert isinstance(item['content'],str) and len(item['content'])>100
+          assert d['implementation_spec']['independent_reconstruction']=='not_performed'
+          assert 'required_companions' not in d['implementation_spec']
+          for chain in d['evidence_chains']:
+              assert all(e['pointer'].startswith('/conversations/') for e in chain['student_evidence'])
+              assert all(e['pointer'].startswith('/experiments/') for e in chain['result_evidence'])
+              assert not any(key in chain for key in ['score','suggested_score','scoring_rationale'])
+          manifest=json.loads(Path('agent/material-digest.json').read_text())
+          assert manifest['current_source_identity']==d['source_identity']
+          print('single-file evidence, unchanged records and current a24 identity passed')
+          PYCODE

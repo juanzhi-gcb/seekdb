@@ -3,15 +3,15 @@
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
- "submission_state": "Prompt-only expansion with a separately attributed retrospective implementation specification; runtime remains a24.",
+ "submission_state": "Self-contained Prompt experiment; runtime remains a24. No official Prompt score.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 126278,
-   "sha256": "a1900858d882a8098d5647a21ab09a9ea0e607c8c0bfbe662edbf2642d78c0d1"
+   "bytes": 128850,
+   "sha256": "271c4d6e1d8e7e6d239341bff80fd466599e4838e8ff60ad00961c235088618b"
   },
   "conversation.json": {
-   "bytes": 126278,
-   "sha256": "a1900858d882a8098d5647a21ab09a9ea0e607c8c0bfbe662edbf2642d78c0d1"
+   "bytes": 128850,
+   "sha256": "271c4d6e1d8e7e6d239341bff80fd466599e4838e8ff60ad00961c235088618b"
   }
  },
  "before_material": {
@@ -30,7 +30,7 @@
   "user_records": 100,
   "experiments": 45,
   "agent_observations": 24,
-  "retrospective_cases": 2
+  "retrospective_cases": 0
  },
  "original_records_preserved": true,
  "revision_baseline": {
@@ -65,13 +65,12 @@
   "sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233"
  },
  "latest_formal_feedback": {
-  "source": "user_supplied_platform_result",
-  "reported_commit": "007146cd3254c6eb9e1374563f78241c80dd058b",
-  "reported_time_shanghai": "2026-11-14 00:16",
-  "mysql_admission": "passed",
-  "performance_E_text": "3426.747635",
-  "prompt_result_text": "Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
-  "scope": "仅三项平台结果，没有正式T/B/M或三轮评审明细。当前Prompt无有效数值，不等于0分。"
+  "source": "user_reported_result",
+  "content": "MySQL 正式用例通过；性能评测完成；原始指标 E = 3615.639045；Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
+  "user_supplied_commit": null,
+  "assumed_commit_from_preceding_handoff": "42f69e8320dcd8c802614f10cfb0699aa7551d2c",
+  "identity_boundary": "本条反馈未再次提供SHA；上述版本关联依据前一轮正式分支交付上下文。",
+  "interpretation": "较a24历史3977.995012低9.109%；运行源码一致时环境或输入差异是可能原因，没有官方T/B/M，尚未确认。Prompt合并提示不等于0分，也不能区分无效类别。"
  },
  "selection_supplements": [
   {
@@ -127,11 +126,11 @@
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 14,
-  "note": "Evidence navigation only, no self-assigned grades."
+  "instances": 12,
+  "note": "Navigation only, no scores or score suggestions."
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "material_parent_commit": "00b6389c81b19d0a82a9f6b60f4a7253b6428c86",
+ "material_parent_commit": "42f69e8320dcd8c802614f10cfb0699aa7551d2c",
  "historical_source_identities": [
   {
    "original_identity": {
@@ -144,7 +143,7 @@
  ],
  "current_source_identity": {
   "verified_engine_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
-  "scope": "当前运行、构建、测试固定a24；新CI检查身份一致性。这里不引用旧版本的原生run作为a24结果。",
+  "scope": "当前材料运行代码保持a24；说明与关键证据全文在本JSON内。后续探索按各自历史身份解释。",
   "runtime_trees": {
    "src": "90dc2e6c149b12c2576d3327e3c621c81c26e524",
    "include": "10ed3388a60ff4621ed52d422b317859a41ea4b0",
