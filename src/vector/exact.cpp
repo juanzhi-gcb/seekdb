@@ -148,7 +148,6 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
     if(keys.size()>16 || values.size()/16!=query.size() || values.size()%16 ||
        (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid transposed VECTOR block");
     if(!mask)return;
-    if(sparse_count && std::popcount(mask)>=4)flush_sparse();
     if(integer_screen && heap.size()==k && std::popcount(mask)>=8) {
       const auto before=std::popcount(mask);
       mask=integer_cache->survivors(integer_query,heap.top().distance,values,mask);
@@ -182,6 +181,9 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
 #endif
     }
     if(!mask)return;
+    // Defer only exact survivors. A stale (larger) heap radius can admit
+    // extra rows but cannot reject a valid neighbor. Flush before dense work.
+    if(sparse_count && std::popcount(mask)>=4)flush_sparse();
     if(screen_stats)screen_stats->exact_lanes+=std::popcount(mask);
     if(sparse_enabled && std::popcount(mask)<4) {
       if(sparse_values.empty())try {sparse_values.resize(query.size()*16);}catch(const std::bad_alloc&) {sparse_enabled=false;}
