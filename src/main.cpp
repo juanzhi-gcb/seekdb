@@ -180,6 +180,9 @@ int main(int argc, char** argv) {
             else if(sync_mode=="fdatasync")options.commit_sync_policy=minivectordb::CommitSyncPolicy::ProcessCrashDataSync;
             else if(sync_mode=="nosync")options.commit_sync_policy=minivectordb::CommitSyncPolicy::ProcessCrashNoSync;
         }
+        if(const char* value=std::getenv("MVDB_ANN_M"))options.ann_m=std::stoul(value);
+        if(const char* value=std::getenv("MVDB_ANN_EF"))options.ann_ef=std::stoul(value);
+        if(const char* value=std::getenv("MVDB_ANN_EF_BUILD"))options.ann_ef_build=std::stoul(value);
         auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
                                 options);
         return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);

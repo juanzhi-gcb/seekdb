@@ -271,6 +271,12 @@ target_link_libraries(journal_storage_tests PRIVATE minivectordb_core)
 add_test(NAME journal_storage_model COMMAND journal_storage_tests)
 set_tests_properties(journal_storage_model PROPERTIES TIMEOUT 180)
 
+add_executable(ann_index_tests tests/ann_index_tests.cpp)
+target_include_directories(ann_index_tests PRIVATE src include)
+target_link_libraries(ann_index_tests PRIVATE minivectordb_core)
+add_test(NAME ann_index_recall COMMAND ann_index_tests)
+set_tests_properties(ann_index_recall PROPERTIES TIMEOUT 120)
+
 add_executable(projection_probation_tests tests/projection_probation_tests.cpp)
 target_link_libraries(projection_probation_tests PRIVATE minivectordb_core)
 add_test(NAME core_projection_probation COMMAND projection_probation_tests)

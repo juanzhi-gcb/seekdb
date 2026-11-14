@@ -3,6 +3,7 @@
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
 #include "projection_cache.hpp"
+#include "ann_index.hpp"
 #include "snapshot_row.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
@@ -150,6 +151,14 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
+    struct AnnVectors {
+      std::uint64_t table=0;
+      std::size_t column=0,dimension=0;
+      std::vector<std::int64_t> keys;
+      std::vector<float> vectors;
+    };
+    AnnVectors ann_vectors;
+    sql::HnswIndex ann_index;
     bool active=false,poisoned=false,busy=false;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -394,7 +403,7 @@ namespace minivectordb {
     }
     bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                       const std::optional<VectorIndex>& index,ExecutionInfo& info,
-                      const VectorVisitor& visit,std::vector<float>& scratch) {
+                      const VectorVisitor& visit,std::vector<float>& scratch,bool build_only=false) {
       const bool eligible=typed_eligible(s,b,index);
       const auto index_id=index?index->id:0;
       if(!eligible) {typed_snapshot.clear();projection_snapshot.clear();return false;}
@@ -405,6 +414,7 @@ namespace minivectordb {
         const auto text_column=typed_text_column(s,b,e,index);
         if(typed_snapshot.ready(s.id,index_id,e.column) &&
             text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
+          if(build_only) {info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();return true;}
           const auto predicates=typed_predicates(s,b);
           const auto [begin,end]=typed_scan_range(predicates);
           for(std::size_t r=begin;r<end;++r) {
@@ -433,7 +443,7 @@ namespace minivectordb {
               typed_snapshot.observe_row(text_column?
                 std::string_view(std::get<std::string>(row[*text_column])):std::string_view{},vector);
             }
-            if(row.matches(b.predicates)) {
+            if(!build_only && row.matches(b.predicates)) {
               if(vector.empty())vector=row.vector_for_distance(e.column,scratch);
               ++info.distances_computed;visit(key,vector);
             }
@@ -463,7 +473,47 @@ namespace minivectordb {
       info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
       return true;
     }
-    ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
+    bool ensure_ann_vectors(const Schema&s,const sql::BoundExpr&e,ExecutionInfo&info) {
+      if(!options.ann_index||!e.query||e.column>=s.columns.size())return false;
+      const auto dimension=s.columns[e.column].extent;
+      if(!dimension||e.query->size()!=dimension)return false;
+      if(ann_vectors.table==s.id&&ann_vectors.column==e.column&&ann_vectors.dimension==dimension&&!ann_vectors.keys.empty())return true;
+      AnnVectors fresh;fresh.table=s.id;fresh.column=e.column;fresh.dimension=dimension;
+      const auto row_bytes=dimension*sizeof(float);
+      const auto max_rows=options.scan_snapshot_bytes/std::max<std::size_t>(1,row_bytes);
+      std::vector<float> scratch;
+      try {
+        store.scan_in(s.id,[&](auto key,auto bytes) {
+          if(fresh.keys.size()>=max_rows)throw std::length_error("ANN snapshot budget");
+          ++info.rows_examined;
+          SelectRow row(s,key,bytes,options.selective_decode,info);
+          const auto vector=row.vector_for_distance(e.column,scratch);
+          if(vector.size()!=dimension)throw Error(ErrorCode::Corruption,"invalid vector dimension for ANN");
+          fresh.keys.push_back(key);
+          fresh.vectors.insert(fresh.vectors.end(),vector.begin(),vector.end());
+        });
+      } catch(...) {return false;}
+      ann_vectors=std::move(fresh);
+      ann_index.clear();
+      return true;
+    }
+    std::optional<std::vector<Neighbor>> ann_top_k(const Schema&s,const sql::Bound&b,const sql::BoundExpr&e,
+                                                   std::size_t k,ExecutionInfo&info) {
+      if(!options.ann_index||!b.predicates.empty()||!e.query||!k)return {};
+      if(!ensure_ann_vectors(s,e,info))return {};
+      const auto count=ann_vectors.keys.size();
+      if(count<256)return {};
+      const auto degree=std::max<std::size_t>(4,std::min(options.ann_m,count));
+      if(!ann_index.matches(count,ann_vectors.dimension,degree)) {
+        if(!ann_index.build(ann_vectors.vectors.data(),count,ann_vectors.dimension,degree,options.ann_ef_build))return {};
+      }
+      std::size_t scanned=0;
+      auto result=ann_index.search(ann_vectors.keys.data(),ann_vectors.vectors.data(),*e.query,k,options.ann_ef,&scanned);
+      info.rows_examined+=scanned;info.typed_rows_examined+=scanned;info.distances_computed+=scanned;
+      if(result.size()<std::min(k,count))return {};
+      return result;
+    }
+    ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink,SearchMode mode) {
       ExecutionInfo info;
       std::vector<std::string> labels;
       for(const auto&e:b.projection)labels.push_back(e.label);
@@ -502,8 +552,12 @@ namespace minivectordb {
         std::optional<VectorIndex> index;
         if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
           if(candidate.column==e.column) { index=candidate; break; }
-        auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
-        auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
+        std::optional<std::vector<Neighbor>> ann_winners;
+        if(mode==SearchMode::Ann&&b.predicates.empty()&&!b.primary_lookup)
+          ann_winners=ann_top_k(s,b,e,static_cast<std::size_t>(limit),info);
+        std::optional<std::vector<Neighbor>> cached_winners;
+        if(!ann_winners)cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
+        auto winners=ann_winners?std::move(*ann_winners):(cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
             ++info.distances_computed;
             if(options.reuse_vector_scratch)visit(key,row.vector_for_distance(e.column,vector_scratch));
@@ -555,7 +609,7 @@ namespace minivectordb {
                     options.table_scan_snapshot && snapshot.ready(s.id,0)) {
             replay_snapshot(s,b,e,info,visit,vector_scratch);
           } else scan_select(s,b,info,consume_row,true);
-        },{});
+        },{}));
         info.snapshot_bytes=snapshot.bytes();
         bool cached_projection=s.columns.size()<=16 && typed_snapshot.ready(s.id,index?index->id:0,e.column) && projection_snapshot.ready(s.id,index?index->id:0);
         for(const auto& p:b.projection)if(p.query?!(p.column==e.column&&p.query==e.query):s.columns[p.column].type==ColumnType::Vector)cached_projection=false;
@@ -617,7 +671,7 @@ namespace minivectordb {
       });
       return info;
     }
-    ExecutionInfo execute(std::string_view text,const QuerySink&sink) {
+    ExecutionInfo execute(std::string_view text,const QuerySink&sink,SearchMode mode) {
       if(busy)throw Error(ErrorCode::Transaction,"Database callbacks cannot reenter execute");
       if(poisoned)throw Error(ErrorCode::Transaction,"commit outcome uncertain; close and reopen Database");
       busy=true;
@@ -636,6 +690,7 @@ namespace minivectordb {
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {
         projection_snapshot.clear();
+        ann_vectors=AnnVectors{};ann_index.clear();
         if(options.reuse_scan_snapshot_buffer) {snapshot.invalidate();typed_snapshot.invalidate();}
         else {snapshot.clear();typed_snapshot.clear();}
       }
@@ -670,7 +725,7 @@ namespace minivectordb {
         schema=lookup_table(store,statement.table);
         if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
       }
-      if(statement.kind==sql::Statement::Select)return select(statement,schema,bound,sink);
+      if(statement.kind==sql::Statement::Select)return select(statement,schema,bound,sink,mode);
       // Binding and existing-key checks finish before any statement mutation.
       if(statement.kind==sql::Statement::Insert)for(const auto&r:bound.insert_rows)if(store.get_in(schema.id,std::get<std::int64_t>(r[schema.primary])))throw Error(ErrorCode::Constraint,"duplicate primary key");
       const bool automatic=!active;
@@ -761,8 +816,7 @@ namespace minivectordb {
   void Database::reset_cache_stats() noexcept {impl_->store.reset_cache_stats();}
   ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink,SearchMode mode) {
     if(mode!=SearchMode::Exact&&mode!=SearchMode::Ann)throw Error(ErrorCode::Type,"invalid search mode");
-    // Flat index enumerates all vectors in either mode; no approximate pruning.
-    return impl_->execute(sql,sink);
+    return impl_->execute(sql,sink,mode);
   }
   bool Database::in_transaction()const noexcept {
     return impl_->active;

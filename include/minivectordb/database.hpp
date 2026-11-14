@@ -96,6 +96,12 @@ struct Options {
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
   bool journal_store=false; // New-file backend; existing formats autodetected.
+  // ANN mode uses a bounded IVF over an immutable base-table snapshot; exact
+  // mode keeps the exhaustive path. Small/filtered scans fall back to exact.
+  bool ann_index=true;
+  std::size_t ann_m=32;
+  std::size_t ann_ef=200;
+  std::size_t ann_ef_build=200;
   bool certified_candidate_search=true; // Exact exclusion certificate, otherwise reference fallback.
 };
 struct QuerySink {
