@@ -1,5 +1,6 @@
 #include "../src/sql/sql.hpp"
 #include <iostream>
+#include <algorithm>
 #include <set>
 #include <cfenv>
 #include <optional>
