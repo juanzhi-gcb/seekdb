@@ -6,12 +6,12 @@
  "submission_state": "Prompt-only a24-bound rebuild: conversations u01-u70, experiments e01-e126, observations a01-a50. Runtime unchanged at a24. Latest user-reported result is E=3615.639045 with Prompt invalid; this rebuild has not been platform-evaluated.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 98986,
-   "sha256": "56b949eae0ae5da4582ebdc505e8d74b1e8795fea75b4102123d3bceb4671702"
+   "bytes": 100184,
+   "sha256": "3d00434af827b6f8cf8e98c09d2065239f1fbfe97cc02a703bb8bde0720007e2"
   },
   "conversation.json": {
-   "bytes": 98986,
-   "sha256": "56b949eae0ae5da4582ebdc505e8d74b1e8795fea75b4102123d3bceb4671702"
+   "bytes": 100184,
+   "sha256": "3d00434af827b6f8cf8e98c09d2065239f1fbfe97cc02a703bb8bde0720007e2"
   }
  },
  "before_material": {
@@ -127,13 +127,13 @@
  ],
  "prompt_rubric": {
   "rule_version": "agent-learning-evidence-v3-unbounded",
-  "instances": 11,
+  "instances": 12,
   "dimensions": {
    "问题理解与自主拆解": 2,
    "技术理解与迁移": 1,
    "独立验证与质疑": 4,
    "实验与反馈迭代": 2,
-   "取舍与反思": 2
+   "取舍与反思": 3
   },
   "note": "Evidence index only; no self-assigned platform score."
  },

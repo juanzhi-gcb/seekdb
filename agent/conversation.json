@@ -1297,12 +1297,35 @@
    "scoring_rationale": "用户提出先正式提测验证方向；后续提供a24的3977.995012正式结果及Prompt无效状态。此闭环没有证明性能翻倍，也没有用户独立解释算法机制的记录。",
    "attribution_limit": "决策由学生提出；提测执行与后续结果尚未记录。",
    "evidence_state": "has_actual_result"
+  },
+  {
+   "instance_id": "R3",
+   "dimension": "取舍与反思",
+   "title": "在每日两次提交限制下设定 2× 目标",
+   "problem": "有限提交次数下，继续优化还是尽快提测。",
+   "student_evidence": [
+    {
+     "id": "u58",
+     "pointer": "/conversations/57/content",
+     "quote": "优化到提升幅度大一点，因为一天只有两天的提交次数，至少优化到现在性能分数2500的两倍再给我最终版"
+    }
+   ],
+   "result_evidence": [
+    {
+     "id": "e125",
+     "pointer": "/experiments/39/output",
+     "quote": "完整候选对正式ff117199：默认写入T=0.4796–0.4939、查询T=0.5314–0.6173、B=0.3586–0.3901"
+    }
+   ],
+   "scoring_rationale": "学生把每日提交次数作为约束，设定至少 2× 2500 的量化目标再提测；实验给出相对 ff117199 的完整 T/B/M 比值，写入约 2×、查询约 1.6–1.9×，形成目标-结果链，但学生未解释分项口径。",
+   "attribution_limit": "提交预算约束与目标由学生给出；实验设计、统计和分项解释由 Agent 完成。",
+   "evidence_state": "has_actual_result"
   }
  ],
  "review_feedback_context": {
   "source": "user_relay_of_organizer_explanation",
   "content": "用户转述常见无效原因：对话不足以支撑当前代码；三次独立评审从不同角度出发，结论差异可能导致证据不足。没有该仓库逐轮报告，不能认定这两项已是本次正式失败的确定原因。",
-  "response": "回到 6.5 有效的真实记录结构：固定 a24 运行源码，恢复五维中的技术理解与迁移实例，保留实现映射、真实请求/结果引用和 11 个独立实例；移除事后实现规格及 a24 之后的 J11/u71+ 实验。"
+  "response": "统一事实入口：固定 a24 运行源码，保留实现映射、真实请求/结果引用和 12 个独立实例；补齐五维覆盖，移除事后实现规格及 a24 之后的 J11/u71+ 实验。未伪造三次独立评审，也不保证消除模型分歧。"
  },
  "implementation_map": [
   {
@@ -1681,7 +1704,7 @@
  ],
  "dimension_evidence_inventory": {
   "source": "agent_evidence_inventory",
-  "user_contribution": "u43 拆分 T/B/M；u53/u65 要求逐版对照与止损；u69 要求阶段提测验证方向；u70 给出 a24 正式反馈。",
+  "user_contribution": "u43 拆分 T/B/M；u53/u65 要求逐版对照与止损；u58 在提交次数约束下设定 2× 目标；u69 要求阶段提测验证方向；u70 给出 a24 正式反馈。",
   "implementation_evidence": "implementation_map 绑定 a24 源码；e119/e123/e125 说明结构性改动、资源取舍和修复验证；e126 记录正式反馈。",
   "mechanism_explanation": "当前详细机制解释主要由 Agent 撰写；材料没有将其替换为学生独立推导证据。",
   "complete_scope": "这是确定范围内的记录选择与当前代码说明；没有声称囊括未保存的聊天或三次平台评审。记录不足以支持某项独立理解时保留该事实，不补造对话。"
