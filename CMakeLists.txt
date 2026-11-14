@@ -291,3 +291,12 @@ set_tests_properties(journal_batch_recovery PROPERTIES TIMEOUT 180)
 add_executable(stream_cache_tests tests/stream_cache_tests.cpp)
 target_link_libraries(stream_cache_tests PRIVATE minivectordb_core)
 add_test(NAME core_stream_cache COMMAND stream_cache_tests)
+
+add_executable(block_scale_tests tests/block_scale_tests.cpp)
+add_test(NAME core_block_scale COMMAND block_scale_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+ foreach(target journal_adversarial_tests page_commit_tests journal_batch_tests)
+  target_link_options(${target} PRIVATE -Wl,--wrap=fdatasync)
+ endforeach()
+endif()

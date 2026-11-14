@@ -13,6 +13,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#if defined(__linux__)
+#include <linux/falloc.h>
+#include <sys/syscall.h>
+#endif
 
 namespace minivectordb::detail {
 // J08/J10 remain readable and writable. New J11 files share batch metadata
@@ -69,9 +73,39 @@ class JournalStore {
   static std::uint64_t get(const unsigned char* p,unsigned n=8){std::uint64_t v=0;for(unsigned i=0;i<n;++i)v|=std::uint64_t(p[i])<<(8*i);return v;}
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
-  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
+  // Data and metadata needed to retrieve it (including file length) reach
+  // stable storage before a successful commit. Directory creation still uses
+  // the store's fsync path. Preserve both Ordered barriers and EINTR retries.
+  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);
+#if defined(__linux__)
+    const int result=::fdatasync(fd_);
+#else
+    const int result=::fsync(fd_);
+#endif
+    if(result==0)return;if(errno!=EINTR)io("journal data sync");}}
+  // A bounded reservation amortizes extent allocation across commits. Keep
+  // logical EOF unchanged so recovery/orphan truncation sees only real frames.
+  // Optional allocation failure never changes write/error/durability semantics.
+  std::uint64_t reserved_until_=0;
+  bool reservation_disabled_=false;
+  void reserve_extent(std::uint64_t end) noexcept {
+#if defined(__linux__) && defined(SYS_fallocate)
+    if(reservation_disabled_ || end<=reserved_until_)return;
+    constexpr std::uint64_t quantum=1024*1024;
+    const auto max=std::uint64_t(std::numeric_limits<off_t>::max());
+    if(end>max-(quantum-1)){reservation_disabled_=true;return;}
+    const auto target=(end+quantum-1)&~(quantum-1);
+    const int saved=errno;long result;
+    do {result=::syscall(SYS_fallocate,fd_,FALLOC_FL_KEEP_SIZE,off_t(reserved_until_),off_t(target-reserved_until_));} while(result<0&&errno==EINTR);
+    if(result==0)reserved_until_=target;else reservation_disabled_=true;
+    errno=saved;
+#else
+    (void)end;
+#endif
+  }
   void write_raw(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
+    if(framed_&&!bytes.empty())reserve_extent(offset+bytes.size());
     if(!framed_&&!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
     std::size_t done=0;
     while(done<bytes.size()){

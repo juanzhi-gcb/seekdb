@@ -136,3 +136,11 @@ int main() {
   disarm();std::cerr<<"FAIL "<<e.what()<<" after cases="<<cases<<std::endl;return 1;
  }
 }
+
+#if defined(__linux__)
+extern "C" int __real_fdatasync(int);
+extern "C" int __wrap_fdatasync(int fd) {
+ if(armed && ++syncs==fail_sync) {errno=EIO;return -1;}
+ return __real_fdatasync(fd);
+}
+#endif

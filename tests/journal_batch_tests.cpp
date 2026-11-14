@@ -70,3 +70,8 @@ int main(){try{
 #endif
  std::filesystem::remove_all(dir);std::cout<<"J11 batch model, signed keys, deletions, snapshots, orphan recovery, J10 writes and corruption passed\n";
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+#if defined(__linux__)
+extern "C" int __real_fdatasync(int);
+extern "C" int __wrap_fdatasync(int fd){if(armed)++syncs;return __real_fdatasync(fd);}
+#endif

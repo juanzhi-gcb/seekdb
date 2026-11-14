@@ -16,13 +16,14 @@
 namespace minivectordb::detail {
 // Auxiliary rejection index only. Original float32 vectors remain authoritative;
 // every survivor uses the unchanged sequential-double distance and tie order.
+// Each 16-row block owns its scale, so an outlier only weakens that block.
+// The existing outward error envelope is unchanged and uses the matching scale.
 class Int8BoundCache {
   std::unique_ptr<std::int8_t[]> codes_;
   std::unique_ptr<std::int32_t[]> norms_,sums_;
-  std::unique_ptr<double[]> errors_;
+  std::unique_ptr<double[]> errors_,scales_;
   const float* source_=nullptr;
   std::size_t rows_=0,dimension_=0,padded_=0;
-  double scale_=1;
   static double up(double v) {return std::nextafter(v,std::numeric_limits<double>::infinity());}
   static int quantize(double value,double scale) {
     return static_cast<int>(std::clamp(std::round(value/scale),-127.0,127.0));
@@ -163,10 +164,10 @@ public:
 #endif
   }
   void clear() noexcept {
-    codes_.reset();norms_.reset();sums_.reset();errors_.reset();
-    source_=nullptr;rows_=dimension_=padded_=0;scale_=1;
+    codes_.reset();norms_.reset();sums_.reset();errors_.reset();scales_.reset();
+    source_=nullptr;rows_=dimension_=padded_=0;
   }
-  std::size_t bytes() const noexcept {return rows_*(padded_+16);}
+  std::size_t bytes() const noexcept {return rows_*(padded_+16)+(rows_/16)*sizeof(double);}
   bool ready() const noexcept {return source_!=nullptr;}
   bool build(std::span<const float> source,std::size_t rows,std::size_t dimension,
              std::size_t budget,bool portable_test=false) {
@@ -174,19 +175,25 @@ public:
     if((!portable_test&&!available()) || !environment() || dimension<32 || dimension>4096 || rows<16)return false;
     const auto count=rows/16*16,padded=(dimension+3)/4*4;
     if(count>budget/(padded+16) || count>source.size()/dimension)return false;
-    double maximum=0;
-    for(std::size_t i=0;i<count*dimension;++i) {
-      if(!std::isfinite(source[i]))return false;
-      maximum=std::max(maximum,std::abs(static_cast<double>(source[i])));
-    }
-    const double scale=maximum>0?maximum/127:1;
+    // Include the per-block scales in the same bounded admission decision.
+    if(count/16>(budget-count*(padded+16))/sizeof(double))return false;
     try {
       codes_=std::make_unique<std::int8_t[]>(count*padded);
       norms_=std::make_unique<std::int32_t[]>(count);
       sums_=std::make_unique<std::int32_t[]>(count);
       errors_=std::make_unique<double[]>(count);
+      scales_=std::make_unique<double[]>(count/16);
     }catch(const std::bad_alloc&){clear();return false;}
-    for(std::size_t block=0;block<count;block+=16)for(std::size_t lane=0;lane<16;++lane) {
+    for(std::size_t block=0;block<count;block+=16) {
+      double maximum=0;
+      for(std::size_t i=0;i<16*dimension;++i) {
+        const auto value=source[block*dimension+i];
+        if(!std::isfinite(value)){clear();return false;}
+        maximum=std::max(maximum,std::abs(static_cast<double>(value)));
+      }
+      const double scale=maximum>0?maximum/127:1;
+      scales_[block/16]=scale;
+      for(std::size_t lane=0;lane<16;++lane) {
       std::int32_t norm=0,sum=0;double error=0;
       for(std::size_t d=0;d<padded;++d) {
         const double value=d<dimension?source[block*dimension+d*16+lane]:0;
@@ -198,7 +205,8 @@ public:
       norms_[block+lane]=norm;sums_[block+lane]=sum;
       errors_[block+lane]=finish_error(error,padded);
     }
-    rows_=count;dimension_=dimension;padded_=padded;scale_=scale;source_=source.data();return true;
+    }
+    rows_=count;dimension_=dimension;padded_=padded;source_=source.data();return true;
   }
   Query query(std::span<const float> vector) const {
     Query result;
@@ -237,7 +245,7 @@ public:
     for(std::size_t group=0;group<padded_/4;++group)for(std::size_t lane=0;lane<16;++lane)
       for(std::size_t k=0;k<4;++k)
         dots[lane]+=int((query.words[group]>>(k*8))&255U)*int(codes_[row*padded_+group*64+lane*4+k]);
-    const double scale_square=scale_*scale_,cross=2*scale_*query.scale;
+    const double scale=scales_[row/16],scale_square=scale*scale,cross=2*scale*query.scale;
     // Upward radius expansion covers original sequential-double subtraction,
     // square/add, sqrt rounding and equality/tie ordering, n <= 4096.
     const double expanded=up(up(radius)*(1+double(dimension_+8)*0x1p-48))+query.error;
