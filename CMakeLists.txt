@@ -279,3 +279,8 @@ set_tests_properties(core_wide_codec PROPERTIES TIMEOUT 120)
 add_executable(block_scale_tests tests/block_scale_tests.cpp)
 add_test(NAME core_block_scale COMMAND block_scale_tests)
 set_tests_properties(core_block_scale PROPERTIES TIMEOUT 60)
+
+add_executable(insert_literal_tests tests/insert_literal_tests.cpp)
+target_link_libraries(insert_literal_tests PRIVATE minivectordb_core)
+add_test(NAME core_insert_literal COMMAND insert_literal_tests)
+set_tests_properties(core_insert_literal PROPERTIES TIMEOUT 120)
