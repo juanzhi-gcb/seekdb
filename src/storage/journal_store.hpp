@@ -13,10 +13,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
-#if defined(__linux__)
-#include <linux/falloc.h>
-#include <sys/syscall.h>
-#endif
 
 namespace minivectordb::detail {
 // J08/J10 remain readable and writable. New J11 files share batch metadata
@@ -89,14 +85,14 @@ class JournalStore {
   std::uint64_t reserved_until_=0;
   bool reservation_disabled_=false;
   void reserve_extent(std::uint64_t end) noexcept {
-#if defined(__linux__) && defined(SYS_fallocate)
+#if defined(__linux__) && defined(FALLOC_FL_KEEP_SIZE)
     if(reservation_disabled_ || end<=reserved_until_)return;
     constexpr std::uint64_t quantum=1024*1024;
     const auto max=std::uint64_t(std::numeric_limits<off_t>::max());
     if(end>max-(quantum-1)){reservation_disabled_=true;return;}
     const auto target=(end+quantum-1)&~(quantum-1);
-    const int saved=errno;long result;
-    do {result=::syscall(SYS_fallocate,fd_,FALLOC_FL_KEEP_SIZE,off_t(reserved_until_),off_t(target-reserved_until_));} while(result<0&&errno==EINTR);
+    const int saved=errno;int result;
+    do {result=::fallocate(fd_,FALLOC_FL_KEEP_SIZE,off_t(reserved_until_),off_t(target-reserved_until_));} while(result<0&&errno==EINTR);
     if(result==0)reserved_until_=target;else reservation_disabled_=true;
     errno=saved;
 #else
