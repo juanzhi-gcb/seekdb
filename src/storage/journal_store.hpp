@@ -141,7 +141,7 @@ public:
   void commit(){
     if(generation_==UINT64_MAX)throw std::overflow_error("generation exhausted");const auto next=generation_+1;
     if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});
-    if(policy_==CommitSyncPolicy::ProcessCrash)sync();
+    if(policy_==CommitSyncPolicy::Ordered || policy_==CommitSyncPolicy::ProcessCrash)sync();
     else if(policy_==CommitSyncPolicy::ProcessCrashDataSync)sync_data();
     // ProcessCrashNoSync: the kernel page cache survives a process-only SIGKILL.
     generation_=next;durable_=head_;undo_.clear();purge_empty();
