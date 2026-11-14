@@ -29,6 +29,7 @@ class JournalStore {
   struct Undo {Key key;std::uint64_t value,head;};
   struct Cached {Page bytes{};std::uint64_t page=UINT64_MAX;std::size_t size=0;};
   int fd_;
+  bool preflush_supported_=true;
   CommitSyncPolicy policy_;
   bool framed_=false,batches_=false,pending_valid_=false;
   // A tagged reference contains a virtual batch offset, row slot, count and
@@ -79,6 +80,20 @@ class JournalStore {
       if(n<0){if(errno==EINTR)continue;io("journal pwrite");}if(!n)throw std::runtime_error("zero-length journal pwrite");done+=std::size_t(n);
     }
   }
+  // Scheduling hint only: never substitutes for commit's fsync barriers.
+  // Kick full framed ranges while directory publication / footer work remains.
+  // Unsupported filesystems keep the original path; real I/O errors propagate.
+  void start_writeback(std::uint64_t offset,std::size_t size){
+#if defined(__linux__) && defined(SYNC_FILE_RANGE_WRITE)
+    if(!preflush_supported_ || size<16384)return;
+    if(::sync_file_range(fd_,off_t(offset),off_t(size),SYNC_FILE_RANGE_WRITE)==0)return;
+    if(errno==ENOSYS || errno==EOPNOTSUPP || errno==EINVAL){preflush_supported_=false;return;}
+    if(errno==EINTR)return;
+    io("journal start writeback");
+#else
+    (void)offset;(void)size;
+#endif
+  }
   std::size_t read_some(std::uint64_t offset,unsigned char* output,std::size_t size)const{
     std::size_t done=0;
     while(done<size){ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pread);n=::pread(fd_,output+done,size-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
@@ -120,7 +135,7 @@ class JournalStore {
     // frame remains pending for its commit footer; no barrier is removed.
     std::array<unsigned char,64*1024> staged;
     std::size_t staged_size=0;std::uint64_t staged_at=0;
-    const auto flush_staged=[&]{if(staged_size){write_raw(staged_at,{reinterpret_cast<const char*>(staged.data()),staged_size});staged_size=0;}};
+    const auto flush_staged=[&]{if(staged_size){write_raw(staged_at,{reinterpret_cast<const char*>(staged.data()),staged_size});start_writeback(staged_at,staged_size);staged_size=0;}};
     try {
       std::size_t done=0;
       while(done<bytes.size()){

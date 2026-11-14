@@ -1,0 +1,28 @@
+name: A24 exact preflush native comparison
+on:
+  push:
+    branches: ['codex/a24-exact-preflush-20261115']
+permissions:
+  contents: read
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exactness, durability and three-round native T B M
+        run: bash bench/newa24/run.sh
+      - name: Preserve raw results and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: newa24-exact-preflush-${{ matrix.replica }}-${{ github.run_id }}
+          path: newa24-results/
+          retention-days: 14
