@@ -9,10 +9,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        route: [extent]
         include:
+          - route: cpu
+            candidate: 7db149c649fb6eb31c58d4490ce3796d55d5259e
           - route: frame
-            candidate: 400fa1ff0662a24c82d924e8f7f8ae7622795fc0
+            candidate: 46d76acec1c43663a70d451aef605450024c6733
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
