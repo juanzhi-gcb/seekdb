@@ -41,6 +41,12 @@ jobs:
           Path('store-results/'+name+'-read-assembly.txt').write_text('\n'.join(out)+'\n')
           PY
           done
+      - name: Reject short frames with production frame candidate
+        run: |
+          mkdir /tmp/frame-production
+          git archive 46d76acec1c43663a70d451aef605450024c6733 include src/storage | tar -x -C /tmp/frame-production
+          g++ -std=c++20 -O2 -ffp-contract=off -I/tmp/frame-production/include tests/frame_short_read_tests.cpp /tmp/frame-production/src/storage/store.cpp -o /tmp/frame-production/test
+          /tmp/frame-production/test > store-results/frame-short-read.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
