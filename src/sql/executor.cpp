@@ -3,6 +3,7 @@
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
 #include "projection_cache.hpp"
+#include "plan_cache.hpp"
 #include "snapshot_row.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
@@ -10,6 +11,9 @@
 #include "../vector/certified_candidates.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
+#include <charconv>
+#include <system_error>
+#include <unordered_map>
 #include <bit>
 #include "../storage/binary.hpp"
 #include <limits>
@@ -150,6 +154,14 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
+    struct SelectPlan {
+      Schema schema;
+      sql::Statement statement;
+      std::vector<sql::Literal*> literals;
+      bool has_limit=false;
+      std::size_t literal_count=0;
+    };
+    std::unordered_map<std::string,SelectPlan> select_plans;
     bool active=false,poisoned=false,busy=false;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -463,6 +475,36 @@ namespace minivectordb {
       info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
       return true;
     }
+    static std::vector<sql::Literal*> collect_literals(sql::Statement& statement) {
+      std::vector<sql::Literal*> literals;
+      for(auto& expression:statement.projection)if(expression.query)literals.push_back(&*expression.query);
+      for(auto& predicate:statement.predicates)literals.push_back(&predicate.value);
+      for(auto& order:statement.order)if(order.expression.query)literals.push_back(&*order.expression.query);
+      return literals;
+    }
+    std::optional<ExecutionInfo> try_cached_select(std::string_view text,const QuerySink&sink) {
+      sql::NormalizedSql normalized;
+      if(!sql::normalize_sql(text,normalized))return {};
+      auto it=select_plans.find(normalized.key);
+      if(it==select_plans.end()||it->second.literal_count!=normalized.literals.size())return {};
+      auto& plan=it->second;
+      for(std::size_t i=0;i<plan.literals.size();++i) {
+        auto& literal=*plan.literals[i];
+        literal.kind=normalized.literals[i].first?sql::Literal::String:sql::Literal::Number;
+        literal.text=normalized.literals[i].second;
+        literal.components.clear();
+      }
+      if(plan.has_limit) {
+        const auto& value=normalized.literals.back().second;
+        std::uint64_t limit=0;
+        const auto parsed=std::from_chars(value.data(),value.data()+value.size(),limit);
+        if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size())return {};
+        plan.statement.limit=limit;
+      }
+      auto bound=sql::bind(plan.statement,plan.schema);
+      store.set_write_cache_hint(false);
+      return select(plan.statement,plan.schema,bound,sink);
+    }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
       ExecutionInfo info;
       std::vector<std::string> labels;
@@ -630,12 +672,14 @@ namespace minivectordb {
       reset {
         busy
       };
+      if(auto cached=try_cached_select(text,sink))return *cached;
       auto statement=sql::parse(text);
       store.set_write_cache_hint(statement.kind!=sql::Statement::Select);
       // Includes failed DML/DDL, BEGIN, COMMIT and ROLLBACK. Conservative invalidation
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {
         projection_snapshot.clear();
+        select_plans.clear();
         if(options.reuse_scan_snapshot_buffer) {snapshot.invalidate();typed_snapshot.invalidate();}
         else {snapshot.clear();typed_snapshot.clear();}
       }
@@ -670,7 +714,25 @@ namespace minivectordb {
         schema=lookup_table(store,statement.table);
         if(statement.kind!=sql::Statement::CreateIndex)bound=sql::bind(statement,schema);
       }
-      if(statement.kind==sql::Statement::Select)return select(statement,schema,bound,sink);
+      if(statement.kind==sql::Statement::Select) {
+        sql::NormalizedSql normalized;
+        if(sql::normalize_sql(text,normalized)) {
+          auto literals=collect_literals(statement);
+          const auto expected=literals.size()+(statement.limit.has_value()?1:0);
+          if(expected==normalized.literals.size()) {
+            SelectPlan plan;
+            plan.schema=schema;
+            plan.statement=std::move(statement);
+            plan.literals=collect_literals(plan.statement);
+            plan.has_limit=plan.statement.limit.has_value();
+            plan.literal_count=normalized.literals.size();
+            auto& stored=select_plans[normalized.key];
+            stored=std::move(plan);
+            return select(stored.statement,stored.schema,bound,sink);
+          }
+        }
+        return select(statement,schema,bound,sink);
+      }
       // Binding and existing-key checks finish before any statement mutation.
       if(statement.kind==sql::Statement::Insert)for(const auto&r:bound.insert_rows)if(store.get_in(schema.id,std::get<std::int64_t>(r[schema.primary])))throw Error(ErrorCode::Constraint,"duplicate primary key");
       const bool automatic=!active;
