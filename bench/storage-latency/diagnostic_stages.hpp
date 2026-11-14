@@ -8,11 +8,11 @@
 extern "C" void mvdb_diag_begin();
 extern "C" void mvdb_diag_end();
 namespace mvdb_diag {
-inline constexpr std::array<const char*,17> labels={"json_parse","sql_parse","catalog","bind","select","topk","format","emit","execute","journal_apply","pack","row_encode","fsync","pread","winner_fetch","unpack","framed_read"};
+inline constexpr std::array<const char*,18> labels={"json_parse","sql_parse","catalog","bind","select","topk","format","emit","execute","journal_apply","pack","row_encode","fsync","pread","winner_fetch","unpack","framed_read","record_frame_crc"};
 struct Metric {std::uint64_t ns=0,calls=0;};
-struct Totals {std::uint64_t requests=0,wall=0,cpu=0;std::array<Metric,17> stages{};};
+struct Totals {std::uint64_t requests=0,wall=0,cpu=0;std::array<Metric,18> stages{};};
 inline thread_local bool active=false;
-inline thread_local std::array<Metric,17> stages{};
+inline thread_local std::array<Metric,18> stages{};
 inline thread_local unsigned kind=0,queries=0;
 inline thread_local std::uint64_t start=0,cpu_start=0;
 inline std::array<Totals,4> totals{};
