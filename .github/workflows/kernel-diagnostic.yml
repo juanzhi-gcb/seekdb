@@ -1,0 +1,45 @@
+name: Isolated exact kernel attribution
+on:
+  push:
+    branches: ['codex/exact-kernel-diagnostic-20261115']
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare kernels and masks, separate from native T B M
+        run: |
+          mkdir kernel-results
+          lscpu > kernel-results/lscpu.txt
+          g++ --version > kernel-results/compiler.txt
+          for pair in a24:a24d2cd764027adec7371f268f99ccdca2307032 cpu:7db149c649fb6eb31c58d4490ce3796d55d5259e radius:f57d827408691a42c856b423121a58c4e4f5df2d hybrid:65adc936a958c9a0b777c4c874249b73266b0900 lazykeys:e4ed945fd1ea243c42901079473ca541d8e12bd6; do
+            name=${pair%%:*}
+            sha=${pair#*:}
+            mkdir -p /tmp/kernel-$name
+            git archive "$sha" include src/vector src/types | tar -x -C /tmp/kernel-$name
+            extra=(); if [[ "$name" == lazykeys ]]; then extra=(-DLAZY_KEYS); fi
+            g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off "${extra[@]}" -I/tmp/kernel-$name/include -I/tmp/kernel-$name/src/vector bench/kernel_probe.cpp /tmp/kernel-$name/src/vector/exact.cpp /tmp/kernel-$name/src/types/value.cpp -o /tmp/kernel-$name/probe
+            /tmp/kernel-$name/probe > kernel-results/$name.jsonl
+          done
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('kernel-results')
+          results={p.stem:[json.loads(l) for l in p.read_text().splitlines()] for p in root.glob('*.jsonl')}
+          reference=results['a24']
+          for name,rows in results.items():
+              assert len(rows)==len(reference)
+              for a,b in zip(reference,rows):
+                  assert (a['rows'],a['shape'],a['round'],a['result_hash'])==(b['rows'],b['shape'],b['round'],b['result_hash']),name
+          print('All result hashes agree; timings are diagnostic only.')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: exact-kernel-diagnostic-${{ github.run_id }}
+          path: kernel-results/
