@@ -207,6 +207,22 @@ def verify_topk(response, truth, workload):
         assert math.isclose(row[1], distance, abs_tol=1e-10, rel_tol=1e-10), (row, ident, distance)
 
 
+def verify_recall(response, truth, workload):
+    assert response.get("ok") is True, response
+    assert response["columns"] == ["id", "d", "body"]
+    assert len(response["rows"]) == len(truth)
+    expected = {ident for ident, _ in truth}
+    returned = set()
+    for row in response["rows"]:
+        assert type(row[0]) is int and 0 <= row[0] < len(workload["vectors"])
+        assert row[0] not in returned
+        returned.add(row[0])
+        assert row[2] == workload["bodies"][row[0]]
+        assert isinstance(row[1], (int, float)) and not isinstance(row[1], bool)
+        assert math.isfinite(row[1])
+    return len(returned & expected)
+
+
 def summarize(samples):
     grouped = {}
     for sample in samples:
@@ -336,7 +352,7 @@ def run_one(args, Session, config, workload, truth, version, image, round_number
 
     def request(sql):
         started = time.perf_counter_ns()
-        response = session.request(sql, mode="exact")
+        response = session.request(sql, mode=args.search_mode)
         duration = (time.perf_counter_ns() - started) / 1e6
         if response.get("ok") is not True:
             raise AssertionError(response)
@@ -384,13 +400,32 @@ def run_one(args, Session, config, workload, truth, version, image, round_number
                       data_device=finish["data_device"], swap_bytes=finish["swap_bytes"])
         # End of measured resource window. Host correctness work and restarts follow.
         if phase == "query":
-            for j, response in warm_replies:
-                verify_topk(response, truth[j], workload)
-            for j, response in enumerate(replies):
-                verify_topk(response, truth[j], workload)
+            if args.search_mode == "ann":
+                for j, response in warm_replies:
+                    verify_recall(response, truth[j], workload)
+                unfiltered_hits = unfiltered_total = filtered_hits = filtered_total = 0
+                for j, response in enumerate(replies):
+                    hits = verify_recall(response, truth[j], workload)
+                    if j % 2 == 0:
+                        unfiltered_hits += hits
+                        unfiltered_total += len(truth[j])
+                    else:
+                        filtered_hits += hits
+                        filtered_total += len(truth[j])
+                result["recall_unfiltered"] = (unfiltered_hits / unfiltered_total
+                                               if unfiltered_total else 1.0)
+                result["recall_filtered"] = (filtered_hits / filtered_total
+                                             if filtered_total else 1.0)
+                result["recall"] = ((unfiltered_hits + filtered_hits) /
+                                    (unfiltered_total + filtered_total))
+            else:
+                for j, response in warm_replies:
+                    verify_topk(response, truth[j], workload)
+                for j, response in enumerate(replies):
+                    verify_topk(response, truth[j], workload)
+                result["recall_unfiltered"] = 1.0
+                result["recall_filtered"] = 1.0
             result["verified_queries"] = len(replies)
-            result["recall_unfiltered"] = 1.0
-            result["recall_filtered"] = 1.0
             result["responses_sha256"] = hashlib.sha256(
                 json.dumps(replies, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         verify_stored_rows(request, workload)
@@ -398,9 +433,10 @@ def run_one(args, Session, config, workload, truth, version, image, round_number
         session.start()
         verify_stored_rows(request, workload)
         if phase == "query":
-            verify_topk(request(workload["queries"][0])[0], truth[0], workload)
+            verify = verify_recall if args.search_mode == "ann" else verify_topk
+            verify(request(workload["queries"][0])[0], truth[0], workload)
             if args.queries > 1:
-                verify_topk(request(workload["queries"][1])[0], truth[1], workload)
+                verify(request(workload["queries"][1])[0], truth[1], workload)
         session.shutdown()
         result.update(passed=True, full_rows_before_restart=True, full_rows_after_restart=True,
                       restart_query_checked=(phase == "query"))
@@ -412,7 +448,7 @@ def run_one(args, Session, config, workload, truth, version, image, round_number
             close_session(session, result)
         finally:
             write_json(directory / "result.json", result)
-    print(json.dumps({key: result[key] for key in ("round", "version", "phase", "indexed", "T_ms", "B_bytes", "M_bytes", "passed")}), flush=True)
+    print(json.dumps({key: result.get(key) for key in ("round", "version", "phase", "indexed", "T_ms", "B_bytes", "M_bytes", "passed", "recall")}), flush=True)
     return result
 
 
@@ -428,6 +464,7 @@ def main(argv=None):
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--seed", type=int, default=20261110)
     parser.add_argument("--filter-type", choices=("bigint", "varchar"), default="bigint")
+    parser.add_argument("--search-mode", choices=("exact", "ann"), default="exact")
     parser.add_argument("--local-case-budget", type=int, default=600,
                         help="fixed before execution, includes preparation and post-measurement verification; never changes request timeout")
     args = parser.parse_args(argv)

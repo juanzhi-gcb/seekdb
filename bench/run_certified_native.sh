@@ -42,6 +42,10 @@ for schema in bigint varchar; do
     --oracle-bin "$scratch/oracle" --output "$result/capacity-$schema" --data-root "$scratch/data/contract" \
     --temp-root "$scratch/tmp/contract" --rounds 1 --rows 30000 --queries 100 --warmup 10 --filter-type "$schema" > "$result/capacity-$schema.log" 2>&1
 done
+sudo python3 -B bench/run_linux_contract.py --reference-image "$base" --candidate-image "$candidate" \
+  --oracle-bin "$scratch/oracle" --output "$result/ann-bigint" --data-root "$scratch/data/contract" \
+  --temp-root "$scratch/tmp/contract" --rounds 1 --rows 10000 --queries 1000 --warmup 10 \
+  --filter-type bigint --search-mode ann > "$result/ann-bigint.log" 2>&1
 sudo python3 - "$result" <<'PY'
 import json,sys
 from pathlib import Path

@@ -21,6 +21,8 @@ class HnswIndex {
   std::uint32_t entry0_=0, entry_top_=0;
   std::vector<std::vector<std::vector<std::uint32_t>>> links_;
   std::vector<std::uint8_t> levels_;
+  mutable std::vector<std::uint32_t> visit_;
+  mutable std::uint32_t visit_stamp_=0;
 
   static double squared(std::span<const float> a,std::span<const float> b) noexcept {
     double sum=0;
@@ -36,10 +38,12 @@ class HnswIndex {
     std::vector<std::uint32_t> result;
     if(layer<0||layer>top_layer_||!count_||!dimension_||query.size()!=dimension_)return result;
     ef=std::max<std::size_t>(ef,1);
-    std::vector<char> seen(count_,0);
+    if(visit_.size()!=count_)visit_.assign(count_,0);
+    if(++visit_stamp_==0){std::fill(visit_.begin(),visit_.end(),0);visit_stamp_=1;}
+    const auto stamp=visit_stamp_;
     std::priority_queue<Candidate,std::vector<Candidate>,std::greater<Candidate>> candidates;
     std::priority_queue<Candidate> nearest;
-    seen[entry]=1;
+    visit_[entry]=stamp;
     if(scanned)++*scanned;
     auto distance=squared(query,row(vectors,entry));
     candidates.emplace(distance,entry);
@@ -49,8 +53,8 @@ class HnswIndex {
       candidates.pop();
       if(nearest.size()>=ef&&current>nearest.top().first)break;
       for(const auto neighbor:links_[std::size_t(layer)][node]) {
-        if(seen[neighbor])continue;
-        seen[neighbor]=1;
+        if(visit_[neighbor]==stamp)continue;
+        visit_[neighbor]=stamp;
         if(scanned)++*scanned;
         const auto d=squared(query,row(vectors,neighbor));
         if(nearest.size()<ef||d<nearest.top().first) {
@@ -101,7 +105,7 @@ class HnswIndex {
     prune(vectors,layer,node);
   }
 public:
-  void clear() noexcept {count_=dimension_=degree_=0;top_layer_=0;entry0_=entry_top_=0;links_.clear();levels_.clear();}
+  void clear() noexcept {count_=dimension_=degree_=0;top_layer_=0;entry0_=entry_top_=0;links_.clear();levels_.clear();visit_.clear();visit_stamp_=0;}
   bool matches(std::size_t count,std::size_t dimension,std::size_t degree) const noexcept {
     return count_&&count_==count&&dimension_==dimension&&degree_==degree;
   }
