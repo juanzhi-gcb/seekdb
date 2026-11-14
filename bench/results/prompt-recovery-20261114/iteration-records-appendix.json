@@ -1,0 +1,30 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Actual latest official feedback from user; separately attributed Agent analysis. No runtime changes.",
+ "conversations": [
+  {
+   "id": "u91",
+   "source": "user",
+   "excerpt": true,
+   "content": "007146cd3254c6eb9e1374563f78241c80dd058b\n通过；此项为准入条件，不计排名分\n性能评测完成；原始指标 E = 3426.747635\nPrompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
+   "context": "用户提供2026-11-14 00:16（Asia/Shanghai）正式提测结果。保留commit及详情原文，省略表格和带凭据的地址。"
+  }
+ ],
+ "experiments": [
+  {
+   "id": "e141",
+   "source": "user_supplied_platform_result",
+   "purpose": "当前运行源码的正式成绩与Prompt复发",
+   "output": "007146cd3254c6eb9e1374563f78241c80dd058b正式MySQL通过，性能E=3426.747635；比dfee的2881.914324提高18.905257%，仍比a24的3977.995012低13.857418%。Prompt返回合并无效提示，没有有效数值；不能解释为0分，也不能由提示确定是待复核、越界还是材料摘要问题。没有T/B/M或三轮评审报告。原生测试改善没有充分预测正式平台表现。"
+  }
+ ],
+ "agent_observations": [
+  {
+   "id": "a63",
+   "source": "agent",
+   "title": "偏好推测未获验证，收敛材料表达",
+   "content": "上一轮将评审偏好推测和较长未来任务模板加入入口，并改变顶层阅读顺序；本次Prompt重新无效，不能继续将这些改动称为已验证优化。它们与代码、其他证据同时变化，且无评审明细，不能证明某一字段是根因。本次只恢复首次有效材料的顶层顺序，将新增偏好推测与长模板移到非评测说明，保留事实记录、贡献归属、当前源码和十四条候选证据索引。该材料收敛是待正式验证的假设，不是修复成功声明。"
+  }
+ ]
+}

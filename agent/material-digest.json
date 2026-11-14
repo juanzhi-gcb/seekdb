@@ -3,15 +3,15 @@
  "date": "2026-11-14",
  "scope": "Local file integrity only; not a platform evaluation result or a documented platform summary field.",
  "base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "submission_state": "Material-only revision on measured eab46369 runtime; no new performance changes or official scores.",
+ "submission_state": "Prompt expression recovery only; runtime identical to formally evaluated007146cd. New material not formally evaluated.",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 124363,
-   "sha256": "004a759392baa22f559856b1fe130e8580d71b8668d68b4196360832c1946a0f"
+   "bytes": 123305,
+   "sha256": "6f3ff9a1a182e85b494aea9336edd0a02d6b0fba52d8dc453a6773f9f6c807b2"
   },
   "conversation.json": {
-   "bytes": 124363,
-   "sha256": "004a759392baa22f559856b1fe130e8580d71b8668d68b4196360832c1946a0f"
+   "bytes": 123305,
+   "sha256": "6f3ff9a1a182e85b494aea9336edd0a02d6b0fba52d8dc453a6773f9f6c807b2"
   }
  },
  "before_material": {
@@ -27,9 +27,9 @@
   "source_binding": "Historical source hashes are checked against immutable Git objects, not ongoing working-tree changes."
  },
  "counts": {
-  "user_records": 90,
-  "experiments": 55,
-  "agent_observations": 27,
+  "user_records": 91,
+  "experiments": 56,
+  "agent_observations": 28,
   "retrospective_cases": 2
  },
  "original_records_preserved": true,
@@ -66,11 +66,12 @@
  },
  "latest_formal_feedback": {
   "source": "user_supplied_platform_result",
-  "reported_commit": "dfee55b84284f4c39d2df45951cdbcb1d1baf1a2",
+  "reported_commit": "007146cd3254c6eb9e1374563f78241c80dd058b",
+  "reported_time_shanghai": "2026-11-14 00:16",
   "mysql_admission": "passed",
-  "performance_E_text": "2881.914324",
-  "prompt_result_text": "Agent Prompt评测完成；原始分 = 6.500000",
-  "scope": "用户本次正式反馈。未提供T/B/M或逐维评审报告；实验分支无新正式分数。"
+  "performance_E_text": "3426.747635",
+  "prompt_result_text": "Prompt结果无效、待复核、超出平台0–100范围或缺少材料摘要，本项不参与排名；未截断或换算本地分数。",
+  "scope": "仅三项平台结果，没有正式T/B/M或三轮评审明细。当前Prompt无有效数值，不等于0分。"
  },
  "selection_supplements": [
   {
@@ -92,6 +93,11 @@
    "path": "bench/results/prompt-20261114/iteration-records-appendix.json",
    "bytes": 2096,
    "sha256": "f83615d95a5a855941e5a3a67421a95acec4add145e59757f1656812e7e0478e"
+  },
+  {
+   "path": "bench/results/prompt-recovery-20261114/iteration-records-appendix.json",
+   "bytes": 2087,
+   "sha256": "37f2f34ff66f25069275370dc41053a0e2837abb01f2ab312038cb2782cdf649"
   }
  ],
  "prompt_rubric": {
