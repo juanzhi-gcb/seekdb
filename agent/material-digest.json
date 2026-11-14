@@ -7,11 +7,11 @@
  "material_files": {
   "agent/conversation.json": {
    "bytes": 130338,
-   "sha256": "5a152ef14a4ef7724d16cdbb890dd7277f0dd49c6eb0686cd3362895abf9eb71"
+   "sha256": "8bec1241f5fa55ab037810afbdd4049020fa852eeef9a6a5bd9491266b929ad2"
   },
   "conversation.json": {
    "bytes": 130338,
-   "sha256": "5a152ef14a4ef7724d16cdbb890dd7277f0dd49c6eb0686cd3362895abf9eb71"
+   "sha256": "8bec1241f5fa55ab037810afbdd4049020fa852eeef9a6a5bd9491266b929ad2"
   }
  },
  "before_material": {
@@ -126,7 +126,7 @@
   {
    "path": "bench/results/post-3615-20261114/prompt-feedback-appendix.json",
    "bytes": 1306,
-   "sha256": "8c0ed61d25c04c46d5680bbf1338f23acf4ebe902127fc7b934709cc8f27c995"
+   "sha256": "417c201a3aba84c42b97a1c0297768ce8990afb46ee3299780c6763a2e3c8d8d"
   }
  ],
  "prompt_rubric": {
@@ -135,7 +135,7 @@
   "note": "Navigation only, no scores or score suggestions."
  },
  "historical_manifest_base_commit": "3ecba07c78adffd740bc4128bb545ec40b8eb5b6",
- "material_parent_commit": "f3bdd126cdf6576808cc62afb087a2bd46c549ec",
+ "material_parent_commit": "0e8aa8085e1fe2deeafe4e26f007db71f22a6cd9",
  "historical_source_identities": [
   {
    "original_identity": {

@@ -12,7 +12,7 @@
  ],
  "experiments": [
   {
-   "id": "e142",
+   "id": "e144",
    "source": "agent_actual_check_summary",
    "output": "42f69e8320dcd8c802614f10cfb0699aa7551d2c的CI43568532070通过a24运行身份核验：src、include、tests、Dockerfile、CMakeLists.txt与a24d2cd764027adec7371f268f99ccdca2307032一致。用户随后报告E3615.639045，对历史3977.995012为-9.109%。该条反馈没有再次给SHA；按此前交付上下文关联42f69e8。在上述版本关联成立时，相同源码排除了源码差异这一解释，不能据此证明机器波动；CPU能力、正式输入和分项T/B/M未提供。后续候选采用同机交替三轮比较，目前不把未完成运行写成结果。"
   }
