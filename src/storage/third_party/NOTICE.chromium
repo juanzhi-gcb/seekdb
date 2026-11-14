@@ -1,0 +1,6 @@
+Chromium IEEE CRC-32 PCLMUL folding function.
+Source: https://github.com/chromium/chromium/blob/53a2b53baf52fcd73b1a5029dcc8aaae5663ff0b/third_party/zlib/crc32_simd.c
+Copyright 2017 The Chromium Authors. BSD-3-Clause; see LICENSE.chromium.
+Only the SSE/PCLMUL function is included. No zlib dependency or runtime download.
+Adaptations: C++ namespace/types/alignment, internal inline name, guarded caller.
+The polynomial and folding math are unchanged. Unsupported CPUs use the original slicing-by-8 implementation.

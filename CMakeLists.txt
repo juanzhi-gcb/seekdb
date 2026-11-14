@@ -302,3 +302,8 @@ add_executable(insert_literal_tests tests/insert_literal_tests.cpp)
 target_link_libraries(insert_literal_tests PRIVATE minivectordb_core)
 add_test(NAME core_insert_literal COMMAND insert_literal_tests)
 set_tests_properties(core_insert_literal PROPERTIES TIMEOUT 120)
+
+add_executable(crc_span_tests tests/crc_span_tests.cpp)
+target_link_libraries(crc_span_tests PRIVATE minivectordb_core)
+add_test(NAME core_crc_span COMMAND crc_span_tests)
+set_tests_properties(core_crc_span PROPERTIES TIMEOUT 120)

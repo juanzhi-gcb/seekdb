@@ -3,6 +3,7 @@
 #include "minivectordb/profile.hpp"
 #include <cstddef>
 #include <cstdint>
+#include "third_party/chromium_crc32_pclmul.hpp"
 
 namespace minivectordb::detail {
 // Reflected IEEE CRC-32 used by format 02 (not the CRC-32C of x86 CRC32).
@@ -48,7 +49,7 @@ inline std::uint32_t page_crc32_load_le(const unsigned char* p) {
        | (static_cast<std::uint32_t>(p[2])<<16)
        | (static_cast<std::uint32_t>(p[3])<<24);
 }
-inline std::uint32_t page_crc32_span(std::uint32_t crc,const unsigned char* p,
+inline std::uint32_t page_crc32_span_slicing(std::uint32_t crc,const unsigned char* p,
                                     std::size_t size) {
   const auto& t=page_crc32_slicing_tables;
   while(size>=8) {
@@ -62,6 +63,27 @@ inline std::uint32_t page_crc32_span(std::uint32_t crc,const unsigned char* p,
   }
   while(size--) crc=(crc>>8)^page_crc32_table[(crc^*p++)&0xffu];
   return crc;
+}
+
+// IEEE CRC-32, with the same uncomplemented streaming state as the original.
+// Hardware CRC32 instructions compute CRC-32C and are deliberately not used.
+inline bool page_crc32_pclmul_available() noexcept {
+#if defined(__x86_64__) && defined(__GNUC__)
+  return __builtin_cpu_supports("sse4.2") && __builtin_cpu_supports("pclmul");
+#else
+  return false;
+#endif
+}
+inline std::uint32_t page_crc32_span(std::uint32_t crc,const unsigned char* p,
+                                    std::size_t size) {
+#if defined(__x86_64__) && defined(__GNUC__)
+  if(size>=64 && page_crc32_pclmul_available()) {
+    const auto bulk=size&~std::size_t(15);
+    crc=chromium_crc32::crc32_fold(p,bulk,crc);
+    p+=bulk;size-=bulk;
+  }
+#endif
+  return page_crc32_span_slicing(crc,p,size);
 }
 
 // The four checksum bytes are treated as zero, without modifying the page.

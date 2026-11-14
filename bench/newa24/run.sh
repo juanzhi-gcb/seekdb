@@ -25,7 +25,7 @@ for item in a24 candidate; do
 done
 git diff --exit-code "$baseline" HEAD -- src/sql/executor.cpp src/sql/parser.cpp src/sql/lexer.cpp src/vector/exact.cpp include/minivectordb/database.hpp src/main.cpp src/protocol
 sudo sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" > "$result/different-format-storage-bytes.txt"
-docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test > "$result/ctest.log" 2>&1
+docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test ctest --test-dir /build --output-on-failure -V > "$result/ctest.log" 2>&1
 python3 -B bench/vendor/seekdb-round2-f4d4e26/protocol_check/run.py --image mvdb:newa24-candidate --output "$result/public" > "$result/public.log" 2>&1
 g++ -std=c++20 -O2 -ffp-contract=off bench/jsonl_oracle.cpp -o "$scratch/oracle"
 for profile in grid-bigint grid-varchar continuous-bigint cluster-bigint outlier-bigint small-short-bigint large-grid-bigint large-continuous-bigint large-outlier-bigint; do
