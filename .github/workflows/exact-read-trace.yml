@@ -1,0 +1,30 @@
+name: A24 exact request and sync attribution
+on:
+  push:
+    branches: ['codex/exact-read-trace-20261115']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Instrumented attribution only; never official score evidence
+        env:
+          CANDIDATE_REF: 46d76acec1c43663a70d451aef605450024c6733
+        run: bash bench/storage-latency/run.sh
+      - name: Preserve diagnostics including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exact-read-trace-${{ matrix.replica }}-${{ github.run_id }}
+          path: storage-trace-results/
+          retention-days: 14
