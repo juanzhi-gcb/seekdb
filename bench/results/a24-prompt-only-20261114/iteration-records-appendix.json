@@ -1,0 +1,41 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "New user messages preserved verbatim and a separately attributed Agent explanation. Existing records are unchanged.",
+ "conversations": [
+  {
+   "id": "u94",
+   "source": "user",
+   "content": "继续大胆优化，保留宽字编码的小幅收益，淘汰没收益的路线。先定位真正占比高的端到端 T 瓶颈，再尝试更有突破性的方案，每版都和 a24 做完整原生 T、B、M 对照，有明显收益再给我正式提测版。"
+  },
+  {
+   "id": "u95",
+   "source": "user",
+   "content": "继续收齐两台原生结果，对比这两条路线相对 a24 的完整 T、B、M，有稳定收益就叠加，再测小数据和大数据；收益不明显就换更大胆的路线，先别给我正式提测版。"
+  },
+  {
+   "id": "u96",
+   "source": "user",
+   "content": "继续"
+  },
+  {
+   "id": "u97",
+   "source": "user",
+   "content": "a24那版其实已经不错了吧"
+  },
+  {
+   "id": "u98",
+   "source": "user",
+   "content": "在a24的基础上改改prompt试试吧"
+  }
+ ],
+ "experiments": [],
+ "agent_observations": [
+  {
+   "id": "a68",
+   "source": "agent",
+   "title": "固定a24运行实现，只调整材料的版本与因果关系",
+   "content": "按u98固定a24d2cd764027adec7371f268f99ccdca2307032的src、include、tests、Dockerfile及CMakeLists.txt。本次修改材料入口、证据导航和解释文档。a24主线采用e119的J08追加日志、e123的响应缓冲复用、e125的投影缓存观察修复，并由e126记录用户提供的正式3977.995012反馈。后续J11及新编码/解析/分块筛选属于其他实验，未加入本次运行实现。历史记录中的“当前版本”指记录产生时的版本，不覆盖本次source_identity。"
+  }
+ ]
+}

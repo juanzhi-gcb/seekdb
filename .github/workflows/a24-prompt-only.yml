@@ -1,0 +1,40 @@
+name: A24 prompt-only material validation
+on:
+  push:
+    branches: ['codex/a24-prompt-only-20261114']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify a24 baseline identity
+        run: git diff --exit-code a24d2cd764027adec7371f268f99ccdca2307032 HEAD -- src include tests Dockerfile CMakeLists.txt
+      - name: Verify material and archived provenance
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          python3 -B scripts/check-submission-contract.py --check-internal-references
+          python3 -B scripts/check-learning-material.py
+          python3 -B tests/learning_selection_tests.py
+          python3 -B tests/submission_contract_tests.py
+      - name: Verify current implementation evidence
+        run: |
+          python3 - <<'PYCODE'
+          import json, hashlib
+          from pathlib import Path
+          d=json.loads(Path('agent/conversation.json').read_text())
+          assert d['source_identity']['verified_engine_commit']=='a24d2cd764027adec7371f268f99ccdca2307032'
+          for m in d['implementation_map']:
+              for f in m['files']:
+                  assert hashlib.sha256(Path(f['path']).read_bytes()).hexdigest()==f['sha256'],f['path']
+          for step in d['a24_development_chain']:
+              for name in step.get('code',[])+step.get('tests',[]):
+                  assert Path(name).is_file(),name
+          print('a24 implementation hashes and evidence paths passed')
+          PYCODE

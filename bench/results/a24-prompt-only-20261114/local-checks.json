@@ -1,0 +1,13 @@
+{
+  "bytes": 106150,
+  "sha256": "057eba6a52192178c78d421fc67568717e23ff4c97ca425d9fa389804af7b3ca",
+  "references": 93,
+  "counts": {
+    "user_records": 98,
+    "experiments": 45,
+    "agent_observations": 22,
+    "retrospective_cases": 2
+  },
+  "archive_selection_passed": true,
+  "a24_source_hashes_passed": true
+}
