@@ -1,0 +1,21 @@
+{
+ "schema_version": "minivectordb-learning-evidence-appendix-v1",
+ "base_archive_sha256": "86572d05ac0c64138fa8e7b76bd7c2ee7a54df8beb14765c529cbe0e00ab2233",
+ "source": "Actual local static review and separately attributed correction summary.",
+ "conversations": [
+  {
+   "id": "u100",
+   "source": "user",
+   "content": "确保其他agent认可这段prompt能生成这段优化代码"
+  }
+ ],
+ "experiments": [],
+ "agent_observations": [
+  {
+   "id": "a70",
+   "source": "agent",
+   "title": "三位独立静态审查后的版本、因果引用和规格修正",
+   "content": "用户要求其他Agent审查可实现性。三位Agent分别审阅规格充分性、源码对应和证据一致性，初审均为有条件支持同类实现指导，不支持已证实独立重建当前代码的强主张。审查发现清单残留旧运行身份、部分模块引用a24之后需求，以及量化公式和缓存/恢复状态不够具体。本次将旧身份归入历史，改引实际前置需求，并补充固定契约输入及算法附件。审查为本地静态分析，不是三次官方评分；独立重建仍未执行。"
+  }
+ ]
+}

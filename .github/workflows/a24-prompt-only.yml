@@ -44,5 +44,18 @@ jobs:
           for requirement in d['requirements_traceability']:
               for name in requirement['code']+requirement['tests']:
                   assert Path(name).is_file(),name
-          print('a24 implementation hashes, ten-dimension specification and evidence paths passed')
+          manifest=json.loads(Path('agent/material-digest.json').read_text())
+          identity=manifest['current_source_identity']
+          assert identity['verified_engine_commit']==d['source_identity']['verified_engine_commit']
+          assert identity['runtime_trees']==d['source_identity']['runtime_trees']
+          assert 'native_run_id' not in identity
+          assert set(prompt['required_companions'])==set(d['implementation_contracts'])
+          for path, meta in d['implementation_contracts'].items():
+              raw=Path(path).read_bytes()
+              assert len(raw)==meta['bytes'],path
+              assert hashlib.sha256(raw).hexdigest()==meta['sha256'],path
+          for module in d['implementation_map']:
+              assert all(int(ref['id'][1:])<=70 for ref in module['request_evidence'])
+          assert Path('conversation.json').read_bytes()==Path('agent/conversation.json').read_bytes()
+          print('a24 hashes, contracts, version identities, chronology and evidence paths passed')
           PYCODE

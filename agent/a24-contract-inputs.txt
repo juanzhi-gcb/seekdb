@@ -1,0 +1,25 @@
+a24实现规格的固定输入、行为范围与验证边界
+
+本文件与implementation-prompt.txt、a24-algorithm-contract.txt共同构成事后整理的规格包。目标是指导同类功能及关键优化的实现，并解释a24；不是历史生成记录或独立重建通过证明。
+
+固定外部输入
+官方协议与公开用例采用上游f4d4e26653af823a7601668802f80e374ad6643c的仓库快照：bench/vendor/seekdb-round2-f4d4e26/STDIO_PROTOCOL.md、protocol_check/config.json、protocol_check/_transport.py、protocol_check/_assertions.py、mysqltest/manifest.json及manifest引用的.test/.result文件。它们是接口输入。tests目录中的其余用例是本项目测试，不称为官方覆盖范围，也不承诺覆盖全部隐藏用例。
+
+a24行为范围（从既有实现提取）
+SQL一次处理一条语句，可选末尾分号；不接受额外尾随语句。支持CREATE TABLE、CREATE VECTOR INDEX ... ON table(column)、多行INSERT INTO ... VALUES、SELECT、UPDATE ... SET、DELETE、BEGIN、COMMIT、ROLLBACK。CREATE TABLE仅包含BIGINT、VARCHAR(n)、VECTOR(n)，恰好一个BIGINT主键，至多一个VECTOR列，n为1至UINT32_MAX。主键可为列内声明或单列表级声明。
+SELECT投影为*或列/L2_DISTANCE(向量列,向量字面量)，支持AS别名；WHERE为AND连接的列与常量比较，运算符为=、<、<=、>、>=；ORDER BY可多项ASC/DESC，LIMIT为非负整数。INSERT须提供所有列，无NULL或默认值填充；UPDATE不能改变主键；VECTOR不参与普通WHERE比较或直接排序。精确的标识符、引号及错误语法验收仍使用固定测试包；本概要不冒充完整形式文法。
+BIGINT为有符号64位整数。VARCHAR长度按Unicode标量计数，不按UTF-8字节数；拒绝过长编码、代理区、截断和非法续字节。比较常量只需合法UTF-8，不因超过列存储宽度而拒绝；比较使用Unicode标量顺序。VECTOR以float32保存；字面量先按有限double解释，再检查维度及float32转换。float32舍入溢出阈值为2^128-2^103，绝对值达到阈值拒绝；FLT_MAX与阈值之间映射到相应符号的FLT_MAX。合法double下溢可以成为带符号零。
+业务入口使用JSONL、/data持久化、精确ready及一请求一响应；错误码是a24的SYNTAX/SCHEMA/TYPE/CONSTRAINT/TRANSACTION/CORRUPTION或EXECUTION。协议配置决定公开断言如何映射类别，不能把示例错误字符串当作完整官方规范。
+
+必须等价与允许不同
+必须等价的是公开行为、精确答案和并列规则、事务/提交确认语义、错误与资源边界。变量名、文件组织、编译产物字节和实现细节无需相同。若要求读取既有数据库，还须满足磁盘格式契约。补充附件定义关键J08格式；旧02至07格式完整规范未在本包展开，不能据此声称已经足以重建全部历史格式兼容性。
+要求复现性能时，须另行固定硬件、构建、工作负载和测量窗口，再进行同机对照；功能等价或三位审查者认可均不能证明同样的T/B/M或正式E。
+
+关键主张的验证定位
+缓存反例：src/sql/projection_cache.hpp::append中的probation且complete提前返回；tests/projection_probation_tests.cpp::main/verify检查无过滤与VARCHAR交替、投影bytes>0、共享预算、索引、更新、回滚和删除。e125对应4ffb3656/run43231201624，汇总在bench/results/release-20261112/probation-comparison.json；native-1/ctest.log及native-2/ctest.log属于该汇总所标版本。不是本次重新运行记录。
+追加日志：src/storage/journal_store.hpp::apply/restore/commit及Store::commit；tests/journal_storage_tests.cpp::main检查模型、保存点分支、扫描中回滚、孤儿记录恢复和读取时损坏拒绝；tests/journal_adversarial_tests.cpp引入journal_adversarial_fixture.cpp执行故障探针。e119对应f8bbfeca9175602a2951bd7d2c378647f7392f47/run43217005915；归档汇总为bench/results/release-20261112/journal-comparison.json。该汇总记录原生套件通过及归档hash，并非逐故障点完整运行日志；尚未逐条建立的覆盖关系保留为待核对。
+保守筛选：tests/int8_bound_tests.cpp::run_case对照独立oracle、距离位模式、精确半径和上一个更宽ULP半径、无所有权/错位缓冲及非默认舍入环境。该源码是验收依据，不能单凭存在就宣称此次已重跑，也不能证明提示词重建出的新程序已通过。
+响应：tests/protocol_adversarial_tests.py、jsonl_buffer_tests.py核对状态确认与缓冲边界；e54/e55保留历史失败/修复，e123对应b170c05f/run43221866726，汇总在bench/results/release-20261112/responsearena-comparison.json。当前材料CI只验证身份、路径和归档引用，不重新宣称运行时故障矩阵通过。
+
+独立重建的完成条件
+向新的实现者提供本规格包和固定协议/验收输入，不提供a24实现源文件；先记录可访问输入，再生成实现，执行未修改的验收集，并逐项报告正确性、历史格式支持、资源及性能差异。依赖原内部API的单元测试需要透明适配；适配本身须审查，不能改变断言。此实验目前未执行。

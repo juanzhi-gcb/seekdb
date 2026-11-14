@@ -1,0 +1,14 @@
+{
+  "bytes": 126278,
+  "sha256": "a1900858d882a8098d5647a21ab09a9ea0e607c8c0bfbe662edbf2642d78c0d1",
+  "references": 131,
+  "counts": {
+    "user_records": 100,
+    "experiments": 45,
+    "agent_observations": 24,
+    "retrospective_cases": 2
+  },
+  "original_records_unchanged": true,
+  "static_reviews": 3,
+  "independent_reconstruction": "not_performed"
+}

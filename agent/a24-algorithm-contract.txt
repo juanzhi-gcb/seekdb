@@ -1,0 +1,158 @@
+MiniVectorDB a24关键算法补充契约
+核对日期：2026-11-14
+
+性质、来源与适用范围
+本文件由Agent依据冻结源码静态核对后事后整理，补充 implementation-prompt.txt 的关键算法细节。它不是历史原始提示词或生成对话，不证明该提示词曾生成a24，也不声称已经开展仅凭提示词或本契约独立重建、运行测试或获得同一性能的实验。
+目标版本标识取自原实施提示词：a24d2cd764027adec7371f268f99ccdca2307032。实际核对文件位于 work/new-a24-20261114/base/{src,include,tests}。以下路径均相对此冻结目录；这不是完整SQL、旧存储格式或全系统重建规格。公式中的浮点操作是规定顺序的机器运算，不能未经论证替换成代数等价的重排、融合运算或近似函数。
+
+一、精确答案与通用记号
+1. 存储向量及查询分量为有限float32。对每个候选，依维度d从0到n-1顺序计算：delta=double(q[d])-double(x[d])；S从double零开始执行S=S+delta*delta；最后D=sqrt(S)。逐维乘法与加法分开，禁止改变精确核的累加顺序。以输出double距离D升序、主键int64升序排序；堆中最差者是距离最大、距离相同时主键最大者。筛选不得删除sqrt舍入后与当前最差距离相等、仍可能靠主键胜出的候选。
+2. 记 U(z)=nextafter(z,+infinity)，DBL_MIN为最小正规正double，FLT_MIN为最小正规正float。RN为最近舍入，RZ为向零舍入。下面显式写出的括号、乘加和U调用顺序应保留。
+3. K=0返回空结果。保留候选始终回到原逐维double精确核；INT8/FP32结果不直接作为返回距离。SIMD沿不同候选并行，每个候选自身仍按原维度顺序计算。
+依据：src/vector/exact.cpp:16-50,75-178；src/vector/batch_simd.hpp:68-106。
+
+二、J08文件、记录和恢复
+A. 整数和校验
+所有磁盘多字节整数采用小端。主键int64按原64位位模式保存/恢复；命名空间为uint64。CRC采用反射IEEE CRC-32：反射多项式0xedb88320，初始0xffffffff，最终按位取反；不是CRC-32C。
+根页CRC覆盖全部4096字节，计算时将根页偏移32..35视为零。记录头CRC只覆盖记录头前44字节，含payload CRC字段，不含头CRC自身。payload CRC覆盖实际落盘的payload字节；压缩时先校验压缩字节再解码。空payload的该CRC为0。
+
+B. 根页与记录布局
+文件偏移0和4096各放一个4096字节提交根页，记录从8192开始。新根页先清零，再写：
+  0..7   ASCII "MVDBJL08"
+  8..15  generation:uint64
+  16..23 logical_head:uint64，0表示空链
+  24..31 extent:uint64，该提交根记录的追加末尾
+  32..35 root_crc:uint32
+  36..4095 保留零字节（写入行为；读取不单独要求这些字节为零，但纳入CRC）
+每条记录头固定48字节，随后紧接payload，不要求页对齐：
+  0..3   ASCII "JREC"
+  4..7   flags:uint32，0=原始值，1=压缩值，2=删除
+  8..15  namespace:uint64
+  16..23 primary_key:int64的位模式
+  24..31 previous:uint64，前一条逻辑可达记录，0=链尾
+  32..39 payload_length:uint64
+  40..43 payload_crc:uint32
+  44..47 header_crc:uint32
+删除记录要求length=0且payload_crc=0。读取头时拒绝flags>2、坏magic/头CRC，以及previous非零但不满足8192<=previous<当前记录偏移的情况。读取头必须满足at>=8192、at<=extent、48<=extent-at、payload_length<=extent-at-48；使用先减后比以免溢出。
+
+C. J08压缩payload
+J08写入对非删除值调用pack_bytes(value,planes=true)。只尝试原长度64..4064的值。RLE帧先写4字节原长度；控制字节<128表示随后control+1个原始字节；控制字节>=128表示将随后一个字节重复control-128+3次。编码器优先编码至少3字节的重复段（最长130），否则形成最长128字节literal，遇下一个至少3字节重复段停止literal。
+并行候选为原字节顺序RLE和4个字节平面RLE。平面顺序依次收集原下标0,4,8...；1,5,9...；2,6,10...；3,7,11...。仅encoded_size+8<=raw_size时允许压缩。平面帧若合格，且普通帧不合格或平面帧严格更短，则选择平面并把4字节长度的最高位置1；长度相同选普通帧。都不合格则flags=0保存原值。
+解码要求帧>=4字节，清除平面标志后的原长度64..4064，encoded_size+8<=原长度；拒绝段越界、输入不足、解码输出超过或不等于原长度。平面标志仅在允许planes的调用中接受；平面逆置必须还原每一原字节。
+
+D. 新建、选根和恢复边界
+新建：内存head=durable=0,end=8192,generation=0；先向4096写全零页，再向0写generation=0的有效根，然后fsync文件。外层Store还fsync父目录。
+重开：文件长度必须>=8192，先令内存end=实际文件长度F，完整读取两根。单根结构有效条件为magic和整页CRC正确，8192<=extent<=F，且head=0或8192<=head<=extent并且48<=extent-head。两根都无效则报损坏；只有一个有效选该根；都有效选generation较大者，generation相同选偏移0的根。不是“选记录链也能恢复的最高根”：选根之后重建失败直接报错，不再试旧根。
+用选中根的head和extent重建目录：沿previous向后遍历，逐条检查上述记录头与边界；保存偏移列表，再反向应用为从旧到新。非删除记录将(namespace,key)映射到该记录偏移，删除记录erase该键。恢复时不读取并验证全部payload，也不解压全部行；payload CRC在value_at读取该行时验证，且核对记录(namespace,key)符合请求、非删除。
+关键区分：恢复链检查上界是选中根的extent；内存追加end仍是物理长度F，不缩回extent。未提交或旧分支的尾部不因物理存在而可见，也不因回滚而截断；后续新记录从F追加。恢复head=durable=选中根head，generation=选中根generation。
+
+E. 批量追加、回滚、保存点
+批次最多128个变更；多条批次的非空值总原始payload上限512KiB（当前代码对单条变更不施加这个批次字节检查）。按有符号主键升序排列，同批重复键在写盘前拒绝。先编码全部记录和更新列表，第一条previous=当前head，后续previous=批内前条偏移。预留undo容量并为所有键预建目录槽后，再从end完成一次逻辑连续追加；pwrite循环处理短写/EINTR，返回0或其它错误失败。只有全部写完后才增加end并依次更新目录/head、记录旧槽值与旧head到undo。失败不得发布部分目录更新。
+保存点记录当前逻辑head，同时由Store绑定owner和事务epoch。restore(target)：相同head直接返回；target在当前undo祖先链中则逆序恢复旧目录槽和head；否则用target及当前end重建目录并清空undo。两者都不截文件、不回退end。rollback恢复durable，再清空undo、删除空目录槽。扫描先抓取(key,offset)快照，再按这些不可变偏移读值；回调中的回滚不能破坏快照引用的记录。
+
+F. 提交、中毒与故障模型
+提交前拒绝generation==UINT64_MAX。next=generation+1。ProcessCrash流程为：记录已写入 -> 写next%2对应根页 -> 最终fsync文件 -> 更新内存generation/durable、清undo/空槽 -> 返回成功。Ordered在写根之前另执行一次fsync，所以是数据fsync -> 根写入 -> 文件fsync。fsync遇EINTR重试；其它错误传播。默认ProcessCrash只针对进程退出/强杀而内核和文件系统仍存活的模型；本契约不承诺任意掉电或设备故障后的持久性。
+J08的Store::commit包围整个journal.commit；任何抛出异常都将Store标为poisoned。此后usable/transaction检查拒绝读、扫描、begin、restore、rollback和再次commit，要求关闭重开；不得把commit失败当成必然未提交。Database显式COMMIT和自动事务提交同样在commit异常时中毒，之后execute入口拒绝所有语句；析构时不会对中毒事务尝试回滚。语句执行阶段的错误仍恢复语句保存点，自动事务再回滚；提交错误处理必须放在这一语句回滚catch之外。
+依据：src/storage/journal_store.hpp:20-139；src/storage/page_checksum.hpp:8-77；src/storage/packed_codec.hpp:13-83；src/storage/store.cpp:551-608,620-623,714-739；src/sql/executor.cpp:596-598,625-641,709-726。
+
+三、INT8保守排除
+A. 可建立条件、布局和容量
+缓存构建先clear。生产可用条件为x86_64/GNU编译路径且运行时CPU支持AVX2；测试专用portable_test可绕过硬件要求但不绕过浮点环境。environment要求fegetround()==FE_TONEAREST；x86还要求(MXCSR & 0xffc0)==0x1f80，即最近舍入、禁用FTZ/DAZ且异常掩码满足该位检查。不得更改调用者浮点环境来强行启用。
+维度32<=n<=4096，行数>=16。只为m=floor(rows/16)*16个完整行建码；p=ceil(n/4)*4。额外内存为m*(p+16)：每行p字节code、int32 norm、int32 sum、double error。先检查m<=budget/(p+16)且m<=source.size()/n。分配失败退回无INT8。source是完整16候选转置块：block内原分量地址block*n+d*16+lane。
+对这m行全部有限float32分量计算M=max(abs(double(x)))。数据缩放sx=M/127；M=0时sx=1。对尾部补齐维度使用0。量化Q(v,s)=int(clamp(round(v/s),-127,127))，round为C++ std::round的半值远离零；不存在-128码。码布局为每16行、每4维一组的64字节块：block*p+(d/4)*64+lane*4+d%4。
+
+B. 数据和查询误差、范数
+对每行：ci[d]=Q(xi[d],sx)，Ni=sum ci[d]^2，Si=sum ci[d]，均为int32整数累加。每个维度的机器double误差项为：
+  ei[d]=U(abs(double(xi[d])-sx*ci[d]) + abs(sx*ci[d])*2^-48 + DBL_MIN)
+  Ei=U(sqrt(sum_d ei[d]*ei[d]) * (1+(p+8)*2^-48))
+求和按d顺序，含补零维度，式中每个显式运算保留顺序；数据重建乘法和减法误差由该宽裕包络覆盖。
+查询必须维度匹配、全有限且environment通过。另算查询最大绝对值Mq，sq=Mq/127（零查询sq=1），cq[d]=Q(q[d],sq)，补齐维度为0；查询码以cq+128存入uint32的连续4个小端字节。Nq=sum cq[d]^2；Eq使用上式把x,sx替换成q,sq。A=(double(Nq)*sq)*sq，按此左结合顺序计算。数据全局缩放不意味着查询与数据共用同一个缩放。
+
+C. 严格排除式
+给定当前最差输出距离R，对每行先得到带偏置整数点积 Di=sum_d (cq[d]+128)*ci[d]，再dot=Di-128*Si。计算：
+  ss=sx*sx
+  cross=(2*sx)*sq
+  B=double(Ni)*ss
+  C=cross*double(dot)
+  expanded=U(U(R)*(1+(n+8)*2^-48)) + Eq
+  lower=((A+B)-C) - ((abs(A)+abs(B))+abs(C))*2^-45
+  bound=U(expanded+Ei)
+  upper=U((bound*bound)*(1+2^-45))
+仅lower>upper时清除此行mask；相等必须保留。向量实现利用A、B非负使用(A+B)+abs(C)形成同一包络，不得让FMA收缩改变该判据。负lower意味着拒绝不了，不是错误。R非有限或R<0、查询无效、块span长度不是16*n、块地址不属于原source或不是16*n*sizeof(float)对齐的原块，则原mask不变。尾部临时补齐块不是原source，不使用此缓存排除。
+AVX2点积不要直接把带偏置查询送入可能饱和的maddubs：先恢复signed查询；以abs(query)和按query符号翻转的data code相乘，任意相邻两项上界32258，避免16位饱和，再加128*Si恢复带偏置点积。AVX-512 VNNI可直接使用unsigned-query/signed-data点积。所有实现必须保持与上述整数点积等价。
+
+D. SQL接入和自适应条件
+TypedScanCache::finish只有已转置且预算大于类型化主体占用时，才在剩余预算内尝试INT8；调用方还要求bounded_int8_screen、bounded_fp32_screen、wide_simd_vector_kernel三个选项都为true。转置本身在SQL路径只针对16<=n<=1024且至少16行，因此SQL内INT8实际受交集32..1024限制；4096是INT8组件的独立上限。
+查询侧要求allow_lower_bound && allow_wide && integer_cache存在才创建INT8 Query；allow_wide在这里是配置开关，不要求CPU真的有AVX-512，AVX2仍可使用INT8。INT8优先于FP32：堆已装满K、mask至少8行且integer_query有效时先试INT8；同一块不再接着做FP32筛选。每次累加试验候选数和排除数；累计候选>=128时，若2*排除数<候选数，则关闭本次查询后续INT8，否则继续；无论关闭与否都将这两个计数清零。关闭后后续块可以进入FP32路径。
+依据：src/vector/int8_bound.hpp:26-38,40-76,143-260；src/vector/exact.cpp:84-139；src/sql/typed_scan_cache.hpp:218-239；src/sql/executor.cpp:317-369,434。
+
+四、FP32筛选与精确半径外扩
+1. 宽路径wide=allow_wide && has_avx512()。FP32 screen启用需allow_lower_bound=true，并满足wide或(AVX2且FMA)，32<=n<=4096，且(MXCSR & 0xffc0)==0x1f80。非x86/GNU路径不开启。此路径以MXCSR判断SIMD环境；不要把INT8额外fegetround检查误写成这里已有的检查。
+2. AVX-512：每维float32差值以嵌入RZ、no-exception舍入求得；平方累加用RZ FMA。四条独立累加链处理d mod 4，余下维度加到第0链，最终用RZ求(s0+s1)+(s2+s3)。这是数学平方和的下界估计，与精确double输出核分离，不要求估计值与精确值相等。
+3. AVX2：16候选拆成两组8候选，各4条float32累加链。用普通RN float32减法、RN FMA求平方累加，最后按(s0+s1)+(s2+s3)归约；剩余维度加第0链。这是需向外误差包络修正的估计，不直接声称本身是下界。
+4. 设R是上一块处理完后堆中最差的sqrt输出距离；初始化阈值为+infinity。堆满时按下面顺序更新阈值T：
+  F=1+(n+8)*2^-49    （wide）
+  F=1+(n+8)*2^-20    （非wide）
+  H=0               （wide）
+  H=(n+8)*FLT_MIN    （非wide）
+  r=U(R)
+  T=U(r*r)
+  T=U(T*F)
+  T=U(T+H)
+候选估计L必须有限，并满足double(L)>T才排除；等于阈值、NaN或无穷估计均保留。不能改成R*R或>=。这包含sqrt舍入并列保护、原double参考误差，以及窄路径float32估计误差/下溢余量。
+5. 筛选仅在堆满且当前mask至少8候选时尝试；当INT8分支本块已执行时跳过FP32。INT8和FP32使用同一组trial_lanes/trial_rejected计数（INT8关闭时计数已清零）。FP32每累计>=128候选，若2*排除数<候选数则关闭本次查询后续FP32；之后清零计数。此退避只改变耗时，不放宽排除规则。
+6. 剩余候选精确求D、按(D,key)更新堆。筛选环境不满足只跳过筛选，不把FP32估计当答案。SQL转置路径的维度范围还受16..1024限制。
+依据：src/vector/batch_simd.hpp:13-65；src/vector/exact.cpp:75-178。
+
+五、类型化与投影缓存的身份、预算及状态
+A. 身份与资格
+两者均为empty/probation/building/ready/refused五态；probation仅观察，building未对外发布，ready才可复用。身份依靠保守失效保证所见版本不变，不保存一个可跨写事务复用的持久化版本证明。
+Typed身份：table_id、index_id（无索引为0）、vector_column，另有布局兼容条件dimension、BIGINT列数、可选text_column及其schema_width、budget。ready(table,index,column)本身只核前三项；执行器还核text_column一致。缓存所有BIGINT列（含主键）、一个向量列、最多一个VARCHAR谓词列，不能只缓存当前过滤后的行。无VARCHAR谓词查询沿用同身份现有text_column；有VARCHAR谓词时选择该列。多个不同VARCHAR谓词列不适合该缓存。
+Projection身份只有table_id、index_id及其budget；不随向量列/文本谓词列切换而重新观察。它保存所有非向量字段的投影，不保存第二份向量；Entry为{int64 key,uint32 offset,uint32 length}，length最高位表示投影帧压缩。
+类型化资格还要求typed_scan_cache、共享预算>0、不是primary_lookup；有索引要求paired_index_scan，无索引要求table_scan_snapshot。谓词须为BIGINT/int64常量或启用text_scan_cache的同一VARCHAR列/string常量。不满足时清类型化及投影并走普通路径。若同table/index已有raw ScanSnapshot的probation/ready/refused等任何非empty观察状态，保持raw选择，不再因无文本查询切回类型化。类型化路径进入后先clear raw快照，避免同时拥有两份主体。
+
+B. 默认预算和协商顺序
+默认scan_snapshot_bytes=64MiB；类型化内部再cap为64MiB。默认projection_cache_bytes=8MiB，投影内部cap为8MiB；执行器给投影P=min(projection_cache_bytes,scan_snapshot_bytes/4)。raw快照内部上限8MiB。预算仅针对这些数组/Entry等计数对象，不代表进程峰值；排序、容器、分配器、响应、准备scratch及页缓存另计。
+未ready的类型化路径每次严格执行：
+  (1) projection.start(table,index,P,allocate=false)，允许进入probation和检查准入，不先分配投影。
+  (2) reserved=projection.planned_bytes()；若已有数组返回实际计划数组占用；否则已完成probation返回expected_rows*sizeof(Entry)+expected_bytes；其它返回0。
+  (3) typed.start(...,scan_snapshot_bytes-reserved,reuse_scan_snapshot_buffer,text_column)。
+  (4) typed拒绝则clear投影；typed进入building才再调用projection.start(...,allocate=true)。若text_column存在而typed拒绝，则清两者并返回普通路径；无text_column且typed拒绝仍可完成正确的原行扫描，但不建立该缓存。
+  (5) 完整扫描全部有效行：先append投影；typed building则append每行向量/所有BIGINT/可选文本，否则observe_row。完成这些捕获之后才应用本次谓词计算答案。
+  (6) 索引路径scan_equal_in验证基表/索引键集并核引用身份；任一异常清两个缓存并传播（键集不一致转Corruption）。仅扫描完整成功后先projection.finish，再typed.finish。
+
+C. 类型化状态和容量
+首次身份进入probation并返回，不新分配数组；observe_row按实际全表行数做饱和计数，并测可选文本最大实际字节宽度。完整扫描finish只标probation_complete，不直接ready。下一次start才准入/构建。
+计算schema_text_width=VARCHAR声明extent*4；完成观察后使用实测最大字节宽度，否则用schema上界。设s=BIGINT列数，meta=s*sizeof(size_t)，row=4*n+8*s；有文本再加实测width+sizeof(uint32)。用除法和减法先验证各项不超过budget再乘加；n=0、s=0或capacity=floor((budget-meta)/row)=0时拒绝。完成观察且N>capacity拒绝；否则容量缩至min(capacity,max(1,N))。allocate的实际字节为meta+capacity*row。容量复用不允许保留旧行数/旧验证；容量不足或allocated_text_width不兼容时先release，再分配。bad_alloc拒绝并释放。
+特殊预算变化：同一table/index/vector/text及同布局、已完成probation时，若因为投影计划占用使typed预算变化，应先暂存观察N/width，release旧分配，再恢复该观察及complete并设置新预算；不要把完整观察丢掉。其它预算/布局变化clear，身份变化则按reuse配置invalidate或clear并重新probation。
+append需building；达到capacity则refuse；维度不符或文本大于观测宽度报Corruption；复制所有字段后count++。当前typed.finish没有额外强制count==probation_rows的检查，发布依赖执行器完成同一不可变身份的全量扫描；不要声称已有这一额外检查。finish可先cluster、再转置，最后尝试INT8并置ready。cluster/转置准备bad_alloc只放弃对应优化，不发布虚假有序/转置状态。
+转置：仅16<=n<=1024、count>=16时，每完整16行转为d*16+lane，尾部保持原AoS；scratch为16*n个float，先分配成功再改任何块。cluster优先按缓存文本列，否则第一非主键BIGINT列升序、主键打破并列；仅count在2..131072且单行scratch计算不超过65536时尝试，全部准备分配完成后才置换并发布排序依据。后续范围缩小只能使用实际发布的该列有序边界，其它谓词仍验证。
+
+D. 投影观察与构建
+start先cap预算；table/index/budget不同则clear。empty转probation并返回；其它非probation状态不重启。probation要求完整观察、非零budget和expected_rows，并检查expected_rows*sizeof(Entry)+expected_bytes不溢出且<=budget，否则refuse。allocate=false在准入后返回；allocate=true分配准确大小数组，失败refuse；成功count=used=0进入building。
+append只在probation/building工作；特别是probation且complete时立即返回，不再累计任何行或字节。这样无过滤观察后初次遇VARCHAR、typed重新probation时，不把原投影预计行数从N变为2N。
+每行扫描已验证行编码，跳过所有VECTOR，仅提取BIGINT的8字节和VARCHAR的长度/原字节；非向量原始投影scratch上限65536字节，超过则refuse。投影自身尝试普通RLE（不启用字节平面，且仍限64..4064并至少省8字节），否则存原投影。probation累加Entry占用和实际保存payload长度并逐步预算校验；building要求count<expected_rows、当前payload<=expected_bytes-used，写Entry及payload。finish在probation只置complete；在building必须count==expected_rows且used==expected_bytes，否则refuse；随后Entry按有符号key排序，发现重复key则clear并报Corruption，最后ready。读取以key二分，按length低31位定位payload，高位决定是否解压。
+
+E. 失效与失败顺序
+Database.execute先检查busy和poisoned，再parse；只有parse成功后设置write_cache_hint并对所有非SELECT清投影。reuse_scan_snapshot_buffer=true时raw及typed仅invalidate，false时clear。失效在BEGIN/COMMIT/ROLLBACK的事务状态检查、schema查找、绑定及DML执行之前，因此解析成功但绑定失败或事务命令失败也会失效；解析失败尚未走到该点。
+typed.invalidate清INT8、有效count/身份/观察/排序和转置证明，保留可复用主体分配；clear额外release数组并清布局。projection.clear总是释放数组和观察。SELECT构建异常必须清理未完成两缓存；完整观察完成不等于已有可用缓存。非SELECT失效规则防止提交、回滚、失败DML以及事务/根ABA后误用旧内容。
+依据：include/minivectordb/database.hpp:25-98；src/sql/typed_scan_cache.hpp:19-239,270-272；src/sql/projection_cache.hpp:16-87；src/sql/scan_cache.hpp:18-84；src/sql/executor.cpp:245-270,295-440,609-617。
+
+六、入口与默认配置边界
+1. 可执行程序默认JSONL，只有显式--protocol dev-tsv走开发协议；默认--data-dir=/data，数据库文件/data/database.mvdb，排序目录/data/tmp，排序预算8MiB。main创建目录并显式设置options.journal_store=true。Database Options自身journal_store=false，底层Store构造器journal_format=false；不要用后两者的默认构造行为冒充业务入口。
+2. Database Options默认commit_sync_policy=ProcessCrash，底层Store构造器默认Ordered。现有文件由Store根据头magic自动识别J08或已有旧格式，不因新库配置而迁移。format01明确拒绝；本契约没有定义旧格式的完整布局。
+3. Database Options中scan_snapshot_bytes=64MiB，projection_cache_bytes=8MiB，data_cache_bytes=524288，index_cache_bytes=1MiB；J08自己的读缓存按min(data_cache_bytes,512KiB)/sizeof(Cached)个槽分配（Cached含4096字节页和页号/长度元数据）。typed/text/转置/聚集/范围裁剪、validated/batched/SIMD/wide向量核、FP32和INT8筛选选项在该Options中均默认true；是否实际生效仍受上述CPU、维度、查询形状、预算、观察状态和退避限制。
+4. JSONL启动输出{"type":"ready"}并flush。每请求上限16MiB，保留已验证id的原始JSON表示。Response预留65536字节并跨请求复用容量；每请求reset关闭上次暂存文件、清旧payload。超过缓冲时在数据目录mkstemp并立即unlink，写入payload；prepare完成fflush和rewind后才emit。id不进入payload暂存，emit才输出id，避免长id使已提交的短确认响应因暂存失败被错误报告为执行失败。执行/prepare异常在emit前输出一条错误响应；emit在该catch之外，传输开始后失败不再补第二条业务响应。每成功响应换行并flush。shutdown和EOF回滚未完成事务；中毒状态不能假装通过回滚解决。
+依据：src/main.cpp:64-85,168-182；include/minivectordb/database.hpp:25-98；include/minivectordb/store.hpp:48-53；src/storage/journal_store.hpp:88-95；src/storage/store.cpp:587-608；src/protocol/jsonl.hpp:160-199,251-309。
+
+七、对应测试入口与证据限度
+下面只列静态发现的测试入口，未在本次编写中执行，不表示已通过，更不表示独立重建通过：
+- tests/journal_storage_tests.cpp::main：随机模型、保存点分支、扫描回调变更、孤儿尾部恢复；34-38行明确payload损坏在get读取时拒绝。
+- tests/journal_adversarial_tests.cpp及tests/journal_harness.hpp：J08显式选择和复用故障测试；注意JournalHarnessStore强制Ordered，不能把其覆盖直接当成默认ProcessCrash全部故障边界已验证。
+- tests/commit_policy_tests.cpp::successful_commit/kill_case/poison_checks/fault_case：提交顺序、强杀、中毒与I/O包装测试；这些函数本身使用的后端配置须与J08测试包装一起核对，不能仅凭名称认为覆盖所有后端组合。
+- tests/int8_bound_tests.cpp::run_case：oracle与距离位模式比较、半径/nextafter边界、浮点环境回退；main维度集合含32、127、128、129、1024、4096。
+- tests/bounded_screen_tests.cpp::dataset/direct_lower_bounds/environment_fallback：筛选差分、直接界检查、MXCSR回退。
+- tests/projection_probation_tests.cpp::main：无过滤/VARCHAR交替、投影非零及共享预算、索引切换、更新/回滚/删除。
+- tests/typed_scan_tests.cpp::budgets/lifecycle/failed_build/cache_unit_contract/transposed_unit_contract/clustered_cache_contract/ordered_bounds_contract：对应容量、生命周期、失败发布及排列状态。
+- tests/jsonl_buffer_tests.py::BufferedFrames：分片输入、立即响应、超限排空、缓冲边界与EOF末帧。
+验收仍需将本契约提供给未读取当前实现的实现者，完成独立实现、正确性与故障测试及同负载性能对照；在这些实验发生之前，只能主张“事后源码核对的操作性补充规格”。
