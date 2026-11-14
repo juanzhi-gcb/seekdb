@@ -23,8 +23,8 @@ for item in a24 candidate; do
   docker run --rm "${limits[@]}" --mount "type=bind,src=$repo/bench/newa24/storage_bytes_probe.cpp,dst=/probe.cpp,readonly" --mount "type=bind,src=$scratch/probe,dst=/out" --entrypoint sh "mvdb:newa24-$item-test" -c "g++ -std=c++20 -O2 -ffp-contract=off -I/src/include -I/src/tests /probe.cpp /build/libminivectordb_core.a -o /out/probe-$item" > "$result/bytes-build-$item.log" 2>&1
   docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/probe,dst=/out,readonly" --entrypoint "/out/probe-$item" "mvdb:newa24-$item-test" "/data/bytes-$item.db" > "$result/bytes-$item.log" 2>&1
 done
-cmp "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db"
-sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" > "$result/identical-storage-bytes.txt"
+sudo cmp "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db"
+sudo sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" > "$result/identical-storage-bytes.txt"
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test > "$result/ctest.log" 2>&1
 python3 -B bench/vendor/seekdb-round2-f4d4e26/protocol_check/run.py --image mvdb:newa24-candidate --output "$result/public" > "$result/public.log" 2>&1
 g++ -std=c++20 -O2 -ffp-contract=off bench/jsonl_oracle.cpp -o "$scratch/oracle"
