@@ -1,6 +1,6 @@
 #pragma once
 #include "minivectordb/store.hpp"
-#include "packed_codec.hpp"
+#include "palette_codec.hpp"
 #include "page_checksum.hpp"
 #include <map>
 #include <vector>
@@ -100,7 +100,7 @@ public:
   }
   std::string value_at(std::uint64_t space,std::int64_t key,std::uint64_t at)const{
     const auto r=record(at,end_);if(r.key!=Key{space,key}||r.flags==2)fail();auto payload=read(at+header_size,std::size_t(r.length));
-    if(crc(payload)!=r.checksum)fail();return r.flags==1?unpack_bytes(payload,4064,true):payload;
+    if(crc(payload)!=r.checksum)fail();return r.flags==1?unpack_journal_bytes(payload):payload;
   }
   void apply(std::uint64_t space,std::span<const Store::Mutation> changes){
     if(changes.size()>Store::max_batch_mutations)throw std::length_error("too many batch mutations");
@@ -110,7 +110,7 @@ public:
     if(order.empty())return;
     std::string encoded,packed;std::vector<std::pair<Key,std::uint64_t>> updates;updates.reserve(order.size());auto previous=head_;
     for(const auto* c:order){std::string_view payload=c->value?std::string_view(*c->value):std::string_view{};unsigned flags=c->value?0:2;
-      if(c->value&&pack_bytes(payload,packed,true)){payload=packed;flags=1;}
+      if(c->value&&pack_journal_bytes(payload,packed)){payload=packed;flags=1;}
       if(encoded.size()>UINT64_MAX-end_)throw std::length_error("journal size");const auto at=end_+encoded.size();std::array<unsigned char,header_size> h{};
       std::memcpy(h.data(),"JREC",4);put(h.data()+4,flags,4);put(h.data()+8,space);put(h.data()+16,std::bit_cast<std::uint64_t>(c->key));put(h.data()+24,previous);put(h.data()+32,payload.size());put(h.data()+40,crc(payload),4);put(h.data()+44,crc({reinterpret_cast<const char*>(h.data()),44}),4);
       encoded.append(reinterpret_cast<const char*>(h.data()),h.size());encoded.append(payload);updates.push_back({{space,c->key},at});previous=at;

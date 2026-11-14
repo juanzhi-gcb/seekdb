@@ -1,8 +1,11 @@
 #include "journal_harness.hpp"
 #include <random>
 #include <iostream>
+#include <fstream>
 int main(int argc,char**argv){try{
-  if(argc!=2)return 2;std::filesystem::path path=argv[1];std::filesystem::remove(path);std::mt19937 rng(20261114);
+  if(argc<3)return 2;std::filesystem::path path=argv[1];
+  auto dump=[&](){JournalHarnessStore db(path);std::ofstream output(argv[2],std::ios::binary);for(auto space:{7,9})db.scan_in(space,[&](auto key,auto value){auto put=[&](std::uint64_t x){for(unsigned i=0;i<8;++i)output.put(char(x>>(8*i)));};put(space);put(std::bit_cast<std::uint64_t>(key));put(value.size());output.write(value.data(),value.size());});if(!output)throw std::runtime_error("dump failed");};
+  if(argc==4){dump();return 0;}std::filesystem::remove(path);std::mt19937 rng(20261114);
   {
     JournalHarnessStore db(path);
     for(int batch=0;batch<100;++batch){db.begin();std::vector<minivectordb::Store::Mutation> changes;
@@ -15,4 +18,5 @@ int main(int argc,char**argv){try{
     }
   }
   {JournalHarnessStore db(path);db.begin();db.put_in(7,INT64_MIN,"min");db.put_in(7,INT64_MAX,"max");db.commit();std::size_t n=0;db.scan_in(7,[&](auto,auto){++n;});std::cout<<"rows="<<n<<" file_bytes="<<std::filesystem::file_size(path)<<'\n';}
+dump();
 }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

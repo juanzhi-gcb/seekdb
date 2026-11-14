@@ -275,3 +275,7 @@ set_tests_properties(core_projection_probation PROPERTIES TIMEOUT 120)
 add_executable(wide_codec_tests tests/wide_codec_tests.cpp)
 add_test(NAME core_wide_codec COMMAND wide_codec_tests)
 set_tests_properties(core_wide_codec PROPERTIES TIMEOUT 120)
+
+add_executable(palette_codec_tests tests/palette_codec_tests.cpp)
+add_test(NAME core_palette_codec COMMAND palette_codec_tests)
+set_tests_properties(core_palette_codec PROPERTIES TIMEOUT 120)
