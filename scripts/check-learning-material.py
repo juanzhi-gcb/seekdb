@@ -162,6 +162,15 @@ def git_file(commit, name):
 
 
 def main():
+    current_schema = read_json(path_in_repo('agent/conversation.json')).get('schema_version')
+    if current_schema == 'minivectordb-evidence-and-implementation-v3':
+        import importlib.util
+        import sys
+        spec = importlib.util.spec_from_file_location('current_learning', ROOT/'scripts/check-current-learning-material.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.verify(ROOT, sys.modules[__name__])
+        return
     binding = read_json(path_in_repo('agent/material-digest.json'))
     require(binding['kind'] == 'local-material-integrity-manifest', 'Wrong integrity manifest')
     files = binding['material_files']
