@@ -249,6 +249,11 @@ set_tests_properties(byteplane_lossless PROPERTIES TIMEOUT 60)
 add_executable(projection_cache_tests tests/projection_cache_tests.cpp)
 target_link_libraries(projection_cache_tests PRIVATE minivectordb_core)
 add_test(NAME projection_cache_equivalence COMMAND projection_cache_tests)
+
+add_executable(column_store_tests tests/column_store_tests.cpp)
+target_link_libraries(column_store_tests PRIVATE minivectordb_core)
+add_test(NAME core_column_store COMMAND column_store_tests)
+set_tests_properties(core_column_store PROPERTIES TIMEOUT 180)
 set_tests_properties(projection_cache_equivalence PROPERTIES TIMEOUT 120)
 
 add_executable(journal_sql_tests tests/journal_sql_tests.cpp)

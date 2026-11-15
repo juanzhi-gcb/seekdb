@@ -3,6 +3,7 @@
 #include "scan_cache.hpp"
 #include "typed_scan_cache.hpp"
 #include "projection_cache.hpp"
+#include "column_store.hpp"
 #include "snapshot_row.hpp"
 #include "../catalog/catalog.hpp"
 #include "minivectordb/exact.hpp"
@@ -149,6 +150,7 @@ namespace minivectordb {
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
+    sql::ColumnStore column_store;
     bool active=false,poisoned=false,busy=false;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -439,6 +441,77 @@ namespace minivectordb {
       info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
       return true;
     }
+    bool fast_exact_select(const sql::Statement& statement,const Schema& s,const sql::Bound& b,
+                           const QuerySink& sink,ExecutionInfo& info) {
+      if(!options.column_store||active||poisoned)return false;
+      if(b.primary_lookup||b.order.size()!=1||b.order[0].descending||!b.order[0].expression.query)return false;
+      const auto& e=b.order[0].expression;
+      if(e.column>=s.columns.size()||s.columns[e.column].type!=ColumnType::Vector||
+         !e.query||e.query->size()!=s.columns[e.column].extent)return false;
+      if(!statement.limit||!*statement.limit)return false;
+      const auto k=static_cast<std::size_t>(*statement.limit);
+      for(const auto& p:b.projection) {
+        if(p.query) {
+          if(p.column!=e.column||p.query!=e.query)return false;
+        } else if(p.column>=s.columns.size()||s.columns[p.column].type==ColumnType::Vector)return false;
+      }
+      std::optional<sql::ColumnStore::Filter> filter;
+      std::size_t cluster=0;
+      if(b.predicates.empty()) {
+        if(column_store.matches_table(s,e.column)) cluster=column_store.cluster_column();
+        else {
+          bool found=false;
+          for(std::size_t c=0;c<s.columns.size();++c)
+            if(c!=s.primary&&c!=e.column&&
+               (s.columns[c].type==ColumnType::Bigint||s.columns[c].type==ColumnType::Varchar)) {
+              cluster=c;found=true;break;
+            }
+          if(!found)return false;
+        }
+      } else {
+        if(b.predicates.size()!=1||b.predicates[0].op!="=")return false;
+        const auto& predicate=b.predicates[0];
+        if(predicate.column>=s.columns.size())return false;
+        if(s.columns[predicate.column].type==ColumnType::Bigint) {
+          const auto* value=std::get_if<std::int64_t>(&predicate.value);
+          if(!value)return false;
+          filter=sql::ColumnStore::Filter{false,*value,{}};
+          cluster=predicate.column;
+        } else if(s.columns[predicate.column].type==ColumnType::Varchar) {
+          const auto* value=std::get_if<std::string>(&predicate.value);
+          if(!value)return false;
+          filter=sql::ColumnStore::Filter{true,0,*value};
+          cluster=predicate.column;
+        } else return false;
+        if(column_store.matches_table(s,e.column)&&column_store.cluster_column()!=cluster)return false;
+      }
+      if(!column_store.ready(s,e.column,cluster)) {
+        if(!column_store.build(store,s,e.column,cluster,options.scan_snapshot_bytes))return false;
+      }
+      auto result=column_store.search(*e.query,k,filter,options.wide_simd_vector_kernel,options.bounded_fp32_screen);
+      if(!result)return false;
+      std::vector<std::size_t> rows;rows.reserve(result->winners.size());
+      for(const auto& winner:result->winners) {
+        const auto row=column_store.row_for_key(winner.key);
+        if(!row)return false;
+        rows.push_back(*row);
+      }
+      std::vector<Row> projected;projected.reserve(result->winners.size());
+      for(std::size_t i=0;i<result->winners.size();++i) {
+        Row output;
+        if(!column_store.project(s,b,rows[i],result->winners[i].distance,output))return false;
+        projected.push_back(std::move(output));
+      }
+      // Every check succeeded; the column store serves this query.
+      typed_snapshot.clear();projection_snapshot.clear();snapshot.clear();
+      for(const auto& output:projected) {
+        if(sink.row)sink.row(output);
+        ++info.affected_rows;
+        for(const auto& p:b.projection)if(!p.query)++info.cells_materialized;
+      }
+      info.rows_examined+=result->examined;info.distances_computed+=result->examined;
+      return true;
+    }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
       ExecutionInfo info;
       std::vector<std::string> labels;
@@ -446,6 +519,7 @@ namespace minivectordb {
       if(sink.columns)sink.columns(labels);
       auto limit=statement.limit.value_or(UINT64_MAX);
       if(!limit)return info;
+      if(options.column_store&&fast_exact_select(statement,s,b,sink,info))return info;
       auto emit=[&](const SelectRow&r,DistanceCache&cache) {
         auto output=project(b,r,cache,info);
         if(sink.row)sink.row(output);
@@ -612,6 +686,7 @@ namespace minivectordb {
       // avoids transaction/root ABA and does not require persisted cache metadata.
       if(statement.kind!=sql::Statement::Select) {
         projection_snapshot.clear();
+        column_store.clear();
         if(options.reuse_scan_snapshot_buffer) {snapshot.invalidate();typed_snapshot.invalidate();}
         else {snapshot.clear();typed_snapshot.clear();}
       }

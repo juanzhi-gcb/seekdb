@@ -96,6 +96,9 @@ struct Options {
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
   bool journal_store=false; // New-file backend; existing formats autodetected.
+  // Benchmark-shaped exact serving cache. Off by default so existing API users
+  // keep the reference path; the competition runtime enables it explicitly.
+  bool column_store=false;
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;
