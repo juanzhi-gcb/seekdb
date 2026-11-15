@@ -71,25 +71,26 @@ int compare_text(std::string_view a,std::string_view b) {
   }
   return a.size()==b.size()?0:(a.size()<b.size()?-1:1);
 }
+float checked_float(double value) {
+  // IEEE binary32 round-to-nearest overflow begins half an ULP above
+  // FLT_MAX. Decimal literals such as 3.4028235e38 still round to FLT_MAX.
+  // Handle that interval explicitly rather than casting an out-of-range double.
+  static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559 &&
+                std::numeric_limits<float>::digits==24);
+  const double maximum=std::numeric_limits<float>::max();
+  const double overflow=std::ldexp(1.0,128)-std::ldexp(1.0,103);
+  const double magnitude=std::abs(value);
+  if(!std::isfinite(value) || magnitude>=overflow) throw std::invalid_argument("VECTOR component is not finite float32");
+  const float converted=magnitude>maximum
+      ? (std::signbit(value)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max())
+      : static_cast<float>(value);
+  if(!std::isfinite(converted)) throw std::invalid_argument("VECTOR component is not finite float32");
+  return converted;
+}
 std::vector<float> make_vector(std::span<const double> values,std::size_t dimension) {
   if(values.size()!=dimension) throw std::invalid_argument("VECTOR dimension mismatch");
   std::vector<float> result; result.reserve(values.size());
-  for(double value:values) {
-    // IEEE binary32 round-to-nearest overflow begins half an ULP above
-    // FLT_MAX. Decimal literals such as 3.4028235e38 still round to FLT_MAX.
-    // Handle that interval explicitly rather than casting an out-of-range double.
-    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559 &&
-                  std::numeric_limits<float>::digits==24);
-    const double maximum=std::numeric_limits<float>::max();
-    const double overflow=std::ldexp(1.0,128)-std::ldexp(1.0,103);
-    const double magnitude=std::abs(value);
-    if(!std::isfinite(value) || magnitude>=overflow) throw std::invalid_argument("VECTOR component is not finite float32");
-    const float converted=magnitude>maximum
-        ? (std::signbit(value)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max())
-        : static_cast<float>(value);
-    if(!std::isfinite(converted)) throw std::invalid_argument("VECTOR component is not finite float32");
-    result.push_back(converted);
-  }
+  for(double value:values) result.push_back(checked_float(value));
   return result;
 }
 }

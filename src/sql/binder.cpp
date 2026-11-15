@@ -1,6 +1,7 @@
 #include "minivectordb/profile.hpp"
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
+#include "fast_float/fast_float.h"
 #include <charconv>
 #include <cmath>
 #include <set>
@@ -48,7 +49,7 @@ namespace minivectordb::sql {
     double real(std::string_view text) {
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
-      auto[end,error]=std::from_chars(text.data(),text.data()+text.size(),result);
+      auto[end,error]=fast_float::from_chars(text.data(),text.data()+text.size(),result);
       if(error==std::errc::result_out_of_range && end==text.data()+text.size()) {
         // from_chars reports both overflow and underflow with this code.
         // Values below binary64 range are still valid binary32 signed zeros.
@@ -128,19 +129,20 @@ namespace minivectordb::sql {
         return v.text;
       }
       if(fast_vector && v.kind==Literal::String) {
-        std::vector<double> values;
+        std::vector<float> values;
         values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
         std::exception_ptr numeric_error;
         const bool plain=plain_vector(v.text,[&](auto component){
           if(numeric_error)return;
-          try {values.push_back(real(component));}
-          catch(const Error&) {numeric_error=std::current_exception();}
+          try {values.push_back(checked_float(real(component)));}
+          catch(const std::exception&) {numeric_error=std::current_exception();}
         });
         if(plain) {
           // The lexer inspects the complete input before any conversion. A
           // malformed suffix must still win over an earlier overflow error.
           if(numeric_error)std::rethrow_exception(numeric_error);
-          return make_vector(values,c.extent);
+          if(values.size()!=c.extent)throw std::invalid_argument("VECTOR dimension mismatch");
+          return values;
         }
       }
       auto components=vector_components(v);

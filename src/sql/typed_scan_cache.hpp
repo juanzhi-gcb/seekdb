@@ -39,15 +39,28 @@ class TypedScanCache {
     std::size_t text_schema_width_=0,allocated_text_width_=0;
     std::unique_ptr<char[]> texts_;
     std::unique_ptr<std::uint32_t[]> text_lengths_;
+    std::unique_ptr<std::uint32_t[]> key_order_;
+    std::size_t key_order_count_=0;
     std::optional<std::size_t> ordered_scalar_slot_;
     bool ordered_text_=false;
 
     void release() noexcept {
         integer_cache_.clear();
         vectors_.reset();half_vectors_.reset();half_=false;scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
+        key_order_.reset();key_order_count_=0;
         capacity_=count_=bytes_=0;transposed_=false;
         probation_rows_=probation_text_width_=allocated_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
+    }
+    void build_key_index() noexcept {
+        key_order_.reset();key_order_count_=0;
+        if(!count_)return;
+        try {
+            auto order=std::make_unique<std::uint32_t[]>(count_);
+            std::iota(order.get(),order.get()+count_,0U);
+            std::sort(order.get(),order.get()+count_,[&](auto a,auto b){return key(a)<key(b);});
+            key_order_=std::move(order);key_order_count_=count_;
+        } catch(const std::bad_alloc&) {}
     }
     void refuse() noexcept { release();state_=State::refused; }
     void cluster() {
@@ -116,6 +129,7 @@ class TypedScanCache {
 public:
     void invalidate() noexcept {
         integer_cache_.clear();
+        key_order_.reset();key_order_count_=0;
         count_=0;table_=index_=0;state_=State::empty;transposed_=false;
         probation_rows_=probation_text_width_=0;probation_complete_=false;probation_half_exact_=true;
         ordered_scalar_slot_.reset();ordered_text_=false;
@@ -239,7 +253,9 @@ public:
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
-        const bool rowwise=count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
+        // Prefer the block layout whenever transposition is possible: the
+        // rowwise layout forces every query through a per-row deinterleave.
+        const bool rowwise=!transpose && count_>=256 && rowwise_candidates && integer_screen && detail::Int8BoundCache::available();
         if(!half_ && !rowwise && transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
@@ -258,6 +274,7 @@ public:
             else if(transposed_||rowwise)integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_,false,rowwise);
         }
         state_=State::ready;
+        build_key_index();
     }
     bool lossless_half() const noexcept {return half_;}
     bool transposed() const noexcept {return transposed_;}
@@ -291,6 +308,18 @@ public:
         return scratch;
     }
     std::size_t size() const noexcept {return count_;}
+    std::optional<std::size_t> row_for_key(std::int64_t value) const noexcept {
+        if(!key_order_||!key_order_count_)return {};
+        const auto begin=key_order_.get(),end=begin+key_order_count_;
+        const auto at=std::lower_bound(begin,end,value,[&](std::uint32_t row,std::int64_t wanted){return key(row)<wanted;});
+        if(at==end||key(*at)!=value)return {};
+        return *at;
+    }
+    std::optional<std::size_t> scalar_slot_if(std::size_t column) const noexcept {
+        if(state_!=State::ready||!columns_)return {};
+        for(std::size_t slot=0;slot<scalar_count_;++slot)if(columns_[slot]==column)return slot;
+        return {};
+    }
     const detail::Int8BoundCache* integer_cache() const noexcept {return integer_cache_.ready()?&integer_cache_:nullptr;}
     std::size_t bytes() const noexcept {return bytes_+integer_cache_.bytes();}
     std::size_t scalar_slot(std::size_t column) const {

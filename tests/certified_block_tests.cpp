@@ -38,6 +38,12 @@ int main(){try{
       blocks+=info.certified_blocks_examined;
       if(!enabled)CHECK(info.certified_blocks_examined==0);
       if(where.find("h=1")!=std::string::npos)CHECK(info.certified_blocks_examined==0);
+      if(where.rfind("label=",0)==0&&where.find(" AND ")==std::string::npos) {
+        std::vector<Row> direct;
+        const auto projected=db.execute(statement(q,where,k),{{},[&](const Row&r){direct.push_back(r);}});
+        CHECK(projected.projection_cache_bytes==0);
+        CHECK(projected.cells_materialized==direct.size()*4);
+      }
     }
     db.execute("BEGIN");db.execute("DELETE FROM t");
     std::vector<Row> empty;db.execute(statement(q),{{},[&](const Row&r){empty.push_back(r);}});CHECK(empty.empty());
