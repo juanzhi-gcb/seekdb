@@ -10,7 +10,7 @@ export TMPDIR="$scratch/tmp" PYTHONDONTWRITEBYTECODE=1
 trap 'sudo chown -R "$(id -u):$(id -g)" "$result"' EXIT
 lscpu > "$result/lscpu.txt"
 git rev-parse HEAD > "$result/candidate-commit.txt"
-baseline=a24d2cd764027adec7371f268f99ccdca2307032
+baseline=73a5190ae5e30d73f65a90bb1f94973fcdff8122
 printf '%s\n' "$baseline" > "$result/baseline-commit.txt"
 limits=(--network none --cpus 2 --memory 2g --memory-swap 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges)
 for item in a24 candidate; do
