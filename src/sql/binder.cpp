@@ -180,17 +180,37 @@ namespace minivectordb::sql {
     Cell bind_insert_literal(const Literal& v,const Column& c) {
       if(c.type!=ColumnType::Vector || v.kind!=Literal::String)return bind_literal(v,c);
       try {
-        std::vector<double> values;
+        // Parse to binary64 as before, then produce the final binary32 array
+        // directly. Keep error ordering: lexical > numeric > dimension > f32.
+        // Do not let a later lexical error get hidden by an earlier overflow.
+        std::vector<float> values;
         values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
+        std::size_t count=0;
+        bool invalid_float=false;
         std::exception_ptr numeric_error;
         const bool plain=insert_vector_numbers(v.text,[&](auto component,double parsed,bool range){
+          ++count;
           if(numeric_error)return;
-          try {values.push_back(range?real(component):parsed);}
-          catch(const Error&) {numeric_error=std::current_exception();}
+          try {if(range)parsed=real(component);}
+          catch(const Error&) {numeric_error=std::current_exception();return;}
+          // make_vector checks dimensions before converting any values.
+          // Defer conversion errors until the complete dimension is known.
+          if(count>c.extent)return;
+          const double maximum=std::numeric_limits<float>::max();
+          const double overflow=std::ldexp(1.0,128)-std::ldexp(1.0,103);
+          const double magnitude=std::abs(parsed);
+          if(!std::isfinite(parsed)||magnitude>=overflow){invalid_float=true;values.push_back(0);return;}
+          const float converted=magnitude>maximum
+              ? (std::signbit(parsed)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max())
+              : static_cast<float>(parsed);
+          if(!std::isfinite(converted))invalid_float=true;
+          values.push_back(converted);
         });
         if(plain) {
           if(numeric_error)std::rethrow_exception(numeric_error);
-          return make_vector(values,c.extent);
+          if(count!=c.extent)throw std::invalid_argument("VECTOR dimension mismatch");
+          if(invalid_float)throw std::invalid_argument("VECTOR component is not finite float32");
+          return values;
         }
       } catch(const std::invalid_argument& e) {throw Error(ErrorCode::Type,e.what());}
       return bind_literal(v,c);
