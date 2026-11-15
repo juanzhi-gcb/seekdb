@@ -141,6 +141,44 @@ class JournalStore {
       flush_staged();
     }catch(...){pending_=old;pending_block_=old_block;pending_used_=old_used;pending_valid_=old_valid;for(auto& c:cache_)c.page=UINT64_MAX;throw;}
   }
+  // A borrowed page is valid only until the next cache access. Callers
+  // consume it synchronously and return an owned string, never a view.
+  const Page& checked_frame(std::uint64_t block,Page& scratch)const {
+    if(cache_.empty()) {
+      if(read_some(physical(block),scratch.data(),scratch.size())!=scratch.size() ||
+         !frame_header(scratch) || !frame_payload_valid(scratch))fail();
+      return scratch;
+    }
+    auto& entry=cache_[block%cache_.size()];
+    if(entry.page!=block) {
+      entry.page=UINT64_MAX;
+      if(read_some(physical(block),entry.bytes.data(),entry.bytes.size())!=entry.bytes.size() ||
+         !frame_header(entry.bytes) || !frame_payload_valid(entry.bytes))fail();
+      entry.page=block;
+    }
+    return entry.bytes;
+  }
+  template<class Consume>
+  std::string consume_framed(std::uint64_t offset,std::size_t size,Consume&& consume)const {
+    if(framed_) {
+      if(offset<8192 || offset>end_ || size>end_-offset)fail();
+      const auto block=(offset-8192)/frame_payload;
+      const auto inside=std::size_t((offset-8192)%frame_payload);
+      if(size<=frame_payload-inside) {
+        if(pending_valid_ && block==pending_block_) {
+          if(inside+size>pending_used_)fail();
+          return consume(std::string_view(reinterpret_cast<const char*>(pending_.data()+inside),size));
+        }
+        Page scratch;
+        const auto& page=checked_frame(block,scratch);
+        if(inside+size>get(page.data()+frame_payload+32,4))fail();
+        return consume(std::string_view(reinterpret_cast<const char*>(page.data()+inside),size));
+      }
+    }
+    // Cross-frame and legacy records retain the owned assembly path.
+    const auto bytes=read(offset,size);
+    return consume(std::string_view(bytes));
+  }
   std::string read_framed(std::uint64_t offset,std::size_t size)const{
     if(offset<8192 || offset>end_ || size>end_-offset)fail();std::string out(size,'\0');std::size_t done=0;
     while(done<size){
@@ -148,13 +186,8 @@ class JournalStore {
       const auto n=std::min(size-done,frame_payload-inside);
       if(pending_valid_ && block==pending_block_){if(inside+n>pending_used_)fail();std::memcpy(out.data()+done,pending_.data()+inside,n);}
       else {
-        Page scratch{};const Page* page=nullptr;
-        if(cache_.empty()){if(read_some(physical(block),scratch.data(),scratch.size())!=scratch.size() || !frame_header(scratch) || !frame_payload_valid(scratch))fail();page=&scratch;}
-        else {auto& entry=cache_[block%cache_.size()];
-          if(entry.page!=block){entry.page=UINT64_MAX;if(read_some(physical(block),entry.bytes.data(),entry.bytes.size())!=entry.bytes.size() || !frame_header(entry.bytes) || !frame_payload_valid(entry.bytes))fail();entry.page=block;}
-          page=&entry.bytes;
-        }
-        if(inside+n>get(page->data()+frame_payload+32,4))fail();std::memcpy(out.data()+done,page->data()+inside,n);
+        Page scratch;const auto& page=checked_frame(block,scratch);
+        if(inside+n>get(page.data()+frame_payload+32,4))fail();std::memcpy(out.data()+done,page.data()+inside,n);
       }
       done+=n;
     }
@@ -259,10 +292,12 @@ public:
       // The namespace/key association was validated when publishing/rebuilding
       // the index. This opaque reference is never accepted from disk or users.
       const auto length=std::size_t((at>>41)&((1ULL<<20)-1));
-      if(length>Store::max_batch_bytes)fail();const auto bytes=read(address(at),length+4);
-      const auto payload=std::string_view(bytes).substr(4);
-      if(crc(payload)!=get(reinterpret_cast<const unsigned char*>(bytes.data()),4))fail();
-      return (at&(1ULL<<61))?unpack_bytes(payload,4064,true):std::string(payload);
+      if(length>Store::max_batch_bytes)fail();
+      return consume_framed(address(at),length+4,[&](std::string_view bytes) {
+        const auto payload=bytes.substr(4);
+        if(crc(payload)!=get(reinterpret_cast<const unsigned char*>(bytes.data()),4))fail();
+        return (at&(1ULL<<61))?unpack_bytes(payload,4064,true):std::string(payload);
+      });
     }
     const auto r=record(at,end_);if(r.key!=Key{space,key}||r.flags==2)fail();auto payload=read(r.payload,std::size_t(r.length));
     if(crc(payload)!=r.checksum)fail();return r.flags==1?unpack_bytes(payload,4064,true):payload;
