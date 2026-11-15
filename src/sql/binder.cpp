@@ -1,6 +1,7 @@
 #include "minivectordb/profile.hpp"
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
+#include "fast_float/fast_float.h"
 #include <charconv>
 #include <cmath>
 #include <set>
@@ -48,7 +49,7 @@ namespace minivectordb::sql {
     double real(std::string_view text) {
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
-      auto[end,error]=std::from_chars(text.data(),text.data()+text.size(),result);
+      auto[end,error]=fast_float::from_chars(text.data(),text.data()+text.size(),result);
       if(error==std::errc::result_out_of_range && end==text.data()+text.size()) {
         // from_chars reports both overflow and underflow with this code.
         // Values below binary64 range are still valid binary32 signed zeros.

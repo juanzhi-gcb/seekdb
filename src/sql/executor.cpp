@@ -10,6 +10,7 @@
 #include "minivectordb/profile.hpp"
 #include <cmath>
 #include <bit>
+#include <cstdlib>
 #include "../storage/binary.hpp"
 #include <limits>
 #include <span>
@@ -315,8 +316,12 @@ namespace minivectordb {
       return {begin,end};
     }
     bool transpose_enabled() const noexcept {
+      // MVDB_FORCE_TRANSPOSE exercises the block layout with the portable
+      // exact kernel on CPUs without AVX2; it is inert unless explicitly set.
+      static const bool forced=std::getenv("MVDB_FORCE_TRANSPOSE")!=nullptr;
       return options.transposed_scan_cache && options.validated_vector_kernel &&
-          options.batched_vector_kernel && options.simd_vector_kernel && detail::has_avx2();
+          options.batched_vector_kernel && options.simd_vector_kernel &&
+          (detail::has_avx2()||forced);
     }
     std::optional<std::vector<Neighbor>> typed_block_top_k(
         const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
@@ -371,6 +376,17 @@ namespace minivectordb {
         return result;
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
     }
+    bool typed_projection_covered(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                                  std::optional<std::size_t> text_column) const {
+      for(const auto& p:b.projection) {
+        if(p.query) {
+          if(p.column!=e.column||p.query!=e.query)return false;
+        } else if(s.columns[p.column].type==ColumnType::Bigint) continue;
+        else if(s.columns[p.column].type==ColumnType::Varchar && text_column && *text_column==p.column) continue;
+        else return false;
+      }
+      return true;
+    }
     bool typed_source(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
                       const std::optional<VectorIndex>& index,ExecutionInfo& info,
                       const VectorVisitor& visit,std::vector<float>& scratch) {
@@ -382,8 +398,10 @@ namespace minivectordb {
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         const auto text_column=typed_text_column(s,b,e,index);
+        const bool projection_covered=typed_projection_covered(s,b,e,text_column);
         if(typed_snapshot.ready(s.id,index_id,e.column) &&
             text_column==typed_snapshot.text_column(s.id,index_id,e.column)) {
+          if(projection_covered) projection_snapshot.clear();
           const auto predicates=typed_predicates(s,b);
           const auto [begin,end]=typed_scan_range(predicates);
           for(std::size_t r=begin;r<end;++r) {
@@ -392,15 +410,16 @@ namespace minivectordb {
             if(typed_matches(r,predicates)) {++info.distances_computed;visit(typed_snapshot.key(r),typed_snapshot.read_vector(r,scratch));}
           }
         } else {
-          projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
+          if(projection_covered) projection_snapshot.clear();
+          else projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4),false);
           typed_snapshot.start(s,index_id,e.column,options.scan_snapshot_bytes-projection_snapshot.planned_bytes(),options.reuse_scan_snapshot_buffer,text_column);
           if(typed_snapshot.refused())projection_snapshot.clear();
-          else if(typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
+          else if(!projection_covered && typed_snapshot.building())projection_snapshot.start(s.id,index_id,std::min(options.projection_cache_bytes,options.scan_snapshot_bytes/4));
           if(text_column && typed_snapshot.refused()) {
             typed_snapshot.clear();projection_snapshot.clear();return false;
           }
           auto consume=[&](std::int64_t key,const SelectRow& row,std::span<const float> vector) {
-            projection_snapshot.append(s,key,row.validated_bytes());
+            if(!projection_covered) projection_snapshot.append(s,key,row.validated_bytes());
             // Capture every row before applying this query's predicate. The cache
             // must also answer a different filter, including after a zero-match build.
             if(typed_snapshot.building()) {
@@ -430,13 +449,58 @@ namespace minivectordb {
               consume(key,row,{});
             });
           }
-          projection_snapshot.finish();
+          if(!projection_covered) projection_snapshot.finish();
           typed_snapshot.finish(transpose_enabled(),options.clustered_scan_cache,options.bounded_int8_screen && options.bounded_fp32_screen && options.wide_simd_vector_kernel);
         }
       } catch(const Store::KeySetMismatch& error) {
         typed_snapshot.clear();projection_snapshot.clear();throw Error(ErrorCode::Corruption,error.what());
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
       info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
+      return true;
+    }
+    // Serve the common id/distance/scalar/text projection directly from the
+    // validated typed cache. Returns false before emitting anything when the
+    // cache cannot supply every projected value.
+    bool typed_project(const Schema& s,const sql::Bound& b,const sql::BoundExpr& e,
+                       std::uint64_t index_id,const std::vector<Neighbor>& winners,
+                       const QuerySink& sink,ExecutionInfo& info) {
+      if(!typed_snapshot.ready(s.id,index_id,e.column))return false;
+      struct Plan {int kind;std::size_t slot;}; // 0=distance, 1=BIGINT, 2=cached VARCHAR
+      std::vector<Plan> plan;plan.reserve(b.projection.size());
+      for(const auto& p:b.projection) {
+        if(p.query) {
+          if(p.column!=e.column||p.query!=e.query)return false;
+          plan.push_back({0,0});
+        } else if(s.columns[p.column].type==ColumnType::Bigint) {
+          const auto slot=typed_snapshot.scalar_slot_if(p.column);
+          if(!slot)return false;
+          plan.push_back({1,*slot});
+        } else if(s.columns[p.column].type==ColumnType::Varchar &&
+                  typed_snapshot.text_column(s.id,index_id,e.column)==p.column) {
+          plan.push_back({2,0});
+        } else return false;
+      }
+      std::vector<std::size_t> rows;rows.reserve(winners.size());
+      for(const auto& winner:winners) {
+        const auto row=typed_snapshot.row_for_key(winner.key);
+        if(!row)return false;
+        rows.push_back(*row);
+      }
+      for(std::size_t i=0;i<winners.size();++i) {
+        Row output;output.reserve(plan.size());
+        for(const auto& item:plan) {
+          if(item.kind==0)output.emplace_back(winners[i].distance);
+          else if(item.kind==1) {
+            output.emplace_back(typed_snapshot.scalar(rows[i],item.slot));
+            ++info.cells_materialized;
+          } else {
+            output.emplace_back(std::string(typed_snapshot.text(rows[i])));
+            ++info.cells_materialized;
+          }
+        }
+        if(sink.row)sink.row(output);
+        ++info.affected_rows;
+      }
       return true;
     }
     ExecutionInfo select(const sql::Statement&statement,const Schema&s,const sql::Bound&b,const QuerySink&sink) {
@@ -533,6 +597,7 @@ namespace minivectordb {
           } else scan_select(s,b,info,consume_row,true);
         },{});
         info.snapshot_bytes=snapshot.bytes();
+        if(typed_project(s,b,e,index?index->id:0,winners,sink,info))return info;
         bool cached_projection=s.columns.size()<=16 && typed_snapshot.ready(s.id,index?index->id:0,e.column) && projection_snapshot.ready(s.id,index?index->id:0);
         for(const auto& p:b.projection)if(p.query?!(p.column==e.column&&p.query==e.query):s.columns[p.column].type==ColumnType::Vector)cached_projection=false;
         for(const auto&winner:winners) {
