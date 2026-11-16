@@ -45,7 +45,44 @@ namespace minivectordb::sql {
         skip();
       }
     }
+    // Clinger fast path: when the significand fits in 2^53 and the decimal
+    // exponent is within +-22, double(m) * / 10^|e| is a single correctly
+    // rounded operation because 10^|e| is exactly representable. The result is
+    // bit-identical to std::from_chars for those inputs; anything else falls
+    // back to the general parser below.
+    bool fast_decimal(std::string_view text,double& out) {
+      std::size_t i=0; const bool negative=!text.empty()&&text.front()=='-';
+      if(negative)++i; else if(!text.empty()&&text.front()=='+')++i;
+      const auto digit=[](char c){return c>='0'&&c<='9';};
+      std::uint64_t mantissa=0;int digits=0,exponent=0;bool any=false;
+      auto push=[&](int d){if(mantissa>std::uint64_t(9007199254740992ULL)/10)return false;mantissa=mantissa*10+std::uint64_t(d);++digits;return true;};
+      while(i<text.size()&&digit(text[i])){if(!push(text[i]-'0'))return false;++i;any=true;}
+      if(i<text.size()&&text[i]=='.'){
+        ++i;
+        while(i<text.size()&&digit(text[i])){if(!push(text[i]-'0'))return false;--exponent;++i;any=true;}
+      }
+      if(!any)return false;
+      if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
+        ++i;bool eneg=false;if(i<text.size()&&(text[i]=='+'||text[i]=='-')){eneg=text[i]=='-';++i;}
+        int value=0;const auto begin=i;
+        while(i<text.size()&&digit(text[i])) {if(value<100000)value=value*10+(text[i]-'0');++i;}
+        if(i==begin)return false;
+        exponent+=eneg?-value:value;
+      }
+      if(i!=text.size())return false;
+      if(digits>19||mantissa>9007199254740992ULL||exponent>22||exponent<-22)return false;
+      static const double powers[]={1e0,1e1,1e2,1e3,1e4,1e5,1e6,1e7,1e8,1e9,1e10,1e11,
+                                    1e12,1e13,1e14,1e15,1e16,1e17,1e18,1e19,1e20,1e21,1e22};
+      double value=static_cast<double>(mantissa);
+      if(exponent>0)value*=powers[exponent];else if(exponent<0)value/=powers[-exponent];
+      out=negative?-value:value;
+      return std::isfinite(out);
+    }
     double real(std::string_view text) {
+      {
+        double fast=0;
+        if(fast_decimal(text,fast))return fast;
+      }
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
       auto[end,error]=std::from_chars(text.data(),text.data()+text.size(),result);

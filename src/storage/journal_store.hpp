@@ -8,6 +8,7 @@
 #include <bit>
 #include <cerrno>
 #include <cstring>
+#include <cstdlib>
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
