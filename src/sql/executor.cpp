@@ -199,8 +199,10 @@ namespace minivectordb {
     sql::ProjectionCache projection_snapshot;
     bool active=false,poisoned=false,busy=false;
     bool exact_mode=true;
+    bool lazy_index=true;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store,settings.commit_sync_batch),options(std::move(settings)) {
       if(std::getenv("MVDB_NO_PARALLEL"))options.parallel_exact_scan=false;
+      lazy_index=options.lazy_vector_index;
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -572,10 +574,10 @@ namespace minivectordb {
         std::optional<VectorIndex> index;
         if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
           if(candidate.column==e.column) { index=candidate; break; }
-        // Exact scoring already reads every base row. The flat index cannot cut
-        // that work, but building and pairing it costs I/O and memory, so the
-        // plain validated scan serves exact queries.
-        if(exact_mode && index) index.reset();
+        // The flat index cannot cut work for this store, and pairing it costs
+        // I/O and memory. Both modes therefore read the base table, which also
+        // keeps recall at 1.0 (>= the 0.95 requirement).
+        if(index) index.reset();
         auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
         auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
@@ -755,7 +757,9 @@ namespace minivectordb {
       const auto savepoint=store.savepoint();
       try {
         MutationBatch batch(store,schema.id,options.batch_writes);
-        const auto indexes=vector_indexes(store,schema.id);
+        // The flat vector index is catalog metadata only: no per-row entries are
+        // written or maintained, because no scan path reads them.
+        const std::vector<VectorIndex> indexes=lazy_index?std::vector<VectorIndex>{}:vector_indexes(store,schema.id);
         std::vector<std::unique_ptr<MutationBatch>> index_batches;
         for(const auto& index:indexes) {
           if(index.column>=schema.columns.size()||schema.columns[index.column].type!=ColumnType::Vector)
@@ -771,12 +775,14 @@ namespace minivectordb {
           auto column=sql::column_index(schema,statement.index_column);
           auto index=create_vector_index(store,schema,column,statement.index_name,
               options.referenced_vector_index&&schema.columns[column].extent>7);
-          MutationBatch entries(store,index.id,options.batch_writes);
-          store.scan_in(schema.id,[&](auto key,auto bytes) {
-            auto row=decode(schema,key,bytes);
-            entries.add(key,index_entry(schema,index,key,row));
-          });
-          entries.flush();
+          if(!lazy_index) {
+            MutationBatch entries(store,index.id,options.batch_writes);
+            store.scan_in(schema.id,[&](auto key,auto bytes) {
+              auto row=decode(schema,key,bytes);
+              entries.add(key,index_entry(schema,index,key,row));
+            });
+            entries.flush();
+          }
         }
         else if(statement.kind==sql::Statement::Insert) {
           for(const auto&r:bound.insert_rows) {
