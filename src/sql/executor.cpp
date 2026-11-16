@@ -385,8 +385,58 @@ namespace minivectordb {
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         struct Half { std::size_t begin,end; std::uint64_t rows=0,dist=0,blocks=0; std::vector<Neighbor> result; };
+        // Exact int16 scan over the cache's interleaved block layout: no decode,
+        // no per-query transpose. Falls back when any query component is not k/128.
+        std::vector<std::int16_t> query_k;
+        bool use_i16=false;
+        if(typed_snapshot.quantized()) {
+          std::vector<std::int16_t> candidate(e.query->size());
+          bool ok=true;
+          for(std::size_t d=0;d<e.query->size();++d) {
+            const double scaled=static_cast<double>((*e.query)[d])*128.0;
+            const long rounded=std::lround(scaled);
+            if(static_cast<double>(rounded)!=scaled || rounded<-32767 || rounded>32767) {ok=false;break;}
+            candidate[d]=static_cast<std::int16_t>(rounded);
+          }
+          if(ok) {query_k=std::move(candidate);use_i16=true;}
+        }
+        auto run_half_i16=[&](std::size_t from,std::size_t to,Half& half) {
+          half.begin=from;half.end=to;
+          half.result=detail::exact_top_k_transposed_i16(query_k,k,[&](const detail::BlockInt16Visitor& visit) {
+            std::array<std::int64_t,16> keys{};
+            std::vector<std::int16_t> tail;
+            for(std::size_t r=from/16*16;r<to;r+=16) {
+              const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
+              std::uint16_t mask=0;
+              if(bulk) {
+                const auto lo=from>r?from-r:0,hi=std::min(count,to-r);
+                const auto selected=hi-lo;
+                mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
+                half.rows+=selected;
+                for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+              } else
+              for(std::size_t lane=0;lane<count;++lane) {
+                if(r+lane<from || r+lane>=to)continue;
+                ++half.rows;
+                keys[lane]=typed_snapshot.key(r+lane);
+                if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++half.dist;}
+              }
+              if(!mask)continue;
+              if(count<16) {
+                tail.assign(16*e.query->size(),0);
+                for(std::size_t lane=0;lane<count;++lane) {
+                  const auto v=typed_snapshot.vector(r+lane);
+                  for(std::size_t d=0;d<e.query->size();++d)
+                    tail[(d/2)*32+lane*2+(d&1)]=static_cast<std::int16_t>(std::lround(double(v[d])*128.0));
+                }
+                visit({keys.data(),count},{tail.data(),tail.size()},mask,r);
+              } else visit({keys.data(),16},typed_snapshot.block_i16(r),mask,r);
+            }
+          });
+        };
         auto run_half=[&](std::size_t from,std::size_t to,Half& half) {
           half.begin=from;half.end=to;
+          if(use_i16) {run_half_i16(from,to,half);return;}
           half.result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
             std::array<std::int64_t,16> keys{};
             std::vector<float> tail;
