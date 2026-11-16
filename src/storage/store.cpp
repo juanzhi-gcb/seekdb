@@ -724,6 +724,18 @@ void Store::apply_batch_in(std::uint64_t space,std::span<const Mutation> mutatio
   nodes.flush();
   state.root=next;
 }
+void Store::scan_in_offset_order(std::uint64_t space,
+    const std::function<void(std::int64_t,std::string_view)>& visitor) const {
+  auto& s=*impl_;
+  if(!s.journal) {scan_in(space,visitor);return;}
+  const auto rows=s.journal->snapshot_by_offset(space);
+  std::size_t seen=0;
+  for(const auto& row:rows) {
+    visitor(row.second,s.journal->value_at(space,row.second,row.first));
+    if((++seen&511)==0)s.journal->advise_before(row.first);
+  }
+  if(!rows.empty())s.journal->advise_before(rows.back().first+4096);
+}
 void Store::commit() {
   auto& s=*impl_; s.transaction();
   if(s.journal){try{s.journal->commit();}catch(...){s.poisoned=true;throw;}s.active=false;return;}

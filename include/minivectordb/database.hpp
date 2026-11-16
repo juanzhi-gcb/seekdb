@@ -98,6 +98,9 @@ struct Options {
   unsigned commit_sync_batch = 4;
   // Split one exact TopK scan across two threads when the cached row range is
   // large enough to pay for the hand-off; results are merged by (distance,key).
+  // Build the owned cache in file-offset order and release pages behind the
+  // reader, so the measured peak does not hold both the file and the cache.
+  bool progressive_page_drop = true;
   bool parallel_exact_scan = true;
   std::size_t parallel_scan_min_rows = 2048;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.

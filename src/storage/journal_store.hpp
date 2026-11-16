@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>
+#include <fcntl.h>
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -147,6 +148,22 @@ public:
       else sync();
     }
     generation_=next;durable_=head_;undo_.clear();purge_empty();
+  }
+  // Ascending file offset: lets a caller drop already-scanned pages so the
+  // measured peak does not hold the whole file alongside the typed cache.
+  auto snapshot_by_offset(std::uint64_t space)const{
+    std::vector<std::pair<std::uint64_t,std::int64_t>> rows;
+    for(auto it=index_.lower_bound({space,INT64_MIN});it!=index_.end()&&it->first.first==space;++it)
+      if(it->second)rows.push_back({it->second,it->first.second});
+    std::sort(rows.begin(),rows.end());
+    return rows;
+  }
+  void advise_before(std::uint64_t offset)const noexcept{
+#if defined(POSIX_FADV_DONTNEED)
+    if(offset)(void)::posix_fadvise(fd_,0,static_cast<off_t>(offset),POSIX_FADV_DONTNEED);
+#else
+    (void)offset;
+#endif
   }
   auto snapshot(std::uint64_t space)const{
     std::vector<std::pair<std::int64_t,std::uint64_t>> rows;

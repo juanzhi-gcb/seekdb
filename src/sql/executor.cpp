@@ -506,6 +506,15 @@ namespace minivectordb {
               auto vector=index_candidate(bytes,s,*index,key,row,scratch);
               consume(key,row,vector);
             });
+          } else if(options.progressive_page_drop && typed_snapshot.building()) {
+            // Offset order lets the store drop pages already scanned; results do
+            // not depend on visit order because TopK ranks explicitly.
+            store.scan_in_offset_order(s.id,[&](auto key,auto bytes) {
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.rows_examined;
+              SelectRow row(s,key,bytes,options.selective_decode,info);
+              consume(key,row,{});
+            });
           } else {
             store.scan_in(s.id,[&](auto key,auto bytes) {
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
