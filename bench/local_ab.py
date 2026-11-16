@@ -24,8 +24,20 @@ def main():
     assert oracle.exists(), 'prebuild build/oracle with: g++ -O2 -std=c++17 bench/jsonl_oracle.cpp -o build/oracle'
 
     rng = random.Random(20261110)
-    vectors = [[rng.randrange(-2048, 2049) / 128 for _ in range(128)] for _ in range(N)]
-    queries = [[rng.randrange(-2048, 2049) / 128 for _ in range(128)] for _ in range(Q)]
+    mode = os.environ.get('MVDB_DATA', 'grid')
+    def make():
+        if mode == 'bits':      # arbitrary finite float32 magnitudes
+            row = []
+            while len(row) < 128:
+                v = struct.unpack('<f', struct.pack('<I', rng.getrandbits(32)))[0]
+                if v == v and abs(v) != float('inf'):
+                    row.append(v)
+            return row
+        if mode == 'uniform':   # wide, smooth magnitudes
+            return [rng.uniform(-1e4, 1e4) for _ in range(128)]
+        return [rng.randrange(-2048, 2049) / 128 for _ in range(128)]
+    vectors = [make() for _ in range(N)]
+    queries = [make() for _ in range(Q)]
     order = list(range(N)); rng.shuffle(order)
     body = lambda i: 'record-' + str(i) + '-' + chr(97 + i % 26) * 256
     lit = lambda v: json.dumps(v, separators=(',', ':'))
@@ -56,12 +68,14 @@ def main():
         log = work / (tag + '-stderr.log')
         s = Session(config, log, command=command)
         rec = {'round': r + 1, 'indexed': index}
-        io_before = cgroup_io(cgroup) if cgroup else {}
+        # A fresh cgroup per round: memory.peak is a high-water mark and resetting
+        # it by writing 0 is unsupported on older kernels.
+        cgroup_dir = None
         if cgroup:
-            try:
-                Path(cgroup, 'memory.peak').write_text('0')
-            except OSError:
-                pass
+            cgroup_dir = Path(cgroup) / ('run-%d-%d' % (os.getpid(), r))
+            cgroup_dir.mkdir(parents=True, exist_ok=True)
+            os.environ['MVDB_CGROUP'] = str(cgroup_dir)
+        io_before = cgroup_io(str(cgroup_dir)) if cgroup_dir else {}
         try:
             s.start()
             peak = {'bytes': 0}
@@ -86,9 +100,9 @@ def main():
             rec.update(proc_metrics(s.proc.pid))
             rec['db_peak_rss_bytes'] = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             s.shutdown()
-            if cgroup:
-                rec['cg_memory_peak_kb'] = read_int(Path(cgroup, 'memory.peak')) // 1024
-                io_after = cgroup_io(cgroup)
+            if cgroup_dir:
+                rec['cg_memory_peak_kb'] = read_int(cgroup_dir / 'memory.peak') // 1024
+                io_after = cgroup_io(str(cgroup_dir))
                 rec['cg_bytes'] = {k: io_after[k] - io_before.get(k, 0) for k in io_after}
         finally:
             s.close()

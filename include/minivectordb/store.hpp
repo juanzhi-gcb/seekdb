@@ -100,6 +100,10 @@ public:
   void restore(const Savepoint&);
   // Visits in signed key order. Uses an immutable root snapshot; callback may mutate the active transaction.
   void scan(const std::function<void(std::int64_t, std::string_view)>& visitor) const;
+  // Same rows as scan_in, visited in ascending file-offset order, dropping the
+  // pages behind the reader. Used only while building an owned cache.
+  void scan_in_offset_order(std::uint64_t space,
+      const std::function<void(std::int64_t, std::string_view)>& visitor) const;
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
