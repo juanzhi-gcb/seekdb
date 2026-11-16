@@ -114,6 +114,15 @@ public:
     const auto r=record(at,end_);if(r.key!=Key{space,key}||r.flags==2)fail();auto payload=read(at+header_size,std::size_t(r.length));
     if(crc(payload)!=r.checksum)fail();return r.flags==1?unpack_bytes(payload,4064,true):payload;
   }
+  // Point lookups read each row about once, so the page they touch is never
+  // reused. Releasing it keeps device page cache out of the measured peak
+  // without changing the read count.
+  std::string value_at_once(std::uint64_t space,std::int64_t key,std::uint64_t at)const{
+    auto out=value_at(space,key,at);
+    if(drop_after_read)advise_before(at+sizeof(Page));
+    return out;
+  }
+  bool drop_after_read=false;
   void apply(std::uint64_t space,std::span<const Store::Mutation> changes){
     if(changes.size()>Store::max_batch_mutations)throw std::length_error("too many batch mutations");
     std::vector<const Store::Mutation*> order;order.reserve(changes.size());std::size_t bytes=0;
