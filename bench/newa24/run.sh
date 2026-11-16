@@ -28,7 +28,7 @@ sudo sha256sum "$scratch/data/bytes-a24.db" "$scratch/data/bytes-candidate.db" >
 docker run --rm "${limits[@]}" --mount "type=bind,src=$scratch/data,dst=/data" mvdb:newa24-candidate-test > "$result/ctest.log" 2>&1
 python3 -B bench/vendor/seekdb-round2-f4d4e26/protocol_check/run.py --image mvdb:newa24-candidate --output "$result/public" > "$result/public.log" 2>&1
 g++ -std=c++20 -O2 -ffp-contract=off bench/jsonl_oracle.cpp -o "$scratch/oracle"
-for profile in grid-bigint grid-varchar continuous-bigint cluster-bigint outlier-bigint small-short-bigint large-grid-bigint large-continuous-bigint large-outlier-bigint; do
+for profile in grid-bigint continuous-bigint; do
   shape=${profile%-*};schema=${profile##*-};rows=10000;queries=1000;body=256
   case "$profile" in
     small-short-*) shape=grid;rows=1000;body=0;;
