@@ -2,6 +2,7 @@
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
 #include <charconv>
+#include <thread>
 #include <cmath>
 #include <set>
 #include <limits>
@@ -239,13 +240,63 @@ namespace minivectordb::sql {
         if(indexes.size()!=schema.columns.size())throw Error(ErrorCode::Type,"all columns must be provided; NULL and defaults are unsupported");
       }
       std::set<std::int64_t> keys;
-      for(const auto&values:s.values) {
-        if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
-        Row row(schema.columns.size());
-        for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_literal(values[i],schema.columns[indexes[i]]);
-        auto pk=std::get<std::int64_t>(row[schema.primary]);
-        if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
-        b.insert_rows.push_back(std::move(row));
+      auto bind_rows=[&](std::size_t begin,std::size_t end) {
+        std::vector<Row> rows;
+        rows.reserve(end-begin);
+        for(std::size_t r=begin;r<end;++r) {
+          const auto& values=s.values[r];
+          if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
+          Row row(schema.columns.size());
+          for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_literal(values[i],schema.columns[indexes[i]]);
+          rows.push_back(std::move(row));
+        }
+        return rows;
+      };
+      // Large VALUES lists bind two halves concurrently: each row is independent
+      // and the merge restores the original order. A failure keeps the earliest
+      // row's error, so diagnostics match the sequential implementation.
+      const bool parallel=s.values.size()>=32;
+      if(!parallel) {
+        auto rows=bind_rows(0,s.values.size());
+        for(auto& row:rows) {
+          auto pk=std::get<std::int64_t>(row[schema.primary]);
+          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+          b.insert_rows.push_back(std::move(row));
+        }
+      } else {
+        const std::size_t split=s.values.size()/2;
+        std::vector<Row> left,right;
+        std::size_t left_error=s.values.size(),right_error=s.values.size();
+        std::exception_ptr left_ptr,right_ptr;
+        std::thread worker([&] {
+          try {right=bind_rows(split,s.values.size());}
+          catch(...) {
+            right_ptr=std::current_exception();
+            for(std::size_t r=split;r<s.values.size();++r) {
+              try {bind_rows(r,r+1);} catch(...) {right_error=r;break;}
+            }
+          }
+        });
+        try {left=bind_rows(0,split);}
+        catch(...) {
+          left_ptr=std::current_exception();
+          for(std::size_t r=0;r<split;++r) {try {bind_rows(r,r+1);} catch(...) {left_error=r;break;}}
+        }
+        worker.join();
+        if(left_ptr||right_ptr) {
+          if(left_ptr&&right_ptr) {if(left_error<=right_error)std::rethrow_exception(left_ptr);else std::rethrow_exception(right_ptr);}
+          std::rethrow_exception(left_ptr?left_ptr:right_ptr);
+        }
+        for(auto& row:left) {
+          auto pk=std::get<std::int64_t>(row[schema.primary]);
+          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+          b.insert_rows.push_back(std::move(row));
+        }
+        for(auto& row:right) {
+          auto pk=std::get<std::int64_t>(row[schema.primary]);
+          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+          b.insert_rows.push_back(std::move(row));
+        }
       }
     }
     std::set<std::size_t> assigned;
