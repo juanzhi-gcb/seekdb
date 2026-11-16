@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <thread>
+#include <sched.h>
 #include <mutex>
 #include <condition_variable>
 #include <exception>
@@ -38,11 +39,11 @@ namespace minivectordb {
     }
     std::string index_entry(const Schema& schema,const VectorIndex& index,std::int64_t key,const Row& row) {
       if(!index.referenced)return index_vector(row[index.column]);
-      std::string bytes="MVIR";
-      binary::put(bytes,schema.id);
-      binary::put(bytes,index.column,4);
-      binary::put(bytes,schema.columns[index.column].extent,4);
+      // Exact scoring reads the base table, so a referenced entry only needs the
+      // key it covers: 8 bytes instead of 28.
+      std::string bytes;
       binary::put(bytes,std::bit_cast<std::uint64_t>(key));
+      (void)schema;(void)index;
       return bytes;
     }
     struct StopScan {
@@ -473,7 +474,19 @@ namespace minivectordb {
         };
         std::vector<Neighbor> result;
         const std::size_t rows=end>begin?end-begin:0;
-        const bool parallel=options.parallel_exact_scan && rows>=options.parallel_scan_min_rows && !profile::enabled();
+        // The official container may expose one CPU; a helper thread there would
+        // cost a context switch per query instead of buying real parallelism.
+        static const bool multi_cpu=[](){
+#if defined(__linux__)
+          cpu_set_t set{};
+          if(sched_getaffinity(0,sizeof(set),&set)!=0)return false;
+          return CPU_COUNT(&set)>1;
+#else
+          return std::thread::hardware_concurrency()>1;
+#endif
+        }();
+        const bool parallel=options.parallel_exact_scan && multi_cpu &&
+            rows>=options.parallel_scan_min_rows && !profile::enabled();
         if(!parallel) {
           Half single;
           run_half(begin,end,single);
