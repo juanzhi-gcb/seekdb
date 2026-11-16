@@ -96,6 +96,10 @@ struct Options {
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::BatchedSync;
   // BatchedSync only: force a device sync every N statements (default 4).
   unsigned commit_sync_batch = 4;
+  // Split one exact TopK scan across two threads when the cached row range is
+  // large enough to pay for the hand-off; results are merged by (distance,key).
+  bool parallel_exact_scan = true;
+  std::size_t parallel_scan_min_rows = 2048;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.

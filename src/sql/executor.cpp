@@ -9,6 +9,10 @@
 #include "../vector/validated.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <exception>
 #include <bit>
 #include "../storage/binary.hpp"
 #include <limits>
@@ -71,6 +75,48 @@ namespace minivectordb {
         mutations_.push_back({key,std::move(value)});
         bytes_+=size;
         if(bytes_>=Store::max_batch_bytes)flush();
+      }
+    };
+    // One persistent helper thread: spawning a std::thread per query costs more
+    // than the whole 100 us scan it is meant to halve.
+    class ScanHelper {
+      std::mutex mutex_;
+      std::condition_variable wake_;
+      std::function<void()> job_;
+      std::thread worker_;
+      bool pending_=false, finished_=true, stop_=false;
+      void loop() {
+        for(;;) {
+          std::function<void()> job;
+          {
+            std::unique_lock<std::mutex> lock(mutex_);
+            wake_.wait(lock,[&] {return stop_ || pending_;});
+            if(stop_)return;
+            job=std::move(job_);pending_=false;
+          }
+          job();
+          {
+            std::lock_guard<std::mutex> lock(mutex_);
+            finished_=true;
+          }
+          wake_.notify_all();
+        }
+      }
+    public:
+      ScanHelper() {worker_=std::thread([this] {loop();});}
+      ~ScanHelper() {
+        {std::lock_guard<std::mutex> lock(mutex_);stop_=true;}
+        wake_.notify_all();worker_.join();
+      }
+      ScanHelper(const ScanHelper&)=delete;
+      ScanHelper& operator=(const ScanHelper&)=delete;
+      void run(std::function<void()> job) {
+        {std::lock_guard<std::mutex> lock(mutex_);job_=std::move(job);pending_=true;finished_=false;}
+        wake_.notify_one();
+      }
+      void wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        wake_.wait(lock,[&] {return finished_;});
       }
     };
     class SelectRow {
@@ -146,6 +192,7 @@ namespace minivectordb {
   struct Database::Impl {
     Store store;
     Options options;
+    std::unique_ptr<ScanHelper> scan_helper;
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
@@ -330,43 +377,78 @@ namespace minivectordb {
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
-        auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
-          std::array<std::int64_t,16> keys{};
-          std::vector<float> tail;
-          // The stored transpose is aligned to physical cache blocks. Keep
-          // that alignment and mask the two interval boundaries explicitly.
-          for(std::size_t r=begin/16*16;r<end;r+=16) {
-            const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
-            std::uint16_t mask=0;
-            if(bulk) {
-              const auto lo=begin>r?begin-r:0,hi=std::min(count,end-r);
-              const auto selected=hi-lo;
-              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
-              info.rows_examined+=selected;info.typed_rows_examined+=selected;
-              info.distances_computed+=selected;++info.certified_blocks_examined;
-              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
-            } else
-            for(std::size_t lane=0;lane<count;++lane) {
-              if(r+lane<begin || r+lane>=end)continue;
-              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
-              ++info.rows_examined;++info.typed_rows_examined;
-              keys[lane]=typed_snapshot.key(r+lane);
-              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
-            }
-            if(!mask)continue;
-            std::span<const float> block;
-            if(count<16) {
-              tail.assign(16*e.query->size(),0);
+        struct Half { std::size_t begin,end; std::uint64_t rows=0,dist=0,blocks=0; std::vector<Neighbor> result; };
+        auto run_half=[&](std::size_t from,std::size_t to,Half& half) {
+          half.begin=from;half.end=to;
+          half.result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
+            std::array<std::int64_t,16> keys{};
+            std::vector<float> tail;
+            for(std::size_t r=from/16*16;r<to;r+=16) {
+              const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
+              std::uint16_t mask=0;
+              if(bulk) {
+                const auto lo=from>r?from-r:0,hi=std::min(count,to-r);
+                const auto selected=hi-lo;
+                mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
+                half.rows+=selected;++half.blocks;
+                for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+              } else
               for(std::size_t lane=0;lane<count;++lane) {
-                const auto vector=typed_snapshot.vector(r+lane);
-                for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
+                if(r+lane<from || r+lane>=to)continue;
+                ++half.rows;
+                keys[lane]=typed_snapshot.key(r+lane);
+                if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++half.dist;}
               }
-              block=tail;
-            } else block=typed_snapshot.block(r);
-            visit({keys.data(),count},block,mask);
+              if(!mask)continue;
+              std::span<const float> block;
+              if(count<16) {
+                tail.assign(16*e.query->size(),0);
+                for(std::size_t lane=0;lane<count;++lane) {
+                  const auto vector=typed_snapshot.vector(r+lane);
+                  for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
+                }
+                block=tail;
+              } else block=typed_snapshot.block(r);
+              visit({keys.data(),count},block,mask);
+            }
+          },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
+            options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
+        };
+        std::vector<Neighbor> result;
+        const std::size_t rows=end>begin?end-begin:0;
+        const bool parallel=options.parallel_exact_scan && rows>=options.parallel_scan_min_rows && !profile::enabled();
+        if(!parallel) {
+          Half single;
+          run_half(begin,end,single);
+          info.rows_examined+=single.rows;info.typed_rows_examined+=single.rows;
+          info.certified_blocks_examined+=single.blocks;info.distances_computed+=single.dist;
+          result=std::move(single.result);
+        } else {
+          const std::size_t split=begin+(rows/2)/16*16;
+          Half left,right;
+          std::exception_ptr failure;
+          if(!scan_helper)scan_helper=std::make_unique<ScanHelper>();
+          auto worker=[&] { try {run_half(split,end,right);} catch(...) {failure=std::current_exception();} };
+          scan_helper->run(worker);
+          try {run_half(begin,split,left);} catch(...) {scan_helper->wait();throw;}
+          scan_helper->wait();
+          if(failure)std::rethrow_exception(failure);
+          info.rows_examined+=left.rows+right.rows;info.typed_rows_examined+=left.rows+right.rows;
+          info.certified_blocks_examined+=left.blocks+right.blocks;
+          info.distances_computed+=left.dist+right.dist;
+          result.reserve(std::min(k,left.result.size()+right.result.size()));
+          std::size_t i=0,j=0;
+          while(result.size()<k && (i<left.result.size()||j<right.result.size())) {
+            bool take_left;
+            if(i==left.result.size())take_left=false;
+            else if(j==right.result.size())take_left=true;
+            else {
+              const auto& a=left.result[i];const auto& b=right.result[j];
+              take_left=a.distance<b.distance || (a.distance==b.distance && a.key<b.key);
+            }
+            result.push_back(take_left?left.result[i++]:right.result[j++]);
           }
-        },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
-          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
+        }
         info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
