@@ -101,7 +101,7 @@ struct Options {
   // Build the owned cache in file-offset order and release pages behind the
   // reader, so the measured peak does not hold both the file and the cache.
   // The flat vector index stays catalog-only: no per-row entries, no pairing.
-  bool lazy_vector_index = true;
+  bool lazy_vector_index = false;  // real index entries: the perf harness prepares an index
   bool progressive_page_drop = true;
   bool parallel_exact_scan = true;
   std::size_t parallel_scan_min_rows = 2048;
