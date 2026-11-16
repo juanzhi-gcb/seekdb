@@ -1,0 +1,65 @@
+{
+  "kind": "live-session-record-archive",
+  "session": "2026-11-16",
+  "note": "本次会话新增记录的原样归档，供材料逐条溯源；字段与材料内记录逐字一致。",
+  "conversations": [
+    {
+      "id": "n20",
+      "role": "user",
+      "source": "live_session_20261116",
+      "phase": "current",
+      "content": "放弃缓存会让查询慢 11.7 倍，有别的解决方案吗，"
+    },
+    {
+      "id": "n21",
+      "role": "user",
+      "source": "live_session_20261116",
+      "phase": "current",
+      "content": "三个方案都试一下，看结果对比哪个方案更好一点"
+    },
+    {
+      "id": "n22",
+      "role": "user",
+      "source": "live_session_20261116",
+      "phase": "current",
+      "content": "方案一修修bug试试看"
+    },
+    {
+      "id": "n23",
+      "role": "user",
+      "source": "live_session_20261116",
+      "phase": "current",
+      "content": "可以，把prompt优化整理一下，突出逻辑链和可辩证性，然后推送给我branch和commit"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "x1",
+      "source": "live_session_20261116",
+      "purpose": "否证“无缓存 12 位流式扫描因字节更少而更快”的假设",
+      "phase": "current",
+      "output": "微基准 1000 次 TopK：转置 float32 缓存 237–260 ms；无缓存 12 位流式扫描 2770–2772 ms。读取量少 2.7 倍仍慢 11.7 倍，原因是每分量解包为标量指令，瓶颈在指令数而非带宽。假设被否证，未采用。"
+    },
+    {
+      "id": "x2",
+      "source": "live_session_20261116",
+      "purpose": "量化 int16 扫描缓存对 M 的收益并检验正确性",
+      "phase": "current",
+      "output": "仅换存储、走已校验扫描：M 9.5→6.35 MB（−33%），公开用例 20/20、1000 条答案与 oracle 一致；查询 492 ms/500 次（慢 10 倍）。接入块解码内核后 top10 与 oracle 不一致（两次分别错为 9872、4690），三次集成均未通过，未采用。"
+    },
+    {
+      "id": "x3",
+      "source": "live_session_20261116",
+      "purpose": "用帧内编码压缩行内向量以降低 B",
+      "phase": "current",
+      "output": "12 位帧内编码（k=value*128，k+2048 存 12 位）行格式 v2：文件 4.60→2.78 MB，B 5.40→3.58 MB（−34%），写入 258.5→244.8 ms，查询与 M 不变，公开用例 20/20。解码 (code-2048)/128.0f 与 float32 逐位一致。"
+    },
+    {
+      "id": "x4",
+      "source": "live_session_20261116",
+      "purpose": "新行格式对回退路径的影响",
+      "phase": "current",
+      "output": "禁用 typed 缓存与缓存预算被拒时触发 CORRUPTION“snapshot vector length mismatch”。修复 snapshot_row 的版本分支后，10000 行（缓存被拒）与 30000 行路径均通过。若未发现，大数据功能用例会导致准入为 0。"
+    }
+  ]
+}
