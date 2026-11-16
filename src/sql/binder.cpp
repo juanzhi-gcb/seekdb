@@ -9,7 +9,8 @@
 #include <cstdlib>
 #include <new>
 #include <exception>
-#include <unordered_map>
+#include <array>
+#include <functional>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -121,22 +122,21 @@ namespace minivectordb::sql {
   // Per-INSERT cache. Keys borrow immutable parsed literal storage and never
   // escape bind(); only successful binary64 parses are reusable.
   struct InsertNumberCache {
-    std::unordered_map<std::string_view,double> entries;
+    struct Entry { std::string_view key; double value=0; };
+    std::array<Entry,256> entries{};
     std::size_t lookups=0,hits=0;
     bool disabled=false;
     double parse(std::string_view component) {
       if(disabled)return real(component);
-      // Re-evaluate each 128 conversions so an initially repetitive prefix
-      // cannot force hash probes on the rest of a high-cardinality statement.
       if(lookups==128) {
-        if(hits<16) {entries.clear();disabled=true;return real(component);}
+        if(hits<16) {disabled=true;return real(component);}
         lookups=0;hits=0;
       }
       ++lookups;
-      auto it=entries.find(component);
-      if(it!=entries.end()) {++hits;return it->second;}
+      auto& slot=entries[std::hash<std::string_view>{}(component)&255];
+      if(!slot.key.empty() && slot.key==component) {++hits;return slot.value;}
       const auto parsed=real(component);
-      if(entries.size()<256)entries.emplace(component,parsed);
+      slot={component,parsed};
       return parsed;
     }
   };

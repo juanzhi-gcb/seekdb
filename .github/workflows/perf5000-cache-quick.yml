@@ -1,7 +1,7 @@
-name: A24 numeric cache quick screen
+name: A24 direct-mapped numeric cache quick screen
 on:
   push:
-    branches: ['codex/perf5000-cache-quick-20261116']
+    branches: ['codex/perf5000-direct-quick-20261116']
 permissions:
   contents: read
 jobs:
@@ -23,6 +23,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: perf5000-cache-quick-${{ matrix.replica }}-${{ github.run_id }}
+          name: perf5000-direct-quick-${{ matrix.replica }}-${{ github.run_id }}
           path: newa24-results/
           retention-days: 14
