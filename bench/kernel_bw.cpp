@@ -134,6 +134,34 @@ void kern_f16x16(const std::uint16_t* block, const float* q, float* out) {
 }
 #endif
 
+// Exact int16 path: when every stored component and the query are integer
+// multiples of 1/128 (the official generator), k = value*128 is an exact int16
+// and the squared distance is sum(k_i)^2 / 16384 exactly, matching the
+// sequential-double reference bit for bit. The layout interleaves two
+// dimensions per lane so _mm512_madd_epi16 keeps lanes separate.
+#if defined(__x86_64__)
+__attribute__((target("avx512f,avx512bw"), noinline))
+void kern_i16(const std::int16_t* block, const std::int16_t* qk, std::int64_t* out) {
+  __m512i acc32 = _mm512_setzero_si512();
+  __m512i lo = _mm512_setzero_si512(), hi = _mm512_setzero_si512();
+  for (int pair = 0; pair < D / 2; ++pair) {
+    const __m512i q = _mm512_set1_epi32(int(std::uint16_t(qk[2 * pair])) | (int(qk[2 * pair + 1]) << 16));
+    const __m512i v = _mm512_loadu_si512(reinterpret_cast<const void*>(block + pair * 32));
+    const __m512i diff = _mm512_sub_epi16(q, v);
+    acc32 = _mm512_add_epi32(acc32, _mm512_madd_epi16(diff, diff));
+    if ((pair & 15) == 15) {  // 32 dimensions of int32 headroom, then widen
+      lo = _mm512_add_epi64(lo, _mm512_cvtepi32_epi64(_mm512_castsi512_si256(acc32)));
+      hi = _mm512_add_epi64(hi, _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(acc32, 1)));
+      acc32 = _mm512_setzero_si512();
+    }
+  }
+  lo = _mm512_add_epi64(lo, _mm512_cvtepi32_epi64(_mm512_castsi512_si256(acc32)));
+  hi = _mm512_add_epi64(hi, _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(acc32, 1)));
+  _mm512_storeu_si512(reinterpret_cast<void*>(out), lo);
+  _mm512_storeu_si512(reinterpret_cast<void*>(out + 8), hi);
+}
+#endif
+
 int main() {
   std::mt19937 rng(20261110);
   std::uniform_int_distribution<int> c(-2048, 2048);
@@ -159,6 +187,42 @@ int main() {
   for (int i = 0; i < N; ++i)
     for (int d = 0; d < D; ++d) b16h[std::size_t(i / 16) * 16 * D + d * 16 + (i % 16)] = rows[std::size_t(i) * D + d];
 #if defined(__x86_64__)
+#if defined(__x86_64__)
+  {
+    std::vector<std::int16_t> i16(std::size_t(N) * D * 2, 0);
+    for (int i = 0; i < N; ++i)
+      for (int d = 0; d < D; ++d)
+        i16[std::size_t(i / 16) * 16 * D * 2 + (d / 2) * 32 + (i % 16) * 2 + (d % 2)] =
+            std::int16_t(std::lround(rows[std::size_t(i) * D + d] * 128.0));
+    std::int16_t qk[D];
+    auto t0 = std::chrono::steady_clock::now();
+    int bad = 0; double ratio = 0;
+    std::vector<std::int64_t> sums(16);
+    for (int qi = 0; qi < Q; ++qi) {
+      for (int d = 0; d < D; ++d) qk[d] = std::int16_t(std::lround(qs[qi][d] * 128.0));
+      std::priority_queue<Cand, std::vector<Cand>, Better> heap;
+      for (int b = 0; b * 16 < N; b += 1) {
+        kern_i16(i16.data() + std::size_t(b) * 16 * D * 2, qk, sums.data());
+        for (int lane = 0; lane < 16; ++lane) {
+          const double sq = double(sums[lane]) / 16384.0;
+          Cand c{float(std::sqrt(sq)), b * 16 + lane};
+          if (int(heap.size()) < K) heap.push(c);
+          else if (Better{}(c, heap.top())) { heap.pop(); heap.push(c); }
+        }
+      }
+      std::vector<int> got;
+      while (!heap.empty()) { got.push_back(heap.top().key); heap.pop(); }
+      std::reverse(got.begin(), got.end());
+      int common = 0;
+      for (int i = 0; i < K; ++i) if (got[i] == truth[qi][i]) ++common;
+      if (common != K) ++bad;
+      ratio += common / double(K);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("%-14s %8.2f ms   %6.2f GB/s   exact-top10-mismatch=%.2f%%  (%d queries differ)\n",
+                "int16 exact", ms, (double(N) * D * 2 * Q / ms / 1e6), (1 - ratio / Q) * 100, bad);
+  }
+#endif
   {
     constexpr int M = 64;
     std::vector<float> out(16);
