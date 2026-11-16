@@ -47,13 +47,21 @@ def main():
 
     config = json.loads((ROOT / 'bench/vendor/seekdb-round2-f4d4e26/protocol_check/config.json').read_text())
     config.update(request_timeout=300, case_timeout=7200)
-    command = [str(binary), '--data-dir', '{data_dir}']
+    wrap = os.environ.get('MVDB_WRAP')
+    command = ([wrap] if wrap else []) + [str(binary), '--data-dir', '{data_dir}']
+    cgroup = os.environ.get('MVDB_CGROUP')
     rounds = []
     for r in range(R):
         tag = 'r%d-%s' % (r + 1, 'indexed' if index else 'unindexed')
         log = work / (tag + '-stderr.log')
         s = Session(config, log, command=command)
         rec = {'round': r + 1, 'indexed': index}
+        io_before = cgroup_io(cgroup) if cgroup else {}
+        if cgroup:
+            try:
+                Path(cgroup, 'memory.peak').write_text('0')
+            except OSError:
+                pass
         try:
             s.start()
             peak = {'bytes': 0}
@@ -78,6 +86,10 @@ def main():
             rec.update(proc_metrics(s.proc.pid))
             rec['db_peak_rss_bytes'] = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             s.shutdown()
+            if cgroup:
+                rec['cg_memory_peak_kb'] = read_int(Path(cgroup, 'memory.peak')) // 1024
+                io_after = cgroup_io(cgroup)
+                rec['cg_bytes'] = {k: io_after[k] - io_before.get(k, 0) for k in io_after}
         finally:
             s.close()
         rec['file_bytes'] = rec.get('data_bytes', 0)
@@ -98,6 +110,23 @@ def main():
     }
     out.write_text(json.dumps(summary, indent=2))
     print(json.dumps({k: summary[k] for k in ('write_ms', 'query_total_ms', 'query_median_ms', 'db_peak_rss_bytes')}))
+
+def read_int(path):
+    try:
+        return int(path.read_text().strip() or 0)
+    except OSError:
+        return 0
+
+def cgroup_io(cgroup):
+    total = {}
+    try:
+        for line in Path(cgroup, 'io.stat').read_text().splitlines():
+            name = line.split()[0]
+            values = dict(item.split('=') for item in line.split()[1:])
+            total[name] = int(values.get('rbytes', 0)) + int(values.get('wbytes', 0))
+    except OSError:
+        pass
+    return total
 
 def proc_metrics(pid):
     out = {}

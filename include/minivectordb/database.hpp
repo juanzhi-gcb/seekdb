@@ -89,11 +89,11 @@ struct Options {
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;
-  // Competition recovery model: a process SIGKILL or a normal restart keeps
-  // every acknowledged row (data is already in the page cache). BatchedSync
-  // bounds the power-loss window to the last N-1 statements instead of paying
-  // one device sync per statement. Ordered keeps data-before-root ordering.
-  CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::BatchedSync;
+  // Official scoring counts the writeback that completes after the run, so
+  // deferring fsync neither lowers B nor shortens the measured window (an
+  // official A/B measured -15.2% E). Default back to one sync per statement;
+  // BatchedSync/PageCache remain available for local experiments only.
+  CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
   // BatchedSync only: force a device sync every N statements (default 4).
   unsigned commit_sync_batch = 4;
   // Split one exact TopK scan across two threads when the cached row range is
