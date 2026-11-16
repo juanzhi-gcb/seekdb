@@ -741,14 +741,6 @@ void Store::restore(const Savepoint& point) {
 void Store::scan(const std::function<void(std::int64_t,std::string_view)>& visitor) const {
   scan_in(0,visitor);
 }
-void Store::scan_cache_in(std::uint64_t space,const std::function<bool(std::int64_t,std::string_view)>& visitor) const {
-  auto& s=*impl_;s.usable();if(s.journal){s.journal->cache_scan(space,visitor);return;}
-  scan_in(space,[&](auto key,auto bytes){(void)visitor(key,bytes);});
-}
-void Store::scan_cache_equal_in(std::uint64_t left,std::uint64_t right,const std::function<bool(std::int64_t,std::string_view,std::string_view)>& visitor) const {
-  auto& s=*impl_;s.usable();if(s.journal){s.journal->cache_scan_equal(left,right,visitor);return;}
-  scan_equal_in(left,right,[&](auto key,auto a,auto b){(void)visitor(key,a,b);});
-}
 void Store::scan_in(std::uint64_t space,const std::function<void(std::int64_t,std::string_view)>& visitor) const {
   auto& s=*impl_; s.usable();if(s.journal){const auto rows=s.journal->snapshot(space);for(auto [key,at]:rows){auto value=s.journal->value_at(space,key,at);visitor(key,value);}return;} auto id=s.locate_namespace(s.root,space);
   Impl::ScanCache memo(s.scan_budget);

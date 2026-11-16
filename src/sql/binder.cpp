@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <new>
 #include <exception>
+#include <unordered_map>
 namespace minivectordb::sql {
   std::size_t column_index(const Schema&s,std::string_view name) {
     for(std::size_t i=0;i<s.columns.size();++i)if(s.columns[i].name==name)return i;
@@ -116,7 +117,30 @@ namespace minivectordb::sql {
       return b;
     }
   }
-  Cell bind_literal(const Literal&v,const Column&c,bool fast_vector) {
+  namespace {
+  // Per-INSERT cache. Keys borrow immutable parsed literal storage and never
+  // escape bind(); only successful binary64 parses are reusable.
+  struct InsertNumberCache {
+    std::unordered_map<std::string_view,double> entries;
+    std::size_t lookups=0,hits=0;
+    bool disabled=false;
+    double parse(std::string_view component) {
+      if(disabled)return real(component);
+      // Re-evaluate each 128 conversions so an initially repetitive prefix
+      // cannot force hash probes on the rest of a high-cardinality statement.
+      if(lookups==128) {
+        if(hits<16) {entries.clear();disabled=true;return real(component);}
+        lookups=0;hits=0;
+      }
+      ++lookups;
+      auto it=entries.find(component);
+      if(it!=entries.end()) {++hits;return it->second;}
+      const auto parsed=real(component);
+      if(entries.size()<256)entries.emplace(component,parsed);
+      return parsed;
+    }
+  };
+  Cell bind_literal_impl(const Literal&v,const Column&c,bool fast_vector,InsertNumberCache* cache) {
     try {
       if(c.type==ColumnType::Bigint) {
         if(v.kind!=Literal::Number)throw Error(ErrorCode::Type,"expected BIGINT literal");
@@ -133,7 +157,7 @@ namespace minivectordb::sql {
         std::exception_ptr numeric_error;
         const bool plain=plain_vector(v.text,[&](auto component){
           if(numeric_error)return;
-          try {values.push_back(real(component));}
+          try {values.push_back(cache?cache->parse(component):real(component));}
           catch(const Error&) {numeric_error=std::current_exception();}
         });
         if(plain) {
@@ -153,48 +177,9 @@ namespace minivectordb::sql {
       throw Error(ErrorCode::Type,e.what());
     }
   }
-  namespace {
-    // Let the numeric converter validate its complete comma-delimited token.
-    // This removes the separate per-character grammar pass for plain arrays.
-    // Anything outside the subset returns to the original lexer, preserving
-    // lexical-error precedence over an earlier numeric overflow.
-    template<class F> bool insert_vector_numbers(std::string_view text,F&& consume) {
-      const auto whitespace=[](char c){return c==' '||c=='\t'||c=='\r'||c=='\n'||c=='\f';};
-      const auto trim=[&](std::string_view v){while(!v.empty()&&whitespace(v.front()))v.remove_prefix(1);while(!v.empty()&&whitespace(v.back()))v.remove_suffix(1);return v;};
-      text=trim(text);if(text.size()<2||text.front()!='['||text.back()!=']')return false;
-      text=trim(text.substr(1,text.size()-2));if(text.empty())return true;
-      for(;;) {
-        const auto comma=text.find(',');const auto component=trim(text.substr(0,comma));
-        auto number=component;if(number.empty())return false;
-        if(number.front()=='+')number.remove_prefix(1);
-        auto unsigned_number=component;if(unsigned_number.front()=='+'||unsigned_number.front()=='-')unsigned_number.remove_prefix(1);
-        if(unsigned_number.empty()||!((unsigned_number.front()>='0'&&unsigned_number.front()<='9')||unsigned_number.front()=='.'))return false;
-        double parsed=0;
-        const auto [end,error]=std::from_chars(number.data(),number.data()+number.size(),parsed);
-        if(end!=number.data()+number.size()||(error!=std::errc{}&&error!=std::errc::result_out_of_range))return false;
-        consume(component,parsed,error==std::errc::result_out_of_range);
-        if(comma==std::string_view::npos)return true;
-        text.remove_prefix(comma+1);if(text.empty())return false;
-      }
-    }
-    Cell bind_insert_literal(const Literal& v,const Column& c) {
-      if(c.type!=ColumnType::Vector || v.kind!=Literal::String)return bind_literal(v,c);
-      try {
-        std::vector<double> values;
-        values.reserve(std::min<std::size_t>(c.extent,v.text.size()/2));
-        std::exception_ptr numeric_error;
-        const bool plain=insert_vector_numbers(v.text,[&](auto component,double parsed,bool range){
-          if(numeric_error)return;
-          try {values.push_back(range?real(component):parsed);}
-          catch(const Error&) {numeric_error=std::current_exception();}
-        });
-        if(plain) {
-          if(numeric_error)std::rethrow_exception(numeric_error);
-          return make_vector(values,c.extent);
-        }
-      } catch(const std::invalid_argument& e) {throw Error(ErrorCode::Type,e.what());}
-      return bind_literal(v,c);
-    }
+  }
+  Cell bind_literal(const Literal&v,const Column&c,bool fast_vector) {
+    return bind_literal_impl(v,c,fast_vector,nullptr);
   }
   Bound bind(const Statement&s,const Schema&schema) {
     Bound b;
@@ -245,10 +230,11 @@ namespace minivectordb::sql {
         if(indexes.size()!=schema.columns.size())throw Error(ErrorCode::Type,"all columns must be provided; NULL and defaults are unsupported");
       }
       std::set<std::int64_t> keys;
+      InsertNumberCache number_cache;
       for(const auto&values:s.values) {
         if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
         Row row(schema.columns.size());
-        for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_insert_literal(values[i],schema.columns[indexes[i]]);
+        for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_literal_impl(values[i],schema.columns[indexes[i]],true,&number_cache);
         auto pk=std::get<std::int64_t>(row[schema.primary]);
         if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
         b.insert_rows.push_back(std::move(row));
