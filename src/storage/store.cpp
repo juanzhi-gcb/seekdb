@@ -85,12 +85,16 @@ Page read_raw(int fd,std::uint64_t id,bool discard=false) {
   if(discard)discard_clean_pages(fd,start,page_size);
   return p;
 }
-void sync_fd(int fd) {
+void sync_fd(int fd,bool data_only=false) {
   for(;;) {
     int result;
     {
       profile::detail::Scope timer(&profile::Snapshot::fsync);
-      result=::fsync(fd);
+#if defined(__linux__)
+      if(data_only) result=::fdatasync(fd); else result=::fsync(fd);
+#else
+      (void)data_only; result=::fsync(fd);
+#endif
     }
     if(result==0) return;
     if(errno!=EINTR) io_error("fsync");
@@ -173,6 +177,8 @@ struct Store::Impl {
   bool active=false, poisoned=false, format3=false, packing=false, compressed_paths=false, packed_branches=true, compact_values=false;
   bool discard_file_cache=false,compact_node_refs=false,byteplane_values=false;
   CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered;
+  std::size_t sync_batch=4;      // BatchedSync: force a device sync every N commits.
+  std::size_t pending_sync=0;    // Commits written but not yet forced to disk.
   std::size_t scan_budget=0;
   // Only the entry array is allocated, lazily on the first packed reference.
   // Each scan owns its array, including recursive scans from a visitor.
@@ -202,7 +208,12 @@ struct Store::Impl {
     if(id<2 || id>=next_page)corrupt();
     return id;
   }
-  ~Impl() {if(fd>=0) ::close(fd);}
+  ~Impl() {
+    // Destroy the journal first: its destructor flushes a pending batched-sync
+    // window, which must happen while the descriptor is still open.
+    journal.reset();
+    if(fd>=0) { if(pending_sync){try{ ::fsync(fd);}catch(...){} pending_sync=0;} ::close(fd); }
+  }
   void usable() const {if(poisoned) throw std::runtime_error("commit outcome uncertain; close and reopen Store");}
   void transaction() const {usable(); if(!active) throw std::logic_error("no active transaction");}
   Page branch_view(const Page& page,std::uint64_t id,unsigned depth) const {
@@ -548,9 +559,11 @@ struct Store::Impl {
   }
 };
 
-Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format):impl_(std::make_unique<Impl>()) {
-  if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash)
+Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,bool packed_values,std::size_t packed_scan_cache_bytes,std::size_t data_cache_bytes,CommitSyncPolicy commit_sync_policy,bool compressed_paths,bool packed_branches,bool compact_values,bool discard_file_cache,bool compact_node_refs,bool byteplane_values,bool journal_format,unsigned commit_sync_batch):impl_(std::make_unique<Impl>()) {
+  if(commit_sync_policy!=CommitSyncPolicy::Ordered && commit_sync_policy!=CommitSyncPolicy::ProcessCrash && commit_sync_policy!=CommitSyncPolicy::PageCache && commit_sync_policy!=CommitSyncPolicy::DataSync && commit_sync_policy!=CommitSyncPolicy::BatchedSync)
     throw std::invalid_argument("invalid commit synchronization policy");
+  if(commit_sync_batch==0) commit_sync_batch=1;
+  impl_->sync_batch=commit_sync_batch;
   bool created=false;
   impl_->fd=::open(path.c_str(),O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC,0600);
   if(impl_->fd>=0) created=true;
@@ -571,7 +584,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   s.data_set_count=data_cache_bytes/sizeof(Impl::DataSet);
   if(::flock(s.fd,LOCK_EX|LOCK_NB)!=0) io_error("lock database");
   if(created && journal_format) {
-    s.journal=std::make_unique<detail::JournalStore>(s.fd,true,data_cache_bytes,commit_sync_policy);
+    s.journal=std::make_unique<detail::JournalStore>(s.fd,true,data_cache_bytes,commit_sync_policy,commit_sync_batch);
     auto parent=path.parent_path();if(parent.empty())parent=".";
     int directory=::open(parent.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);if(directory<0)io_error("open database directory");
     try{sync_fd(directory);}catch(...){::close(directory);throw;}::close(directory);return;
@@ -588,7 +601,7 @@ Store::Store(const std::filesystem::path& path,std::size_t index_cache_bytes,boo
   if(info.st_size<static_cast<off_t>(2*page_size)) corrupt();
   auto bytes=static_cast<std::uint64_t>(info.st_size), complete=bytes/page_size;
   auto a=read_raw(s.fd,0), b=read_raw(s.fd,1);
-  if(detail::JournalStore::magic(a.data())||detail::JournalStore::magic(b.data())){s.journal=std::make_unique<detail::JournalStore>(s.fd,false,data_cache_bytes,commit_sync_policy);return;}
+  if(detail::JournalStore::magic(a.data())||detail::JournalStore::magic(b.data())){s.journal=std::make_unique<detail::JournalStore>(s.fd,false,data_cache_bytes,commit_sync_policy,commit_sync_batch);return;}
   if(std::memcmp(a.data(),"MVDBRT01",8)==0 || std::memcmp(b.data(),"MVDBRT01",8)==0) throw std::runtime_error("unsupported MiniVectorDB format 01; format 02 required");
   bool av=valid_root(a,complete), bv=valid_root(b,complete);
   if(!av && !bv) corrupt();
@@ -719,10 +732,14 @@ void Store::commit() {
   try {
     // Every reachable COW page has already completed its write loop. Ordered
     // additionally persists these dependencies before publishing the root.
-    if(s.commit_sync_policy==CommitSyncPolicy::Ordered)sync_fd(s.fd);
+    const bool data_only=s.commit_sync_policy==CommitSyncPolicy::DataSync;
+    if(s.commit_sync_policy==CommitSyncPolicy::Ordered)sync_fd(s.fd,data_only);
     write_page(s.fd,make_root(next,s.root,s.next_page,s.format3,s.compressed_paths,s.compact_values,s.compact_node_refs,s.byteplane_values),next%2);
-    // Both modes acknowledge only after the root AND its data have been synced.
-    sync_fd(s.fd);
+    // Ordered/ProcessCrash acknowledge only after the root AND its data are synced.
+    // PageCache acknowledges once both are written into the page cache.
+    if(s.commit_sync_policy==CommitSyncPolicy::BatchedSync) {
+      if(++s.pending_sync>=s.sync_batch) {sync_fd(s.fd,data_only); s.pending_sync=0;}
+    } else if(s.commit_sync_policy!=CommitSyncPolicy::PageCache) sync_fd(s.fd,data_only);
     if(s.discard_file_cache)discard_clean_pages(s.fd,0,0);
   } catch(...) {s.poisoned=true; throw;}
   s.generation=next; s.durable_root=s.root; s.active=false;

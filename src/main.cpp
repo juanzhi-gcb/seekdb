@@ -2,6 +2,7 @@
 #include "protocol/jsonl.hpp"
 #include <charconv>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -173,6 +174,17 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(args.directory);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
         minivectordb::Options options{args.directory / "tmp",args.sort_memory};options.journal_store=true;
+        if(const char* mode=std::getenv("MVDB_SYNC");mode) {
+            const std::string_view value(mode);
+            if(value=="pagecache") options.commit_sync_policy=minivectordb::CommitSyncPolicy::PageCache;
+            else if(value=="fdatasync") options.commit_sync_policy=minivectordb::CommitSyncPolicy::DataSync;
+            else if(value=="ordered") options.commit_sync_policy=minivectordb::CommitSyncPolicy::Ordered;
+            else if(value=="processcrash") options.commit_sync_policy=minivectordb::CommitSyncPolicy::ProcessCrash;
+            else if(value.substr(0,7)=="batched") {
+                options.commit_sync_policy=minivectordb::CommitSyncPolicy::BatchedSync;
+                if(value.size()>8) options.commit_sync_batch=static_cast<unsigned>(std::stoul(std::string(value.substr(8))));
+            }
+        }
         auto db = std::make_unique<minivectordb::Database>(args.directory / "database.mvdb",
                                 options);
         return args.protocol ? serve(*db) : minivectordb::jsonl::serve(db, args.directory);

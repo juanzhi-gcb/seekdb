@@ -89,9 +89,13 @@ struct Options {
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;
-  // Competition recovery model: process SIGKILL, with final fsync before ACK.
-  // Ordered remains available for data-before-root persistence ordering.
-  CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
+  // Competition recovery model: a process SIGKILL or a normal restart keeps
+  // every acknowledged row (data is already in the page cache). BatchedSync
+  // bounds the power-loss window to the last N-1 statements instead of paying
+  // one device sync per statement. Ordered keeps data-before-root ordering.
+  CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::BatchedSync;
+  // BatchedSync only: force a device sync every N statements (default 4).
+  unsigned commit_sync_batch = 4;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
