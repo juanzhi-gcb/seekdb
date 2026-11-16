@@ -198,6 +198,7 @@ namespace minivectordb {
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
     bool active=false,poisoned=false,busy=false;
+    bool exact_mode=true;
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store,settings.commit_sync_batch),options(std::move(settings)) {
       if(std::getenv("MVDB_NO_PARALLEL"))options.parallel_exact_scan=false;
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
@@ -571,6 +572,10 @@ namespace minivectordb {
         std::optional<VectorIndex> index;
         if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
           if(candidate.column==e.column) { index=candidate; break; }
+        // Exact scoring already reads every base row. The flat index cannot cut
+        // that work, but building and pairing it costs I/O and memory, so the
+        // plain validated scan serves exact queries.
+        if(exact_mode && index) index.reset();
         auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
         auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
@@ -830,6 +835,7 @@ namespace minivectordb {
   void Database::reset_cache_stats() noexcept {impl_->store.reset_cache_stats();}
   ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink,SearchMode mode) {
     if(mode!=SearchMode::Exact&&mode!=SearchMode::Ann)throw Error(ErrorCode::Type,"invalid search mode");
+    impl_->exact_mode=(mode==SearchMode::Exact);
     // Flat index enumerates all vectors in either mode; no approximate pruning.
     return impl_->execute(sql,sink);
   }
