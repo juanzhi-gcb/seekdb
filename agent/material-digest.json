@@ -6,12 +6,12 @@
   "material_parent_commit": "a08e66e299847ca539c419cfbc67593357246627",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 128184,
-      "sha256": "9114bfd281960d1e087d9799a1827c5ea3ff59885b09ab29a76d127b027503f8"
+      "bytes": 128505,
+      "sha256": "4e93a9ba4a9cce46b1ebc42b818e699a647ebd4aae55807b7f00430ce6f29944"
     },
     "conversation.json": {
-      "bytes": 128184,
-      "sha256": "9114bfd281960d1e087d9799a1827c5ea3ff59885b09ab29a76d127b027503f8"
+      "bytes": 128505,
+      "sha256": "4e93a9ba4a9cce46b1ebc42b818e699a647ebd4aae55807b7f00430ce6f29944"
     }
   },
   "counts": {
