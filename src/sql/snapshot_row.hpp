@@ -11,7 +11,7 @@ namespace minivectordb::sql {
 // Never apply this projection to unvalidated Store bytes. A rejecting predicate
 // can stop early because the complete row was validated when the cache was built.
 class SnapshotProjection {
-    enum class Kind { Skip, SkipText, SkipVector, Vector, IntegerPredicate, TextPredicate };
+    enum class Kind { Skip, SkipText, Vector, IntegerPredicate, TextPredicate };
     struct Step {Kind kind;std::size_t bytes;};
     std::vector<Step> steps_;
     const BoundPredicate* predicate_=nullptr;
@@ -37,12 +37,8 @@ public:
             else if(predicate_&&column==predicate_->column)
                 steps_.push_back({field.type==ColumnType::Bigint?Kind::IntegerPredicate:Kind::TextPredicate,0});
             else if(field.type==ColumnType::Varchar)steps_.push_back({Kind::SkipText,0});
-            else if(field.type==ColumnType::Vector) {
-                // Version-2 rows carry a tag byte and either 12-bit or float32
-                // payloads, so the skip length is only known per row.
-                steps_.push_back({Kind::SkipVector,field.extent});
-            } else {
-                const auto bytes=std::size_t(8);
+            else {
+                const auto bytes=field.type==ColumnType::Bigint?std::size_t(8):4+std::size_t(field.extent)*4;
                 if(steps_.back().kind==Kind::Skip)steps_.back().bytes+=bytes;
                 else steps_.push_back({Kind::Skip,bytes});
             }
@@ -56,31 +52,9 @@ public:
         for(const auto& step:steps_)switch(step.kind) {
             case Kind::Skip:(void)in.take(step.bytes);break;
             case Kind::SkipText:(void)in.text_view();break;
-            case Kind::SkipVector: {
-                const auto n=in.get(4);
-                if(n!=step.bytes)throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                const auto tag=in.get(1);
-                in.take(tag?std::size_t((n*12+7)/8):std::size_t(n)*sizeof(float));
-                break;
-            }
             case Kind::Vector: {
                 const auto n=in.get(4);
-                if(n!=dimension_)throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                const auto packed=in.get(1);
-                if(packed) {
-                    const std::uint64_t need=(n*12+7)/8;
-                    if(need>in.remaining())throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                    const auto raw=in.take(static_cast<std::size_t>(need));
-                    scratch.resize(dimension_);
-                    std::uint32_t acc=0;unsigned bits=0;std::size_t at=0;
-                    for(std::size_t i=0;i<dimension_;++i) {
-                        while(bits<12) {acc|=static_cast<std::uint32_t>(static_cast<unsigned char>(raw[at++]))<<bits;bits+=8;}
-                        const auto code=static_cast<int>(acc&0xfff);acc>>=12;bits-=12;
-                        scratch[i]=static_cast<float>(code-2048)/128.0f;
-                    }
-                    return true;
-                }
-                if(n>in.remaining()/sizeof(float))
+                if(n!=dimension_||n>in.remaining()/sizeof(float))
                     throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
                 vector_bytes=in.take(std::size_t(n)*sizeof(float));break;
             }
@@ -125,8 +99,7 @@ public:
         :schema_(schema),bytes_(bytes) {
         if(schema.columns.size()>small_.size())large_.resize(schema.columns.size());
         binary::Reader in(bytes);
-        const auto version=in.get(1);
-        if((version!=1&&version!=2) || in.get(4)!=schema.columns.size())
+        if(in.get(1)!=1 || in.get(4)!=schema.columns.size())
             throw Error(ErrorCode::Corruption,"snapshot row header mismatch");
         for(std::size_t c=0;c<schema.columns.size();++c) {
             (large_.empty()?small_[c]:large_[c])=bytes.size()-in.remaining();
@@ -136,19 +109,9 @@ public:
                 case ColumnType::Varchar: (void)in.text_view();break;
                 case ColumnType::Vector: {
                     const auto count=in.get(4);
-                    if(count!=field.extent)
+                    if(count!=field.extent || count>in.remaining()/sizeof(float))
                         throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                    if(version>=2) {
-                        const auto tag=in.get(1);
-                        const std::uint64_t need=tag?(count*12+7)/8:count*sizeof(float);
-                        if(need>in.remaining())throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                        (void)in.take(static_cast<std::size_t>(need));
-                    } else {
-                        if(count>in.remaining()/sizeof(float))
-                            throw Error(ErrorCode::Corruption,"snapshot vector length mismatch");
-                        (void)in.take(static_cast<std::size_t>(count)*sizeof(float));
-                    }
-                    break;
+                    (void)in.take(static_cast<std::size_t>(count)*sizeof(float));break;
                 }
             }
         }

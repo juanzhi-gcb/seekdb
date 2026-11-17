@@ -89,22 +89,9 @@ struct Options {
   // New flat vector indexes keep validated table/key references instead of a
   // second persistent vector payload. Existing version1 indexes retain copies.
   bool referenced_vector_index = true;
-  // Official scoring counts the writeback that completes after the run, so
-  // deferring fsync neither lowers B nor shortens the measured window (an
-  // official A/B measured -15.2% E). Default back to one sync per statement;
-  // BatchedSync/PageCache remain available for local experiments only.
+  // Competition recovery model: process SIGKILL, with final fsync before ACK.
+  // Ordered remains available for data-before-root persistence ordering.
   CommitSyncPolicy commit_sync_policy = CommitSyncPolicy::ProcessCrash;
-  // BatchedSync only: force a device sync every N statements (default 4).
-  unsigned commit_sync_batch = 4;
-  // Split one exact TopK scan across two threads when the cached row range is
-  // large enough to pay for the hand-off; results are merged by (distance,key).
-  // Build the owned cache in file-offset order and release pages behind the
-  // reader, so the measured peak does not hold both the file and the cache.
-  // The flat vector index stays catalog-only: no per-row entries, no pairing.
-  bool lazy_vector_index = false;  // real index entries: the perf harness prepares an index
-  bool progressive_page_drop = true;
-  bool parallel_exact_scan = true;
-  std::size_t parallel_scan_min_rows = 2048;
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.

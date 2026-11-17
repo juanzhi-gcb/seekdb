@@ -9,12 +9,6 @@
 #include "../vector/validated.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
-#include <cstdlib>
-#include <thread>
-#include <sched.h>
-#include <mutex>
-#include <condition_variable>
-#include <exception>
 #include <bit>
 #include "../storage/binary.hpp"
 #include <limits>
@@ -39,11 +33,11 @@ namespace minivectordb {
     }
     std::string index_entry(const Schema& schema,const VectorIndex& index,std::int64_t key,const Row& row) {
       if(!index.referenced)return index_vector(row[index.column]);
-      // Exact scoring reads the base table, so a referenced entry only needs the
-      // key it covers: 8 bytes instead of 28.
-      std::string bytes;
+      std::string bytes="MVIR";
+      binary::put(bytes,schema.id);
+      binary::put(bytes,index.column,4);
+      binary::put(bytes,schema.columns[index.column].extent,4);
       binary::put(bytes,std::bit_cast<std::uint64_t>(key));
-      (void)schema;(void)index;
       return bytes;
     }
     struct StopScan {
@@ -77,48 +71,6 @@ namespace minivectordb {
         mutations_.push_back({key,std::move(value)});
         bytes_+=size;
         if(bytes_>=Store::max_batch_bytes)flush();
-      }
-    };
-    // One persistent helper thread: spawning a std::thread per query costs more
-    // than the whole 100 us scan it is meant to halve.
-    class ScanHelper {
-      std::mutex mutex_;
-      std::condition_variable wake_;
-      std::function<void()> job_;
-      std::thread worker_;
-      bool pending_=false, finished_=true, stop_=false;
-      void loop() {
-        for(;;) {
-          std::function<void()> job;
-          {
-            std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait(lock,[&] {return stop_ || pending_;});
-            if(stop_)return;
-            job=std::move(job_);pending_=false;
-          }
-          job();
-          {
-            std::lock_guard<std::mutex> lock(mutex_);
-            finished_=true;
-          }
-          wake_.notify_all();
-        }
-      }
-    public:
-      ScanHelper() {worker_=std::thread([this] {loop();});}
-      ~ScanHelper() {
-        {std::lock_guard<std::mutex> lock(mutex_);stop_=true;}
-        wake_.notify_all();worker_.join();
-      }
-      ScanHelper(const ScanHelper&)=delete;
-      ScanHelper& operator=(const ScanHelper&)=delete;
-      void run(std::function<void()> job) {
-        {std::lock_guard<std::mutex> lock(mutex_);job_=std::move(job);pending_=true;finished_=false;}
-        wake_.notify_one();
-      }
-      void wait() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        wake_.wait(lock,[&] {return finished_;});
       }
     };
     class SelectRow {
@@ -194,18 +146,11 @@ namespace minivectordb {
   struct Database::Impl {
     Store store;
     Options options;
-    std::unique_ptr<ScanHelper> scan_helper;
     sql::ScanSnapshot snapshot;
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
     bool active=false,poisoned=false,busy=false;
-    bool exact_mode=true;
-    bool lazy_index=true;
-    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store,settings.commit_sync_batch),options(std::move(settings)) {
-      if(std::getenv("MVDB_NO_PARALLEL"))options.parallel_exact_scan=false;
-      if(std::getenv("MVDB_NO_TYPED"))options.typed_scan_cache=false;
-      if(const char* p2=std::getenv("MVDB_SNAP"))options.scan_snapshot_bytes=std::strtoull(p2,nullptr,10);
-      lazy_index=options.lazy_vector_index;
+    Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
     }
@@ -385,140 +330,43 @@ namespace minivectordb {
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
-        struct Half { std::size_t begin,end; std::uint64_t rows=0,dist=0,blocks=0; std::vector<Neighbor> result; };
-        // Exact int16 scan over the cache's interleaved block layout: no decode,
-        // no per-query transpose. Falls back when any query component is not k/128.
-        std::vector<std::int16_t> query_k;
-        bool use_i16=false;
-        if(typed_snapshot.quantized()) {
-          std::vector<std::int16_t> candidate(e.query->size());
-          bool ok=true;
-          for(std::size_t d=0;d<e.query->size();++d) {
-            const double scaled=static_cast<double>((*e.query)[d])*128.0;
-            const long rounded=std::lround(scaled);
-            if(static_cast<double>(rounded)!=scaled || rounded<-32767 || rounded>32767) {ok=false;break;}
-            candidate[d]=static_cast<std::int16_t>(rounded);
-          }
-          if(ok) {query_k=std::move(candidate);use_i16=true;}
-        }
-        auto run_half_i16=[&](std::size_t from,std::size_t to,Half& half) {
-          half.begin=from;half.end=to;
-          half.result=detail::exact_top_k_transposed_i16(query_k,k,[&](const detail::BlockInt16Visitor& visit) {
-            std::array<std::int64_t,16> keys{};
-            std::vector<std::int16_t> tail;
-            for(std::size_t r=from/16*16;r<to;r+=16) {
-              const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
-              std::uint16_t mask=0;
-              if(bulk) {
-                const auto lo=from>r?from-r:0,hi=std::min(count,to-r);
-                const auto selected=hi-lo;
-                mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
-                half.rows+=selected;
-                for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
-              } else
+        auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
+          std::array<std::int64_t,16> keys{};
+          std::vector<float> tail;
+          // The stored transpose is aligned to physical cache blocks. Keep
+          // that alignment and mask the two interval boundaries explicitly.
+          for(std::size_t r=begin/16*16;r<end;r+=16) {
+            const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
+            std::uint16_t mask=0;
+            if(bulk) {
+              const auto lo=begin>r?begin-r:0,hi=std::min(count,end-r);
+              const auto selected=hi-lo;
+              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
+              info.rows_examined+=selected;info.typed_rows_examined+=selected;
+              info.distances_computed+=selected;++info.certified_blocks_examined;
+              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+            } else
+            for(std::size_t lane=0;lane<count;++lane) {
+              if(r+lane<begin || r+lane>=end)continue;
+              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
+              ++info.rows_examined;++info.typed_rows_examined;
+              keys[lane]=typed_snapshot.key(r+lane);
+              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
+            }
+            if(!mask)continue;
+            std::span<const float> block;
+            if(count<16) {
+              tail.assign(16*e.query->size(),0);
               for(std::size_t lane=0;lane<count;++lane) {
-                if(r+lane<from || r+lane>=to)continue;
-                ++half.rows;
-                keys[lane]=typed_snapshot.key(r+lane);
-                if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++half.dist;}
+                const auto vector=typed_snapshot.vector(r+lane);
+                for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
               }
-              if(!mask)continue;
-              if(count<16) {
-                tail.assign(16*e.query->size(),0);
-                for(std::size_t lane=0;lane<count;++lane) {
-                  const auto v=typed_snapshot.vector(r+lane);
-                  for(std::size_t d=0;d<e.query->size();++d)
-                    tail[(d/2)*32+lane*2+(d&1)]=static_cast<std::int16_t>(std::lround(double(v[d])*128.0));
-                }
-                visit({keys.data(),count},{tail.data(),tail.size()},mask,r);
-              } else visit({keys.data(),16},typed_snapshot.block_i16(r),mask,r);
-            }
-          });
-        };
-        auto run_half=[&](std::size_t from,std::size_t to,Half& half) {
-          half.begin=from;half.end=to;
-          if(use_i16) {run_half_i16(from,to,half);return;}
-          half.result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
-            std::array<std::int64_t,16> keys{};
-            std::vector<float> tail;
-            for(std::size_t r=from/16*16;r<to;r+=16) {
-              const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
-              std::uint16_t mask=0;
-              if(bulk) {
-                const auto lo=from>r?from-r:0,hi=std::min(count,to-r);
-                const auto selected=hi-lo;
-                mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
-                half.rows+=selected;++half.blocks;
-                for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
-              } else
-              for(std::size_t lane=0;lane<count;++lane) {
-                if(r+lane<from || r+lane>=to)continue;
-                ++half.rows;
-                keys[lane]=typed_snapshot.key(r+lane);
-                if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++half.dist;}
-              }
-              if(!mask)continue;
-              std::span<const float> block;
-              if(count<16) {
-                tail.assign(16*e.query->size(),0);
-                for(std::size_t lane=0;lane<count;++lane) {
-                  const auto vector=typed_snapshot.vector(r+lane);
-                  for(std::size_t d=0;d<vector.size();++d)tail[d*16+lane]=vector[d];
-                }
-                block=tail;
-              } else block=typed_snapshot.block(r);
-              visit({keys.data(),count},block,mask);
-            }
-          },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
-            options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
-        };
-        std::vector<Neighbor> result;
-        const std::size_t rows=end>begin?end-begin:0;
-        // The official container may expose one CPU; a helper thread there would
-        // cost a context switch per query instead of buying real parallelism.
-        static const bool multi_cpu=[](){
-#if defined(__linux__)
-          cpu_set_t set{};
-          if(sched_getaffinity(0,sizeof(set),&set)!=0)return false;
-          return CPU_COUNT(&set)>1;
-#else
-          return std::thread::hardware_concurrency()>1;
-#endif
-        }();
-        const bool parallel=options.parallel_exact_scan && multi_cpu &&
-            rows>=options.parallel_scan_min_rows && !profile::enabled();
-        if(!parallel) {
-          Half single;
-          run_half(begin,end,single);
-          info.rows_examined+=single.rows;info.typed_rows_examined+=single.rows;
-          info.certified_blocks_examined+=single.blocks;info.distances_computed+=single.dist;
-          result=std::move(single.result);
-        } else {
-          const std::size_t split=begin+(rows/2)/16*16;
-          Half left,right;
-          std::exception_ptr failure;
-          if(!scan_helper)scan_helper=std::make_unique<ScanHelper>();
-          auto worker=[&] { try {run_half(split,end,right);} catch(...) {failure=std::current_exception();} };
-          scan_helper->run(worker);
-          try {run_half(begin,split,left);} catch(...) {scan_helper->wait();throw;}
-          scan_helper->wait();
-          if(failure)std::rethrow_exception(failure);
-          info.rows_examined+=left.rows+right.rows;info.typed_rows_examined+=left.rows+right.rows;
-          info.certified_blocks_examined+=left.blocks+right.blocks;
-          info.distances_computed+=left.dist+right.dist;
-          result.reserve(std::min(k,left.result.size()+right.result.size()));
-          std::size_t i=0,j=0;
-          while(result.size()<k && (i<left.result.size()||j<right.result.size())) {
-            bool take_left;
-            if(i==left.result.size())take_left=false;
-            else if(j==right.result.size())take_left=true;
-            else {
-              const auto& a=left.result[i];const auto& b=right.result[j];
-              take_left=a.distance<b.distance || (a.distance==b.distance && a.key<b.key);
-            }
-            result.push_back(take_left?left.result[i++]:right.result[j++]);
+              block=tail;
+            } else block=typed_snapshot.block(r);
+            visit({keys.data(),count},block,mask);
           }
-        }
+        },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
+          options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
         info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
@@ -573,15 +421,6 @@ namespace minivectordb {
               SelectRow row(s,key,base,options.selective_decode,info);
               auto vector=index_candidate(bytes,s,*index,key,row,scratch);
               consume(key,row,vector);
-            });
-          } else if(options.progressive_page_drop && typed_snapshot.building()) {
-            // Offset order lets the store drop pages already scanned; results do
-            // not depend on visit order because TopK ranks explicitly.
-            store.scan_in_offset_order(s.id,[&](auto key,auto bytes) {
-              profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
-              ++info.rows_examined;
-              SelectRow row(s,key,bytes,options.selective_decode,info);
-              consume(key,row,{});
             });
           } else {
             store.scan_in(s.id,[&](auto key,auto bytes) {
@@ -639,10 +478,6 @@ namespace minivectordb {
         std::optional<VectorIndex> index;
         if(!b.primary_lookup)for(const auto& candidate:vector_indexes(store,s.id))
           if(candidate.column==e.column) { index=candidate; break; }
-        // The flat index cannot cut work for this store, and pairing it costs
-        // I/O and memory. Both modes therefore read the base table, which also
-        // keeps recall at 1.0 (>= the 0.95 requirement).
-        if(index) index.reset();
         auto cached_winners=typed_block_top_k(s,b,e,index,static_cast<std::size_t>(limit),info);
         auto winners=cached_winners?std::move(*cached_winners):top_k(*e.query,static_cast<std::size_t>(limit),[&](const VectorVisitor&visit) {
           auto consume_row=[&](std::int64_t key,const SelectRow& row) {
@@ -822,9 +657,7 @@ namespace minivectordb {
       const auto savepoint=store.savepoint();
       try {
         MutationBatch batch(store,schema.id,options.batch_writes);
-        // The flat vector index is catalog metadata only: no per-row entries are
-        // written or maintained, because no scan path reads them.
-        const std::vector<VectorIndex> indexes=lazy_index?std::vector<VectorIndex>{}:vector_indexes(store,schema.id);
+        const auto indexes=vector_indexes(store,schema.id);
         std::vector<std::unique_ptr<MutationBatch>> index_batches;
         for(const auto& index:indexes) {
           if(index.column>=schema.columns.size()||schema.columns[index.column].type!=ColumnType::Vector)
@@ -840,14 +673,12 @@ namespace minivectordb {
           auto column=sql::column_index(schema,statement.index_column);
           auto index=create_vector_index(store,schema,column,statement.index_name,
               options.referenced_vector_index&&schema.columns[column].extent>7);
-          if(!lazy_index) {
-            MutationBatch entries(store,index.id,options.batch_writes);
-            store.scan_in(schema.id,[&](auto key,auto bytes) {
-              auto row=decode(schema,key,bytes);
-              entries.add(key,index_entry(schema,index,key,row));
-            });
-            entries.flush();
-          }
+          MutationBatch entries(store,index.id,options.batch_writes);
+          store.scan_in(schema.id,[&](auto key,auto bytes) {
+            auto row=decode(schema,key,bytes);
+            entries.add(key,index_entry(schema,index,key,row));
+          });
+          entries.flush();
         }
         else if(statement.kind==sql::Statement::Insert) {
           for(const auto&r:bound.insert_rows) {
@@ -906,7 +737,6 @@ namespace minivectordb {
   void Database::reset_cache_stats() noexcept {impl_->store.reset_cache_stats();}
   ExecutionInfo Database::execute(std::string_view sql,const QuerySink&sink,SearchMode mode) {
     if(mode!=SearchMode::Exact&&mode!=SearchMode::Ann)throw Error(ErrorCode::Type,"invalid search mode");
-    impl_->exact_mode=(mode==SearchMode::Exact);
     // Flat index enumerates all vectors in either mode; no approximate pruning.
     return impl_->execute(sql,sink);
   }

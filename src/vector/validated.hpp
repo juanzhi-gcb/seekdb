@@ -10,13 +10,6 @@ bool has_avx512() noexcept;
 using BlockVectorVisitor = std::function<void(std::span<const std::int64_t>,
                                              std::span<const float>,std::uint16_t)>;
 using BlockVectorSource = std::function<void(const BlockVectorVisitor&)>;
-// Exact int16 path: components are k/128, block layout is interleaved as
-// (d/2)*32 + lane*2 + (d&1); sum(k)^2/16384 equals the double distance.
-using BlockInt16Visitor =
-    std::function<void(std::span<const std::int64_t>, std::span<const std::int16_t>, std::uint16_t, std::size_t)>;
-using BlockInt16Source = std::function<void(const BlockInt16Visitor&)>;
-std::vector<Neighbor> exact_top_k_transposed_i16(std::span<const std::int16_t> query_k,
-    std::size_t k, const BlockInt16Source& source);
 struct BoundScreenStats {
   std::uint64_t integer_screened=0,integer_rejected=0;
   std::uint64_t screened_lanes=0,rejected_lanes=0,exact_lanes=0;

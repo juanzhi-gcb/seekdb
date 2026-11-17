@@ -45,26 +45,17 @@ public:
     // first seen) must not count every projection row a second time.
     if(state_==State::probation&&complete_)return;
     // Bound scratch before copying even when a valid row has very large text.
-    binary::Reader scan(validated);const auto version=scan.get(1);
-    if((version!=1&&version!=2)||scan.get(4)!=schema.columns.size())throw Error(ErrorCode::Corruption,"projection row header");
+    binary::Reader scan(validated);if(scan.get(1)!=1||scan.get(4)!=schema.columns.size())throw Error(ErrorCode::Corruption,"projection row header");
     std::size_t size=0;
     for(const auto& col:schema.columns) {
-      if(col.type==ColumnType::Vector){
-        auto n=scan.get(4);if(n!=col.extent)throw Error(ErrorCode::Corruption,"projection vector length");
-        if(version>=2) {const auto tag=scan.get(1);if(tag!=0){const std::uint64_t need=(n*12+7)/8;if(need>scan.remaining())throw Error(ErrorCode::Corruption,"projection vector length");scan.take(std::size_t(need));} else {if(n>scan.remaining()/4)throw Error(ErrorCode::Corruption,"projection vector length");scan.take(std::size_t(n)*4);}}
-        else {if(n>scan.remaining()/4)throw Error(ErrorCode::Corruption,"projection vector length");scan.take(std::size_t(n)*4);}
-      }
+      if(col.type==ColumnType::Vector){auto n=scan.get(4);if(n!=col.extent||n>scan.remaining()/4)throw Error(ErrorCode::Corruption,"projection vector length");scan.take(std::size_t(n)*4);}
       else if(col.type==ColumnType::Bigint){scan.take(8);size+=8;}
       else {auto text=scan.text_view();if(text.size()>65536-size||size+text.size()>65532){refuse();return;}size+=4+text.size();}
       if(size>65536){refuse();return;}
     }
     scan.end();std::string raw;raw.reserve(size);binary::Reader in(validated);in.take(5);
     for(const auto& col:schema.columns) {
-      if(col.type==ColumnType::Vector){
-        auto n=in.get(4);
-        if(version>=2) {const auto tag=in.get(1);if(tag!=0)in.take(std::size_t((n*12+7)/8));else in.take(std::size_t(n)*4);}
-        else in.take(std::size_t(n)*4);
-      }
+      if(col.type==ColumnType::Vector){auto n=in.get(4);in.take(std::size_t(n)*4);}
       else if(col.type==ColumnType::Bigint)raw.append(in.take(8));
       else binary::text(raw,in.text_view());
     }

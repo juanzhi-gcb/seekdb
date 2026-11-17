@@ -13,18 +13,7 @@ namespace minivectordb {
 // process-only crash with the kernel/filesystem alive; it still fsyncs the whole
 // file before acknowledging commit, but does not order an unacknowledged root
 // against its data across power loss or a kernel/device failure.
-// PageCache acknowledges writes once the record and commit root are in the
-// running kernel's page cache (no per-commit fsync). Data survives a process
-// SIGKILL and a normal restart; it does NOT survive kernel panic or power loss.
-// Intended for the competition recovery model, where the driver only kills the
-// process; measure it, do not assume it equals the durable modes.
-// DataSync uses fdatasync: same data durability as ProcessCrash for this format,
-// without forcing unrelated metadata (access time, size block) to disk.
-// BatchedSync keeps page-cache visibility like ProcessCrash but only forces a
-// device sync every N statements (Store::commit_sync_batch). At most the last
-// N-1 acknowledged statements can be lost on power loss or kernel panic; a
-// process SIGKILL or a normal restart keeps every acknowledged row.
-enum class CommitSyncPolicy { Ordered, ProcessCrash, PageCache, DataSync, BatchedSync };
+enum class CommitSyncPolicy { Ordered, ProcessCrash };
 struct CacheStats {
   std::uint64_t hits=0, misses=0, evictions=0;
   std::size_t capacity_bytes=0, resident_pages=0;
@@ -61,8 +50,7 @@ public:
                  std::size_t data_cache_bytes=0,
                  CommitSyncPolicy commit_sync_policy=CommitSyncPolicy::Ordered,
                  bool compressed_paths=false, bool packed_branches=true,bool compact_values=false,
-                 bool discard_file_cache=false, bool compact_node_refs=false,bool byteplane_values=false,bool journal_format=false,
-                 unsigned commit_sync_batch=4);
+                 bool discard_file_cache=false, bool compact_node_refs=false,bool byteplane_values=false,bool journal_format=false);
   // Separate lazy four-way cache for validated packed and overflow pages. The budget
   // includes the entire set array (pages, IDs, ranks, padding); fixed object and
   // allocator overhead are excluded. A budget smaller than one set disables it.
@@ -100,10 +88,6 @@ public:
   void restore(const Savepoint&);
   // Visits in signed key order. Uses an immutable root snapshot; callback may mutate the active transaction.
   void scan(const std::function<void(std::int64_t, std::string_view)>& visitor) const;
-  // Same rows as scan_in, visited in ascending file-offset order, dropping the
-  // pages behind the reader. Used only while building an owned cache.
-  void scan_in_offset_order(std::uint64_t space,
-      const std::function<void(std::int64_t, std::string_view)>& visitor) const;
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

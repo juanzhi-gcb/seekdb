@@ -13,8 +13,6 @@
 #include <map>
 #include <string>
 #include <unistd.h>
-#include <chrono>
-#include <cstdlib>
 
 namespace minivectordb::jsonl {
 // Preserve raw validated JSON identifiers, avoiding any conversion through double.
@@ -186,22 +184,6 @@ public:
         }
         if(std::fwrite(s.data(),1,s.size(),file)!=s.size()) throw std::runtime_error("response spool write failed");
     }
-    // Escape straight into the destination buffer: a per-cell temporary string
-    // was measurable for wide VARCHAR payloads.
-    void append_quoted(std::string_view text) {
-        constexpr char hex[]="0123456789abcdef";
-        append("\"");
-        while(!text.empty()) {
-            const auto count=plain_string_prefix(text);
-            append(text.substr(0,count));text.remove_prefix(count);
-            if(text.empty())break;
-            const auto c=static_cast<unsigned char>(text.front());text.remove_prefix(1);
-            if(c=='"'||c=='\\') {char pair[2]={'\\',char(c)};append(std::string_view(pair,2));}
-            else if(c<32) {char esc[6]={'\\','u','0','0',hex[c>>4],hex[c&15]};append(std::string_view(esc,6));}
-            else {char one=char(c);append(std::string_view(&one,1));}
-        }
-        append("\"");
-    }
     void prepare() {if(file && (std::fflush(file)!=0 || std::fseek(file,0,SEEK_SET)!=0)) throw std::runtime_error("response spool finalize failed");}
     void emit(std::string_view id) {
         // Echo the validated identifier only after the complete payload is ready.
@@ -219,7 +201,7 @@ public:
 inline void cell(Response& out,const Cell& c) {
     std::visit([&](const auto& v) {
         using T=std::decay_t<decltype(v)>;
-        if constexpr(std::is_same_v<T,std::string>) out.append_quoted(v);
+        if constexpr(std::is_same_v<T,std::string>) out.append(quote(v));
         else if constexpr(std::is_same_v<T,std::int64_t>) out.append(std::to_string(v));
         else {
             auto number=[&](auto x) {
@@ -266,28 +248,19 @@ public:
         }
     }
 };
-struct StageClock {
-    double parse=0,execute=0,emit=0;bool on=std::getenv("MVDB_JSONL_PROF")!=nullptr;
-    std::chrono::steady_clock::time_point t{};
-    void start(){if(on)t=std::chrono::steady_clock::now();}
-    void stop(double& slot){if(on)slot+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t).count();}
-};
 inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& directory) {
-    StageClock clock;
     std::cout<<"{\"type\":\"ready\"}\n"<<std::flush;
     constexpr std::size_t limit=16*1024*1024;
     LineReader input;
     Response response(directory);
-    std::string line;line.reserve(1<<16);
     for(;;) {
-        bool oversized=false;
+        std::string line;bool oversized=false;
         if(!input.next(line,oversized,limit))break;
         std::string id="null";
         bool shutdown=false;
         response.reset();
         try {
             if(oversized) throw std::invalid_argument("JSON request exceeds 16 MiB");
-            clock.start();
             auto request=Parser(line).parse();
             auto ident=request.find("id");
             if(ident==request.end()) throw std::invalid_argument("missing id");
@@ -309,7 +282,7 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
                 QuerySink sink;
                 sink.columns=[&](const std::vector<std::string>& names) {
                     result=true;response.append(",\"columns\":[");
-                    bool comma=false;for(const auto& name:names) {if(comma) response.append(",");comma=true;response.append_quoted(name);}
+                    bool comma=false;for(const auto& name:names) {if(comma) response.append(",");comma=true;response.append(quote(name));}
                     response.append("],\"rows\":[");
                 };
                 sink.row=[&](const Row& row) {
@@ -317,10 +290,7 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
                     first=false;response.append("[");
                     bool comma=false;for(const auto& v:row) {if(comma) response.append(",");comma=true;cell(response,v);}response.append("]");
                 };
-                clock.stop(clock.parse);
-                clock.start();
                 auto info=db->execute(field("sql"),sink,mode=="ann"?SearchMode::Ann:SearchMode::Exact);
-                clock.stop(clock.execute);
                 if(result) response.append("]");
                 else {response.append(",\"affected_rows\":");response.append(std::to_string(info.affected_rows));}
             } else throw std::invalid_argument("unsupported op");
@@ -332,17 +302,10 @@ inline int serve(std::unique_ptr<Database>& db,const std::filesystem::path& dire
             continue;
         }
         // A transport failure after emission begins is fatal, never a second response.
-        clock.start();
         response.emit(id);
-        clock.stop(clock.emit);
-        if(shutdown) {
-            if(clock.on) std::fprintf(stderr,"JSONL stages: parse=%.1fms execute=%.1fms emit=%.1fms\n",clock.parse,clock.execute,clock.emit);
-            return 0;
-        }
+        if(shutdown) return 0;
     }
     if(db->in_transaction()) db->execute("ROLLBACK;");
-    db.reset();
-    if(clock.on) std::fprintf(stderr,"JSONL stages: parse=%.1fms execute=%.1fms emit=%.1fms\n",clock.parse,clock.execute,clock.emit);
-    return 0;
+    db.reset();return 0;
 }
 }

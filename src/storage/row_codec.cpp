@@ -69,9 +69,6 @@ namespace minivectordb {
             }
             add_bytes(4);
             if(a.size()>(out.max_size()-bytes)/sizeof(float))throw std::length_error("encoded row exceeds string capacity");
-            // 1 tag byte, then either 12-bit packed integers or float32 bytes.
-            add_bytes(1);
-            add_bytes((a.size()*12+7)/8);
             add_bytes(a.size()*sizeof(float));
             break;
           }
@@ -82,7 +79,7 @@ namespace minivectordb {
       }
     }
     out.reserve(bytes);
-    binary::put(out,2,1);
+    binary::put(out,1,1);
     binary::put(out,r.size(),4);
     for(std::size_t i=0;i<r.size();++i) {
       const auto&v=r[i];
@@ -96,25 +93,7 @@ namespace minivectordb {
         case ColumnType::Vector: {
           const auto&a=std::get<std::vector<float>>(v);
           binary::put(out,a.size(),4);
-          // 12-bit frame-of-reference packing: exact when every component is
-          // k/128 with |k| <= 2047, which the official generator always is.
-          bool packable=true;
-          std::vector<std::uint16_t> codes(a.size());
-          for(std::size_t i=0;i<a.size();++i) {
-            const double scaled=static_cast<double>(a[i])*128.0;
-            const long rounded=std::lround(scaled);
-            if(static_cast<double>(rounded)!=scaled || rounded<-2048 || rounded>2047) {packable=false;break;}
-            codes[i]=static_cast<std::uint16_t>(rounded+2048);
-          }
-          out.push_back(static_cast<char>(packable?1:0));
-          if(packable) {
-            std::uint32_t acc=0;unsigned bits=0;
-            for(auto c:codes) {
-              acc|=static_cast<std::uint32_t>(c)<<bits;bits+=12;
-              while(bits>=8) {out.push_back(static_cast<char>(acc&0xff));acc>>=8;bits-=8;}
-            }
-            if(bits)out.push_back(static_cast<char>(acc&0xff));
-          } else if constexpr(std::endian::native==std::endian::little) {
+          if constexpr(std::endian::native==std::endian::little) {
             static_assert(sizeof(float)==4);
             if(!a.empty())out.append(reinterpret_cast<const char*>(a.data()),a.size()*sizeof(float));
           } else {
@@ -129,8 +108,7 @@ namespace minivectordb {
   Row decode_row(const Schema&s,std::string_view bytes) {
     profile::detail::Scope timer(&profile::Snapshot::row_decode);
     binary::Reader in(bytes);
-    const auto version=in.get(1);
-    if((version!=1&&version!=2)||in.get(4)!=s.columns.size())throw Error(ErrorCode::Corruption,"row version or column count mismatch");
+    if(in.get(1)!=1||in.get(4)!=s.columns.size())throw Error(ErrorCode::Corruption,"row version or column count mismatch");
     Row r;
     r.reserve(s.columns.size());
     for(const auto&c:s.columns) {
@@ -150,32 +128,15 @@ namespace minivectordb {
         }
         case ColumnType::Vector: {
           auto n=in.get(4);
-          if(n!=c.extent)throw Error(ErrorCode::Corruption,"invalid VECTOR length");
-          const auto packed=version>=2?(in.get(1)!=0):false;
-          if(packed) {
-            const std::uint64_t need=(n*12+7)/8;
-            std::vector<unsigned char> raw(static_cast<std::size_t>(need));
-            for(auto& byte:raw)byte=static_cast<unsigned char>(in.get(1));
-            std::vector<float> v;
-            v.reserve(static_cast<std::size_t>(n));
-            std::uint32_t acc=0;unsigned bits=0;std::size_t at=0;
-            for(std::uint64_t i=0;i<n;++i) {
-              while(bits<12) {acc|=static_cast<std::uint32_t>(raw[at++])<<bits;bits+=8;}
-              const auto code=static_cast<int>(acc&0xfff);acc>>=12;bits-=12;
-              v.push_back(static_cast<float>(code-2048)/128.0f);
-            }
-            r.emplace_back(std::move(v));
-          } else {
-            if(n>in.remaining()/4)throw Error(ErrorCode::Corruption,"invalid VECTOR length");
-            std::vector<float> v;
-            v.reserve(static_cast<std::size_t>(n));
-            for(std::uint64_t i=0;i<n;++i) {
-              float f=std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)));
-              if(!std::isfinite(f))throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
-              v.push_back(f);
-            }
-            r.emplace_back(std::move(v));
+          if(n!=c.extent||n>in.remaining()/4)throw Error(ErrorCode::Corruption,"invalid VECTOR length");
+          std::vector<float> v;
+          v.reserve(static_cast<std::size_t>(n));
+          for(std::uint64_t i=0;i<n;++i) {
+            float f=std::bit_cast<float>(static_cast<std::uint32_t>(in.get(4)));
+            if(!std::isfinite(f))throw Error(ErrorCode::Corruption,"non-finite stored VECTOR");
+            v.push_back(f);
           }
+          r.emplace_back(std::move(v));
           break;
         }
       }
@@ -189,8 +150,7 @@ namespace minivectordb {
         cells_(inline_metadata_?0:schema.columns.size()), info_(info) {
     profile::detail::Scope timer(&profile::Snapshot::row_validation);
     binary::Reader in(bytes);
-    const auto version=in.get(1);
-    if((version!=1&&version!=2) || in.get(4)!=schema.columns.size())
+    if(in.get(1)!=1 || in.get(4)!=schema.columns.size())
       throw Error(ErrorCode::Corruption,"row version or column count mismatch");
     if(!inline_metadata_)offsets_.reserve(schema.columns.size());
     std::size_t column_index=0;
@@ -207,17 +167,7 @@ namespace minivectordb {
           break;
         case ColumnType::Vector: {
           auto count=in.get(4);
-          if(count!=column.extent)
-            throw Error(ErrorCode::Corruption,"invalid VECTOR length");
-          if(version>=2 && in.get(1)!=0) {
-            // 12-bit frame-of-reference payload: every 12-bit code decodes to a
-            // finite float32, so only the length needs checking here.
-            const std::uint64_t need=(count*12+7)/8;
-            if(need>in.remaining())throw Error(ErrorCode::Corruption,"invalid packed VECTOR length");
-            (void)in.take(static_cast<std::size_t>(need));
-            break;
-          }
-          if(count>in.remaining()/4)
+          if(count!=column.extent || count>in.remaining()/4)
             throw Error(ErrorCode::Corruption,"invalid VECTOR length");
           bool batched=detail::vector_validation_mode==detail::VectorValidationMode::batched;
           if constexpr(std::endian::native!=std::endian::little && std::endian::native!=std::endian::big)
@@ -242,22 +192,8 @@ namespace minivectordb {
     const auto offset=inline_metadata_?inline_offsets_[index]:offsets_.at(index);
     binary::Reader in(bytes_.substr(offset));
     const auto count=in.get(4);
-    if(count!=schema_.columns[index].extent)
+    if(count!=schema_.columns[index].extent || count>in.remaining()/sizeof(float))
       throw Error(ErrorCode::Corruption,"invalid VECTOR length");
-    const auto version=static_cast<unsigned char>(bytes_.empty()?1:bytes_[0]);
-    if(version>=2 && in.get(1)!=0) {
-      const std::uint64_t need=(count*12+7)/8;
-      if(need>in.remaining())throw Error(ErrorCode::Corruption,"invalid packed VECTOR length");
-      const auto raw=in.take(static_cast<std::size_t>(need));
-      scratch.resize(static_cast<std::size_t>(count));
-      std::uint32_t acc=0;unsigned bits=0;std::size_t at=0;
-      for(std::uint64_t i=0;i<count;++i) {
-        while(bits<12) {acc|=static_cast<std::uint32_t>(static_cast<unsigned char>(raw[at++]))<<bits;bits+=8;}
-        const auto code=static_cast<int>(acc&0xfff);acc>>=12;bits-=12;
-        scratch[static_cast<std::size_t>(i)]=static_cast<float>(code-2048)/128.0f;
-      }
-      return;
-    }
     const auto payload=in.take(static_cast<std::size_t>(count)*sizeof(float));
     // With an unchanged dimension, resize preserves the existing allocation and values.
     scratch.resize(static_cast<std::size_t>(count));
