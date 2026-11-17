@@ -9,6 +9,20 @@
       "source": "live_session_20261117",
       "phase": "current",
       "content": "去掉扫描缓存后查询慢了 11.7 倍，但每查询读取的字节数从 5.12 MB 降到 1.83 MB——瓶颈不在内存带宽，而在逐分量 12 位解包与候选复算的指令开销；因此压缩只能降 B，不能降查询 T。"
+    },
+    {
+      "id": "n25",
+      "role": "user",
+      "source": "confirmed_draft_20261117",
+      "phase": "current",
+      "content": "12 位无损：值乘 128 必为整数且落在 [0,4095]，解码 (code-2048)/128 还原的 float32 与原值逐位相同，省的是磁盘字节不是精度。"
+    },
+    {
+      "id": "n26",
+      "role": "user",
+      "source": "confirmed_draft_20261117",
+      "phase": "current",
+      "content": "事后丢页降不了 M：memory.peak 是高水位，页缓存主要来自写入 /data 的数据文件，只能靠写入不进页缓存或减少写入字节。"
     }
   ],
   "experiments": []
