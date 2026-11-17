@@ -95,7 +95,11 @@ struct Options {
   bool bounded_int8_screen = true; // Auxiliary conservative bound; exact survivors unchanged.
   bool byteplane_values = true; // Format07 lossless generic byte-plane packing.
   std::size_t projection_cache_bytes=8*1024*1024; // Shared snapshot budget.
-  bool journal_store=false; // New-file backend; existing formats autodetected.
+  bool journal_store=false;
+  // Split one exact block TopK across two threads when a second CPU is visible.
+  // Only affects wall time; I/O, peak memory and results are unchanged.
+  bool parallel_exact_scan=true;
+  std::size_t parallel_scan_min_rows=2048; // New-file backend; existing formats autodetected.
 };
 struct QuerySink {
   std::function<void(const std::vector<std::string>&)> columns;

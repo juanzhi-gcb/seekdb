@@ -9,6 +9,11 @@
 #include "../vector/validated.hpp"
 #include "minivectordb/profile.hpp"
 #include <cmath>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <sched.h>
+
 #include <bit>
 #include "../storage/binary.hpp"
 #include <limits>
@@ -150,6 +155,25 @@ namespace minivectordb {
     sql::TypedScanCache typed_snapshot;
     sql::ProjectionCache projection_snapshot;
     bool active=false,poisoned=false,busy=false;
+    struct ScanHelper4 {
+      std::mutex m; std::condition_variable cv; std::function<void()> job;
+      std::thread th; bool pending=false,finished=true,stop=false;
+      ScanHelper4(){th=std::thread([this]{for(;;){std::function<void()> j;
+        {std::unique_lock<std::mutex> lk(m);cv.wait(lk,[&]{return stop||pending;});if(stop)return;j=std::move(job);pending=false;}
+        j();{std::lock_guard<std::mutex> lk(m);finished=true;}cv.notify_all();}});}
+      ~ScanHelper4(){{std::lock_guard<std::mutex> lk(m);stop=true;}cv.notify_all();th.join();}
+      void run(std::function<void()> f){{std::lock_guard<std::mutex> lk(m);job=std::move(f);pending=true;finished=false;}cv.notify_one();}
+      void wait(){{std::unique_lock<std::mutex> lk(m);cv.wait(lk,[&]{return finished;});}}
+    };
+    std::unique_ptr<ScanHelper4> helper;
+    static bool multi_cpu() {
+#if defined(__linux__)
+      cpu_set_t set{}; if(sched_getaffinity(0,sizeof(set),&set)!=0) return false;
+      return CPU_COUNT(&set)>1;
+#else
+      return std::thread::hardware_concurrency()>1;
+#endif
+    }
     Impl(const std::filesystem::path&path,Options settings):store(path,settings.index_cache_bytes,settings.packed_values,settings.packed_scan_cache_bytes,settings.data_cache_bytes,settings.commit_sync_policy,settings.compressed_paths,settings.packed_branches,settings.compact_values,settings.discard_file_cache,settings.compact_node_refs,settings.byteplane_values,settings.journal_store),options(std::move(settings)) {
       if(options.sort_directory.empty())options.sort_directory=path.parent_path()/"tmp";
       if(options.memory_budget_bytes<4096)throw Error(ErrorCode::Constraint,"sort memory budget must be at least 4096 bytes");
@@ -326,32 +350,33 @@ namespace minivectordb {
           typed_text_column(s,b,e,index)!=typed_snapshot.text_column(s.id,index?index->id:0,e.column))return {};
       const auto predicates=typed_predicates(s,b);
       bool certified=false;
-      const auto [begin,end]=typed_scan_range(predicates,&certified);
+      const auto [range_begin,range_end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
-        auto result=detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
+        auto run_scan=[&](std::size_t lo_range,std::size_t hi_range,ExecutionInfo& loc)->std::vector<Neighbor> {
+        return detail::exact_top_k_transposed_validated_candidates(*e.query,k,[&](const detail::BlockVectorVisitor& visit) {
           std::array<std::int64_t,16> keys{};
           std::vector<float> tail;
           // The stored transpose is aligned to physical cache blocks. Keep
           // that alignment and mask the two interval boundaries explicitly.
-          for(std::size_t r=begin/16*16;r<end;r+=16) {
+          for(std::size_t r=lo_range/16*16;r<hi_range;r+=16) {
             const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
             std::uint16_t mask=0;
             if(bulk) {
-              const auto lo=begin>r?begin-r:0,hi=std::min(count,end-r);
-              const auto selected=hi-lo;
-              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lo);
-              info.rows_examined+=selected;info.typed_rows_examined+=selected;
-              info.distances_computed+=selected;++info.certified_blocks_examined;
-              for(auto lane=lo;lane<hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
+              const auto lane_lo=lo_range>r?lo_range-r:0,lane_hi=std::min(count,hi_range-r);
+              const auto selected=lane_hi-lane_lo;
+              mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lane_lo);
+              loc.rows_examined+=selected;loc.typed_rows_examined+=selected;
+              loc.distances_computed+=selected;++loc.certified_blocks_examined;
+              for(auto lane=lane_lo;lane<lane_hi;++lane)keys[lane]=typed_snapshot.key(r+lane);
             } else
             for(std::size_t lane=0;lane<count;++lane) {
-              if(r+lane<begin || r+lane>=end)continue;
+              if(r+lane<lo_range || r+lane>=hi_range)continue;
               profile::detail::Scope consume_timer(&profile::Snapshot::scan_consume);
-              ++info.rows_examined;++info.typed_rows_examined;
+              ++loc.rows_examined;++loc.typed_rows_examined;
               keys[lane]=typed_snapshot.key(r+lane);
-              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++info.distances_computed;}
+              if(typed_matches(r+lane,predicates)){mask|=std::uint16_t(1U<<lane);++loc.distances_computed;}
             }
             if(!mask)continue;
             std::span<const float> block;
@@ -367,6 +392,39 @@ namespace minivectordb {
           }
         },options.wide_simd_vector_kernel,options.bounded_fp32_screen,nullptr,
           options.bounded_int8_screen?typed_snapshot.integer_cache():nullptr);
+        };
+        const std::size_t rows=range_end>range_begin?range_end-range_begin:0;
+        std::vector<Neighbor> result;
+        if(options.parallel_exact_scan && multi_cpu() && !profile::enabled() && rows>=options.parallel_scan_min_rows) {
+          const std::size_t mid=range_begin+rows/2;
+          ExecutionInfo left_info,right_info;
+          std::vector<Neighbor> right; std::exception_ptr failure;
+          if(!helper)helper=std::make_unique<ScanHelper4>();
+          helper->run([&]{try{right=run_scan(mid,range_end,right_info);}catch(...){failure=std::current_exception();}});
+          std::vector<Neighbor> left;
+          try {left=run_scan(range_begin,mid,left_info);} catch(...) {helper->wait();throw;}
+          helper->wait();
+          if(failure)std::rethrow_exception(failure);
+          std::size_t i=0,j=0;
+          result.reserve(std::min(k,left.size()+right.size()));
+          while(result.size()<k && (i<left.size()||j<right.size())) {
+            bool take_left;
+            if(i==left.size())take_left=false;
+            else if(j==right.size())take_left=true;
+            else take_left=left[i].distance<right[j].distance ||
+                           (left[i].distance==right[j].distance && left[i].key<right[j].key);
+            result.push_back(take_left?left[i++]:right[j++]);
+          }
+          info.rows_examined+=left_info.rows_examined+right_info.rows_examined;
+          info.typed_rows_examined+=left_info.typed_rows_examined+right_info.typed_rows_examined;
+          info.distances_computed+=left_info.distances_computed+right_info.distances_computed;
+          info.certified_blocks_examined+=left_info.certified_blocks_examined+right_info.certified_blocks_examined;
+        } else {
+          ExecutionInfo local;
+          result=run_scan(range_begin,range_end,local);
+          info.rows_examined+=local.rows_examined;info.typed_rows_examined+=local.typed_rows_examined;
+          info.distances_computed+=local.distances_computed;info.certified_blocks_examined+=local.certified_blocks_examined;
+        }
         info.typed_cache_bytes=typed_snapshot.bytes();info.projection_cache_bytes=projection_snapshot.bytes();
         return result;
       } catch(...) {typed_snapshot.clear();projection_snapshot.clear();throw;}
