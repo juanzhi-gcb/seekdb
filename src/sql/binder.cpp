@@ -2,7 +2,6 @@
 #include "sql.hpp"
 #include "minivectordb/value.hpp"
 #include <charconv>
-#include <thread>
 #include <cmath>
 #include <set>
 #include <limits>
@@ -46,44 +45,7 @@ namespace minivectordb::sql {
         skip();
       }
     }
-    // Clinger fast path: when the significand fits in 2^53 and the decimal
-    // exponent is within +-22, double(m) * / 10^|e| is a single correctly
-    // rounded operation because 10^|e| is exactly representable. The result is
-    // bit-identical to std::from_chars for those inputs; anything else falls
-    // back to the general parser below.
-    bool fast_decimal(std::string_view text,double& out) {
-      std::size_t i=0; const bool negative=!text.empty()&&text.front()=='-';
-      if(negative)++i; else if(!text.empty()&&text.front()=='+')++i;
-      const auto digit=[](char c){return c>='0'&&c<='9';};
-      std::uint64_t mantissa=0;int digits=0,exponent=0;bool any=false;
-      auto push=[&](int d){if(mantissa>std::uint64_t(9007199254740992ULL)/10)return false;mantissa=mantissa*10+std::uint64_t(d);++digits;return true;};
-      while(i<text.size()&&digit(text[i])){if(!push(text[i]-'0'))return false;++i;any=true;}
-      if(i<text.size()&&text[i]=='.'){
-        ++i;
-        while(i<text.size()&&digit(text[i])){if(!push(text[i]-'0'))return false;--exponent;++i;any=true;}
-      }
-      if(!any)return false;
-      if(i<text.size()&&(text[i]=='e'||text[i]=='E')) {
-        ++i;bool eneg=false;if(i<text.size()&&(text[i]=='+'||text[i]=='-')){eneg=text[i]=='-';++i;}
-        int value=0;const auto begin=i;
-        while(i<text.size()&&digit(text[i])) {if(value<100000)value=value*10+(text[i]-'0');++i;}
-        if(i==begin)return false;
-        exponent+=eneg?-value:value;
-      }
-      if(i!=text.size())return false;
-      if(digits>19||mantissa>9007199254740992ULL||exponent>22||exponent<-22)return false;
-      static const double powers[]={1e0,1e1,1e2,1e3,1e4,1e5,1e6,1e7,1e8,1e9,1e10,1e11,
-                                    1e12,1e13,1e14,1e15,1e16,1e17,1e18,1e19,1e20,1e21,1e22};
-      double value=static_cast<double>(mantissa);
-      if(exponent>0)value*=powers[exponent];else if(exponent<0)value/=powers[-exponent];
-      out=negative?-value:value;
-      return std::isfinite(out);
-    }
     double real(std::string_view text) {
-      {
-        double fast=0;
-        if(fast_decimal(text,fast))return fast;
-      }
       if(!text.empty()&&text.front()=='+')text.remove_prefix(1);
       double result=0;
       auto[end,error]=std::from_chars(text.data(),text.data()+text.size(),result);
@@ -240,63 +202,13 @@ namespace minivectordb::sql {
         if(indexes.size()!=schema.columns.size())throw Error(ErrorCode::Type,"all columns must be provided; NULL and defaults are unsupported");
       }
       std::set<std::int64_t> keys;
-      auto bind_rows=[&](std::size_t begin,std::size_t end) {
-        std::vector<Row> rows;
-        rows.reserve(end-begin);
-        for(std::size_t r=begin;r<end;++r) {
-          const auto& values=s.values[r];
-          if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
-          Row row(schema.columns.size());
-          for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_literal(values[i],schema.columns[indexes[i]]);
-          rows.push_back(std::move(row));
-        }
-        return rows;
-      };
-      // Large VALUES lists bind two halves concurrently: each row is independent
-      // and the merge restores the original order. A failure keeps the earliest
-      // row's error, so diagnostics match the sequential implementation.
-      const bool parallel=s.values.size()>=32;
-      if(!parallel) {
-        auto rows=bind_rows(0,s.values.size());
-        for(auto& row:rows) {
-          auto pk=std::get<std::int64_t>(row[schema.primary]);
-          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
-          b.insert_rows.push_back(std::move(row));
-        }
-      } else {
-        const std::size_t split=s.values.size()/2;
-        std::vector<Row> left,right;
-        std::size_t left_error=s.values.size(),right_error=s.values.size();
-        std::exception_ptr left_ptr,right_ptr;
-        std::thread worker([&] {
-          try {right=bind_rows(split,s.values.size());}
-          catch(...) {
-            right_ptr=std::current_exception();
-            for(std::size_t r=split;r<s.values.size();++r) {
-              try {bind_rows(r,r+1);} catch(...) {right_error=r;break;}
-            }
-          }
-        });
-        try {left=bind_rows(0,split);}
-        catch(...) {
-          left_ptr=std::current_exception();
-          for(std::size_t r=0;r<split;++r) {try {bind_rows(r,r+1);} catch(...) {left_error=r;break;}}
-        }
-        worker.join();
-        if(left_ptr||right_ptr) {
-          if(left_ptr&&right_ptr) {if(left_error<=right_error)std::rethrow_exception(left_ptr);else std::rethrow_exception(right_ptr);}
-          std::rethrow_exception(left_ptr?left_ptr:right_ptr);
-        }
-        for(auto& row:left) {
-          auto pk=std::get<std::int64_t>(row[schema.primary]);
-          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
-          b.insert_rows.push_back(std::move(row));
-        }
-        for(auto& row:right) {
-          auto pk=std::get<std::int64_t>(row[schema.primary]);
-          if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
-          b.insert_rows.push_back(std::move(row));
-        }
+      for(const auto&values:s.values) {
+        if(values.size()!=indexes.size())throw Error(ErrorCode::Type,"INSERT column count mismatch");
+        Row row(schema.columns.size());
+        for(std::size_t i=0;i<values.size();++i)row[indexes[i]]=bind_literal(values[i],schema.columns[indexes[i]]);
+        auto pk=std::get<std::int64_t>(row[schema.primary]);
+        if(!keys.insert(pk).second)throw Error(ErrorCode::Constraint,"duplicate primary key within INSERT");
+        b.insert_rows.push_back(std::move(row));
       }
     }
     std::set<std::size_t> assigned;

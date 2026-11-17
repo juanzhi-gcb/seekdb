@@ -177,64 +177,6 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
   while(!heap.empty()){result.push_back(heap.top());heap.pop();}
   std::reverse(result.begin(),result.end());return result;
 }
-
-#if defined(__x86_64__) && defined(__GNUC__)
-namespace {
-__attribute__((target("avx512f,avx512bw"), noinline))
-void i16_block_sums(const std::int16_t* block,const std::int16_t* qk,std::size_t n,std::int64_t* out) {
-  __m512i acc32=_mm512_setzero_si512(),lo=acc32,hi=acc32;
-  for(std::size_t pair=0;pair<n/2;++pair) {
-    const __m512i q=_mm512_set1_epi32(int(std::uint16_t(qk[2*pair]))|(int(qk[2*pair+1])<<16));
-    const __m512i v=_mm512_loadu_si512(reinterpret_cast<const void*>(block+pair*32));
-    const __m512i diff=_mm512_sub_epi16(q,v);
-    acc32=_mm512_add_epi32(acc32,_mm512_madd_epi16(diff,diff));
-    if((pair&15)==15) {
-      lo=_mm512_add_epi64(lo,_mm512_cvtepi32_epi64(_mm512_castsi512_si256(acc32)));
-      hi=_mm512_add_epi64(hi,_mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(acc32,1)));
-      acc32=_mm512_setzero_si512();
-    }
-  }
-  lo=_mm512_add_epi64(lo,_mm512_cvtepi32_epi64(_mm512_castsi512_si256(acc32)));
-  hi=_mm512_add_epi64(hi,_mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(acc32,1)));
-  _mm512_storeu_si512(reinterpret_cast<void*>(out),lo);
-  _mm512_storeu_si512(reinterpret_cast<void*>(out+8),hi);
-}
-}
-#endif
-std::vector<Neighbor> exact_top_k_transposed_i16(std::span<const std::int16_t> query_k,
-    std::size_t k,const BlockInt16Source& source) {
-  if(k==0)return {};
-  const std::size_t n=query_k.size();
-  auto better=[](const Neighbor& a,const Neighbor& b){return a.distance<b.distance||(a.distance==b.distance&&a.key<b.key);};
-  std::priority_queue<Neighbor,std::vector<Neighbor>,decltype(better)> heap(better);
-  std::array<std::int64_t,16> sums{};
-  source([&](std::span<const std::int64_t> keys,std::span<const std::int16_t> values,std::uint16_t mask,std::size_t row) {
-    (void)row;
-    if(values.size()!=n*16 || (std::uint32_t(mask)>>keys.size()))throw std::invalid_argument("invalid int16 VECTOR block");
-    if(!mask)return;
-#if defined(__x86_64__) && defined(__GNUC__)
-    if(detail::has_avx512() && n%2==0) i16_block_sums(values.data(),query_k.data(),n,sums.data());
-    else
-#endif
-    for(std::size_t lane=0;lane<16;++lane) {
-      std::int64_t sum=0;
-      for(std::size_t d=0;d<n;++d) {
-        const std::int64_t diff=std::int64_t(query_k[d])-std::int64_t(values[(d/2)*32+lane*2+(d&1)]);
-        sum+=diff*diff;
-      }
-      sums[lane]=sum;
-    }
-    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
-      Neighbor x{keys[lane],std::sqrt(double(sums[lane])/16384.0)};
-      if(heap.size()<k)heap.push(x);
-      else if(better(x,heap.top())){heap.pop();heap.push(x);}
-    }
-  });
-  std::vector<Neighbor> out;out.reserve(heap.size());
-  while(!heap.empty()){out.push_back(heap.top());heap.pop();}
-  std::reverse(out.begin(),out.end());
-  return out;
-}
 std::vector<Neighbor> exact_top_k_validated_candidates(std::span<const float> query,std::size_t k,
                                                      const VectorSource& source,const KeyPredicate& predicate) {
   return top_k<false>(query,k,source,predicate);

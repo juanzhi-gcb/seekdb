@@ -1,6 +1,6 @@
 # MiniVectorDB
 
-OceanBase 加赛提交分支为 `2026-competition-round2`。最新一次正式反馈：MySQL 准入通过，性能原始 E=3893.716197，Prompt 原始分 7.5（提交 `bce207d6`，其运行源码为 a24 加 Prompt 材料）。历史 a24 反馈 E=3977.995012、3615.639045。本分支在其上只改提交同步策略，见下节。此后的原生测量均为自行生成的数据，不能换算官方分数。
+OceanBase 加赛提交分支为 `2026-competition-round2`。当前运行源码固定为 `a24d2cd764027adec7371f268f99ccdca2307032`。最新用户反馈：MySQL 准入通过，性能原始 E=3615.639045，Prompt 仍返回合并无效/待复核提示；历史 a24 反馈 E=3977.995012。此后的原生测量均为自行生成的数据，不能换算官方分数。
 
 ## 运行与接口
 
@@ -10,9 +10,9 @@ Dockerfile 最终 runtime 目标以前台进程启动 JSONL，固定使用 `/dat
 
 ## 本轮实现
 
-新建 CLI 数据库采用 MVDBJL08 追加记录存储：不可变记录链、双校验提交根、内存键到偏移目录；旧 02–07 格式自动识别并沿用原后端。每批全部写完后才发布内存变化；提交策略见下节。回滚改变逻辑可达性，不截断扫描快照仍引用的记录。格式见 [journal-format08.txt](docs/journal-format08.txt)。尚无历史日志回收；目录与恢复成本随记录规模增长，不能把有界读缓存误称为全库固定内存。
+新建 CLI 数据库采用 MVDBJL08 追加记录存储：不可变记录链、双校验提交根、内存键到偏移目录；旧 02–07 格式自动识别并沿用原后端。每批全部写完后才发布内存变化，提交 fsync 成功后才确认。回滚改变逻辑可达性，不截断扫描快照仍引用的记录。格式见 [journal-format08.txt](docs/journal-format08.txt)。尚无历史日志回收；目录与恢复成本随记录规模增长，不能把有界读缓存误称为全库固定内存。
 
-提交同步默认 `BatchedSync`（`commit_sync_batch = 4`）：每 4 条语句对数据与提交根做一次设备同步，进程 `SIGKILL`、容器重启或正常重启后全部已确认行仍可读（数据在页缓存中），但**整机断电或内核崩溃最多可能丢掉最后 3 条已确认语句**。这是相对"每条语句都 fsync"的明确放宽，不是等价实现。`MVDB_SYNC=processcrash` 恢复每条 fsync，`pagecache` 完全不 fsync，`ordered` 保留数据先落盘顺序，`batched:N` 可调 N。提交 I/O 失败后须重新打开。事务、保存点、故障注入、重启与旧格式测试保留。
+默认 ProcessCrash 提交策略针对进程强杀后内核和文件系统继续存活的模型；Ordered 另加数据先同步的屏障。提交 I/O 失败后须重新打开。事务、保存点、故障注入、重启与旧格式测试保留。
 
 类型化向量快照、原始行快照和投影缓存共用 64 MiB 上限；投影缓存另受 8 MiB 上限约束。预算不足时回退扫描，不发布部分缓存。非 SELECT、写入、DDL 和事务命令执行前使缓存失效。缓存只复用已验证的数据，每次仍重新计算过滤、距离、TopK；不缓存查询答案。
 
@@ -24,7 +24,7 @@ JSONL 响应跨请求复用不超过 64 KiB 的缓冲容量。每次先清空内
 
 两台原生 x86_64 分别在 2 CPU、2 GiB、无交换、运行期无网络的容器中执行回归、公开协议、精确 oracle、重启和 T/B/M 对照。常规负载为 10000 行、128 维、1000 次查询、三轮；另有随机 float32/随机文本和 30000 行容量验证。失败及退步实验保留，采集异常不计作成功样本。原生结果见 [本轮证据](bench/results/release-20261112)，历史正式结果不被本地测量覆盖。
 
-材料入口 [agent/conversation.json](agent/conversation.json) 与根目录 conversation.json 逐字节相同。当前按 `agent-learning-evidence-v3-unbounded` 组织为 15 个 rubric 实例，覆盖五个维度；每个实例分开给出学生原文与结果原文，引用可在 JSON 内用 pointer 和原文核对。文件保留 58 条原话，包含实际工具摘要和明确归属的 Agent 分析；没有补造用户学习过程。`agent/material-digest.json` 仅证明本地材料完整性，不是平台内部评审摘要或评分。历史完整归档保留。
+材料入口 [agent/conversation.json](agent/conversation.json) 与根目录 conversation.json 逐字节相同。当前按 `agent-learning-evidence-v3-unbounded` 组织为 12 个 rubric 实例，覆盖五个维度；每个实例分开给出学生原文与结果原文，引用可在 JSON 内用 pointer 和原文核对。文件保留 70 条 a24 之前的用户原话，包含实际工具摘要和明确归属的 Agent 分析；没有补造用户学习过程。`agent/material-digest.json` 仅证明本地材料完整性，不是平台内部评审摘要或评分。历史完整归档保留。
 
 本地检查：
 

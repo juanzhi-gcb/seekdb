@@ -26,9 +26,6 @@ class TypedScanCache {
     bool probation_complete_=false;
     detail::Int8BoundCache integer_cache_;
     std::unique_ptr<float[]> vectors_;
-    // int16 mirror in the kernel's interleaved block layout: (d/2)*32+lane*2+(d&1).
-    std::unique_ptr<std::int16_t[]> qvecs_;
-    bool quantized_=false,require_f32_=false,quant_ok_=true;
     std::unique_ptr<std::int64_t[]> scalars_;
     std::unique_ptr<std::size_t[]> columns_;
     bool transposed_=false;
@@ -42,17 +39,12 @@ class TypedScanCache {
 
     void release() noexcept {
         integer_cache_.clear();
-        vectors_.reset();qvecs_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
-        quantized_=false;quant_ok_=true;
+        vectors_.reset();scalars_.reset();columns_.reset();texts_.reset();text_lengths_.reset();
         capacity_=count_=bytes_=0;transposed_=false;
         probation_rows_=probation_text_width_=allocated_text_width_=0;probation_complete_=false;
         ordered_scalar_slot_.reset();ordered_text_=false;
     }
     void refuse() noexcept { release();state_=State::refused; }
-    void* vec_ptr(std::size_t row) noexcept {
-        return quantized_?static_cast<void*>(qvecs_.get()+row*dimension_):static_cast<void*>(vectors_.get()+row*dimension_);
-    }
-    std::size_t vec_bytes() const noexcept {return dimension_*(quantized_?sizeof(std::int16_t):sizeof(float));}
     void cluster() {
         // Bounded preparation only: <=512 KiB row permutation and <=64 KiB
         // single-row scratch. Allocate everything before changing any payload.
@@ -63,7 +55,7 @@ class TypedScanCache {
         if(!text_column_ && slot==scalar_count_)return;
         std::vector<std::uint32_t> order(count_);
         std::iota(order.begin(),order.end(),0U);
-        std::vector<unsigned char> row_scratch(vec_bytes());
+        std::vector<float> vector(dimension_);
         std::vector<std::int64_t> scalars(scalar_count_);
         std::vector<char> text_copy(text_width_);
         std::sort(order.begin(),order.end(),[&](auto a,auto b) {
@@ -73,7 +65,7 @@ class TypedScanCache {
             return cmp<0 || (cmp==0 && key(a)<key(b));
         });
         const auto move_row=[&](std::size_t to,std::size_t from) {
-            std::memcpy(vec_ptr(to),vec_ptr(from),vec_bytes());
+            std::memcpy(vectors_.get()+to*dimension_,vectors_.get()+from*dimension_,dimension_*sizeof(float));
             std::memcpy(scalars_.get()+to*scalar_count_,scalars_.get()+from*scalar_count_,scalar_count_*sizeof(std::int64_t));
             if(text_column_) {
                 text_lengths_[to]=text_lengths_[from];
@@ -81,7 +73,7 @@ class TypedScanCache {
             }
         };
         for(std::size_t i=0;i<count_;++i)if(order[i]!=i) {
-            std::memcpy(row_scratch.data(),vec_ptr(i),vec_bytes());
+            std::memcpy(vector.data(),vectors_.get()+i*dimension_,dimension_*sizeof(float));
             std::memcpy(scalars.data(),scalars_.get()+i*scalar_count_,scalar_count_*sizeof(std::int64_t));
             const auto length=text_column_?text_lengths_[i]:0;
             if(length)std::memcpy(text_copy.data(),texts_.get()+i*text_width_,length);
@@ -90,7 +82,7 @@ class TypedScanCache {
                 const auto next=order[row];move_row(row,next);
                 order[row]=static_cast<std::uint32_t>(row);row=next;
             }
-            std::memcpy(vec_ptr(row),row_scratch.data(),vec_bytes());
+            std::memcpy(vectors_.get()+row*dimension_,vector.data(),dimension_*sizeof(float));
             std::memcpy(scalars_.get()+row*scalar_count_,scalars.data(),scalar_count_*sizeof(std::int64_t));
             if(text_column_) {
                 text_lengths_[row]=length;
@@ -164,8 +156,7 @@ public:
         if(!dimension || !scalar_count || scalar_count>budget/sizeof(std::size_t)) {refuse();return;}
         const auto metadata=scalar_count*sizeof(std::size_t);
         if(dimension>(budget-metadata)/sizeof(float)) {refuse();return;}
-        const std::size_t component_bytes=require_f32_?sizeof(float):sizeof(std::int16_t);
-        const auto vector_bytes=dimension*component_bytes;
+        const auto vector_bytes=dimension*sizeof(float);
         if(scalar_count>(budget-metadata-vector_bytes)/sizeof(std::int64_t)) {refuse();return;}
         auto row_bytes=vector_bytes+scalar_count*sizeof(std::int64_t);
         if(text_column_) {
@@ -181,11 +172,10 @@ public:
         // Only a completed scan of this exact immutable identity proves the
         // needed row count. Keep the hard budget, but allocate for actual rows.
         if(probation_complete_)capacity=std::min(capacity,std::max(std::size_t(1),probation_rows_));
-        if((vectors_||qvecs_) && (capacity_<capacity || allocated_text_width_!=text_width_))release();
-        if(!vectors_ && !qvecs_) {
+        if(vectors_ && (capacity_<capacity || allocated_text_width_!=text_width_))release();
+        if(!vectors_) {
             try {
-                if(require_f32_) vectors_.reset(new float[capacity*dimension]);
-                else { qvecs_.reset(new std::int16_t[capacity*dimension]); quantized_=true; }
+                vectors_.reset(new float[capacity*dimension]);
                 scalars_.reset(new std::int64_t[capacity*scalar_count]);
                 columns_.reset(new std::size_t[scalar_count]);
                 if(text_column_) {
@@ -220,15 +210,7 @@ public:
             if(!text.empty())std::memcpy(texts_.get()+count_*text_width_,text.data(),text.size());
             text_lengths_[count_]=static_cast<std::uint32_t>(text.size());
         }
-        if(quantized_) {
-          auto* dst=qvecs_.get()+count_*dimension_;
-          for(std::size_t d=0;d<dimension_;++d) {
-            const double scaled=static_cast<double>(vector[d])*128.0;
-            const long rounded=std::lround(scaled);
-            if(static_cast<double>(rounded)!=scaled || rounded<-32767 || rounded>32767) {quant_ok_=false;return;}
-            dst[d]=static_cast<std::int16_t>(rounded);
-          }
-        } else std::memcpy(vectors_.get()+count_*dimension_,vector.data(),dimension_*sizeof(float));
+        std::memcpy(vectors_.get()+count_*dimension_,vector.data(),dimension_*sizeof(float));
         for(std::size_t slot=0;slot<scalar_count_;++slot)
             scalars_[count_*scalar_count_+slot]=scalar(columns_[slot]);
         ++count_;
@@ -236,22 +218,11 @@ public:
     void finish(bool transpose=false,bool clustered=false,bool integer_screen=false) noexcept {
         if(state_==State::probation) {probation_complete_=true;return;}
         if(!building())return;
-        if(quantized_ && !quant_ok_) {require_f32_=true;quant_ok_=true;release();invalidate();return;}
         if(clustered)try {cluster();}catch(const std::bad_alloc&) {}
         // Only complete blocks are transposed; the final short block remains
         // AoS, so padding never grows the arena or reduces cache admission.
         if(transpose && dimension_>=16 && dimension_<=1024 && count_>=16) {
             try {
-                if(quantized_) {
-                    auto scratch=std::make_unique<std::int16_t[]>(16*dimension_);
-                    for(std::size_t row=0;row+16<=count_;row+=16) {
-                        auto* block=qvecs_.get()+row*dimension_;
-                        for(std::size_t lane=0;lane<16;++lane)
-                            for(std::size_t d=0;d<dimension_;++d)
-                                scratch[(d/2)*32+lane*2+(d&1)]=block[lane*dimension_+d];
-                        std::memcpy(block,scratch.get(),16*dimension_*sizeof(std::int16_t));
-                    }
-                } else {
                 auto scratch=std::make_unique<float[]>(16*dimension_);
                 for(std::size_t row=0;row+16<=count_;row+=16) {
                     auto* block=vectors_.get()+row*dimension_;
@@ -260,11 +231,10 @@ public:
                             scratch[d*16+lane]=block[lane*dimension_+d];
                     std::memcpy(block,scratch.get(),16*dimension_*sizeof(float));
                 }
-                }
                 transposed_=true;
             } catch(const std::bad_alloc&) {} // No block changed before allocation.
         }
-        if(!quantized_ && integer_screen && transposed_ && budget_>bytes_)
+        if(integer_screen && transposed_ && budget_>bytes_)
             integer_cache_.build({vectors_.get(),count_*dimension_},count_,dimension_,budget_-bytes_);
         state_=State::ready;
     }
@@ -287,22 +257,12 @@ public:
     std::string_view text(std::size_t row) const noexcept {
         return {texts_.get()+row*text_width_,text_lengths_[row]};
     }
-    bool quantized() const noexcept {return quantized_ && transposed_;}
-    std::span<const std::int16_t> block_i16(std::size_t row) const noexcept {
-        return {qvecs_.get()+row*dimension_,16*dimension_};
-    }
     std::span<const float> block(std::size_t row) const noexcept {
         return {vectors_.get()+row*dimension_,16*dimension_};
     }
     std::span<const float> read_vector(std::size_t row,std::vector<float>& scratch) const {
         if(!transposed_ || row>=count_/16*16)return vector(row);
         scratch.resize(dimension_);
-        if(quantized_) {
-            const auto* values=qvecs_.get()+(row/16*16)*dimension_;
-            for(std::size_t d=0;d<dimension_;++d)
-                scratch[d]=static_cast<float>(values[(d/2)*32+(row%16)*2+(d&1)])/128.0f;
-            return scratch;
-        }
         const auto* values=vectors_.get()+(row/16*16)*dimension_;
         for(std::size_t d=0;d<dimension_;++d)scratch[d]=values[d*16+row%16];
         return scratch;
@@ -319,13 +279,6 @@ public:
     }
     std::int64_t key(std::size_t row) const noexcept {return scalar(row,primary_slot_);}
     std::span<const float> vector(std::size_t row) const noexcept {
-        if(quantized_) {
-            thread_local std::vector<float> decoded_row;
-            decoded_row.resize(dimension_);
-            const auto* src=qvecs_.get()+row*dimension_;
-            for(std::size_t d=0;d<dimension_;++d)decoded_row[d]=static_cast<float>(src[d])/128.0f;
-            return {decoded_row.data(),dimension_};
-        }
         return {vectors_.get()+row*dimension_,dimension_};
     }
 };

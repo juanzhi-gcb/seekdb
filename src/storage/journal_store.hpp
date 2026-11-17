@@ -8,8 +8,6 @@
 #include <bit>
 #include <cerrno>
 #include <cstring>
-#include <cstdlib>
-#include <fcntl.h>
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -26,7 +24,6 @@ class JournalStore {
   struct Cached {Page bytes{};std::uint64_t page=UINT64_MAX;std::size_t size=0;};
   int fd_;
   CommitSyncPolicy policy_;
-  std::size_t batch_=4,pending_=0;
   std::uint64_t head_=0,durable_=0,end_=8192,generation_=0;
   std::map<Key,std::uint64_t> index_;
   std::size_t empty_entries_=0;
@@ -38,14 +35,7 @@ class JournalStore {
   static std::uint64_t get(const unsigned char* p,unsigned n=8){std::uint64_t v=0;for(unsigned i=0;i<n;++i)v|=std::uint64_t(p[i])<<(8*i);return v;}
   static void put(unsigned char* p,std::uint64_t v,unsigned n=8){for(unsigned i=0;i<n;++i)p[i]=static_cast<unsigned char>(v>>(8*i));}
   static std::uint32_t crc(std::string_view s){return ~page_crc32_span(0xffffffffU,reinterpret_cast<const unsigned char*>(s.data()),s.size());}
-  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);
-    int rc;
-#if defined(__linux__)
-    if(policy_==CommitSyncPolicy::DataSync) rc=::fdatasync(fd_); else rc=::fsync(fd_);
-#else
-    rc=::fsync(fd_);
-#endif
-    if(rc==0)return;if(errno!=EINTR)io("journal fsync");}}
+  void sync(){for(;;){profile::detail::Scope timer(&profile::Snapshot::fsync);if(::fsync(fd_)==0)return;if(errno!=EINTR)io("journal fsync");}}
   void write(std::uint64_t offset,std::string_view bytes){
     if(offset>std::uint64_t(std::numeric_limits<off_t>::max()) || bytes.size()>std::uint64_t(std::numeric_limits<off_t>::max())-offset)throw std::length_error("journal offset exhausted");
     if(!bytes.empty())for(auto& c:cache_)if(c.page>=offset/4096 && c.page<=(offset+bytes.size()-1)/4096)c.page=UINT64_MAX;
@@ -95,7 +85,7 @@ class JournalStore {
   void purge_empty(){if(!empty_entries_)return;for(auto i=index_.begin();i!=index_.end();)if(!i->second){i=index_.erase(i);--empty_entries_;}else ++i;}
 public:
   static bool magic(const unsigned char* p){return std::memcmp(p,"MVDBJL08",8)==0;}
-  JournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy,std::size_t sync_batch=4):fd_(fd),policy_(policy),batch_(sync_batch?sync_batch:1){
+  JournalStore(int fd,bool created,std::size_t cache_budget,CommitSyncPolicy policy):fd_(fd),policy_(policy){
     cache_.resize(std::min(cache_budget,std::size_t(512*1024))/sizeof(Cached));
     if(created){Page zero{};write(4096,{reinterpret_cast<const char*>(zero.data()),zero.size()});auto p=root(0);write(0,{reinterpret_cast<const char*>(p.data()),p.size()});sync();return;}
     struct stat stat{};if(::fstat(fd_,&stat))io("journal fstat");if(stat.st_size<8192)fail();end_=std::uint64_t(stat.st_size);
@@ -103,8 +93,6 @@ public:
     const bool av=valid(a,end_),bv=valid(b,end_);if(!av&&!bv)fail();const auto& p=!av||(bv&&get(b.data()+8)>get(a.data()+8))?b:a;
     generation_=get(p.data()+8);head_=durable_=get(p.data()+16);index_=reconstruct(head_,get(p.data()+24));
   }
-  // A clean shutdown must not leave a batched window open.
-  ~JournalStore(){if(pending_){try{sync();}catch(...){}}}
   std::uint64_t head()const noexcept{return head_;}
   void begin(){undo_.clear();}
   std::optional<std::string> value(std::uint64_t space,std::int64_t key)const{
@@ -114,15 +102,6 @@ public:
     const auto r=record(at,end_);if(r.key!=Key{space,key}||r.flags==2)fail();auto payload=read(at+header_size,std::size_t(r.length));
     if(crc(payload)!=r.checksum)fail();return r.flags==1?unpack_bytes(payload,4064,true):payload;
   }
-  // Point lookups read each row about once, so the page they touch is never
-  // reused. Releasing it keeps device page cache out of the measured peak
-  // without changing the read count.
-  std::string value_at_once(std::uint64_t space,std::int64_t key,std::uint64_t at)const{
-    auto out=value_at(space,key,at);
-    if(drop_after_read)advise_before(at+sizeof(Page));
-    return out;
-  }
-  bool drop_after_read=false;
   void apply(std::uint64_t space,std::span<const Store::Mutation> changes){
     if(changes.size()>Store::max_batch_mutations)throw std::length_error("too many batch mutations");
     std::vector<const Store::Mutation*> order;order.reserve(changes.size());std::size_t bytes=0;
@@ -150,29 +129,8 @@ public:
   void rollback(){restore(durable_);undo_.clear();purge_empty();}
   void commit(){
     if(generation_==UINT64_MAX)throw std::overflow_error("generation exhausted");const auto next=generation_+1;
-    const bool durable=policy_!=CommitSyncPolicy::PageCache;
-    if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});
-    if(durable){
-      if(policy_==CommitSyncPolicy::BatchedSync){if(++pending_>=batch_){sync();pending_=0;}}
-      else sync();
-    }
+    if(policy_==CommitSyncPolicy::Ordered)sync();auto p=root(next);write((next%2)*4096,{reinterpret_cast<const char*>(p.data()),p.size()});sync();
     generation_=next;durable_=head_;undo_.clear();purge_empty();
-  }
-  // Ascending file offset: lets a caller drop already-scanned pages so the
-  // measured peak does not hold the whole file alongside the typed cache.
-  auto snapshot_by_offset(std::uint64_t space)const{
-    std::vector<std::pair<std::uint64_t,std::int64_t>> rows;
-    for(auto it=index_.lower_bound({space,INT64_MIN});it!=index_.end()&&it->first.first==space;++it)
-      if(it->second)rows.push_back({it->second,it->first.second});
-    std::sort(rows.begin(),rows.end());
-    return rows;
-  }
-  void advise_before(std::uint64_t offset)const noexcept{
-#if defined(POSIX_FADV_DONTNEED)
-    if(offset)(void)::posix_fadvise(fd_,0,static_cast<off_t>(offset),POSIX_FADV_DONTNEED);
-#else
-    (void)offset;
-#endif
   }
   auto snapshot(std::uint64_t space)const{
     std::vector<std::pair<std::int64_t,std::uint64_t>> rows;
