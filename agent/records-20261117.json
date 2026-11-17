@@ -1,0 +1,15 @@
+{
+  "kind": "live-session-record-archive",
+  "session": "2026-11-17",
+  "note": "本日新增记录原样归档，字段与材料内记录逐字一致。",
+  "conversations": [
+    {
+      "id": "n24",
+      "role": "user",
+      "source": "live_session_20261117",
+      "phase": "current",
+      "content": "去掉扫描缓存后查询慢了 11.7 倍，但每查询读取的字节数从 5.12 MB 降到 1.83 MB——瓶颈不在内存带宽，而在逐分量 12 位解包与候选复算的指令开销；因此压缩只能降 B，不能降查询 T。"
+    }
+  ],
+  "experiments": []
+}

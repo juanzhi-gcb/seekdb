@@ -6,18 +6,18 @@
   "material_parent_commit": "a08e66e299847ca539c419cfbc67593357246627",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 127736,
-      "sha256": "6dd816117923d81ff46543b98410a0127f48c4baeec6e4d1d2253f041b9efd6b"
+      "bytes": 128296,
+      "sha256": "7bda7a66eb1f59b87ed44434ec634bb06fa6f5e1651d0ef97976da4d77642ea4"
     },
     "conversation.json": {
-      "bytes": 127736,
-      "sha256": "6dd816117923d81ff46543b98410a0127f48c4baeec6e4d1d2253f041b9efd6b"
+      "bytes": 128296,
+      "sha256": "7bda7a66eb1f59b87ed44434ec634bb06fa6f5e1651d0ef97976da4d77642ea4"
     }
   },
   "counts": {
-    "conversations": 55,
+    "conversations": 56,
     "experiments": 49,
-    "evidence_chains": 14
+    "evidence_chains": 15
   },
   "record_sources": [
     {
@@ -85,6 +85,12 @@
       "path": "agent/records-20261116.json",
       "bytes": 2874,
       "sha256": "21c7c3a6b0e5a11467f9eee25f9af640505bbdfb722ce02cdaea2428d9083d11"
+    },
+    {
+      "kind": "record-archive",
+      "path": "agent/records-20261117.json",
+      "bytes": 584,
+      "sha256": "f1d9c6ab0399d92f45466bd822888162511a550a90a87920759e86e89c85f8fe"
     }
   ],
   "current_source_identity": {
