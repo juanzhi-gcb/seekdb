@@ -6,18 +6,18 @@
   "material_parent_commit": "a08e66e299847ca539c419cfbc67593357246627",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 102214,
-      "sha256": "8aca2b73537011e31f7e380c7e3de6027fe751468293ef76d0b5b350cbc566b2"
+      "bytes": 126487,
+      "sha256": "6ba87dc76e76df3c32de9510f37e2ffc299371a7387b7cccb6c459a26f1813d8"
     },
     "conversation.json": {
-      "bytes": 102214,
-      "sha256": "8aca2b73537011e31f7e380c7e3de6027fe751468293ef76d0b5b350cbc566b2"
+      "bytes": 126487,
+      "sha256": "6ba87dc76e76df3c32de9510f37e2ffc299371a7387b7cccb6c459a26f1813d8"
     }
   },
   "counts": {
-    "conversations": 58,
+    "conversations": 59,
     "experiments": 49,
-    "evidence_chains": 19
+    "evidence_chains": 20
   },
   "record_sources": [
     {
