@@ -6,12 +6,12 @@
   "material_parent_commit": "a08e66e299847ca539c419cfbc67593357246627",
   "material_files": {
     "agent/conversation.json": {
-      "bytes": 126487,
-      "sha256": "6ba87dc76e76df3c32de9510f37e2ffc299371a7387b7cccb6c459a26f1813d8"
+      "bytes": 126426,
+      "sha256": "de159db7afddd0c3cb66880dbe54ae23997c5c1d77df4896e9695471c5690ee6"
     },
     "conversation.json": {
-      "bytes": 126487,
-      "sha256": "6ba87dc76e76df3c32de9510f37e2ffc299371a7387b7cccb6c459a26f1813d8"
+      "bytes": 126426,
+      "sha256": "de159db7afddd0c3cb66880dbe54ae23997c5c1d77df4896e9695471c5690ee6"
     }
   },
   "counts": {
@@ -96,18 +96,18 @@
   "current_source_identity": {
     "verified_engine_commit": "a24d2cd764027adec7371f268f99ccdca2307032",
     "runtime_trees": {
-      "src": "90dc2e6c149b12c2576d3327e3c621c81c26e524",
-      "include": "10ed3388a60ff4621ed52d422b317859a41ea4b0",
+      "src": "223fee4c50e2e9228c492feb0aec47816a40c256",
+      "include": "5e090e57c2804811f1387df4ee6b1cad566ae8f4",
       "tests": "ce82fb4d207f355db4cfc95f777232f664c98b3d",
       "CMakeLists.txt": "78d8497653d29085db65ae5a9e57954f1a7ac513",
       "Dockerfile": "5ca119733dfffd36fa9e11ee4612607d65ccc468"
     },
-    "scope": "运行代码固定a24，src/include/tests/构建树身份沿用已核验a24身份；后续实验与当前复盘仅作历史学习记录，不纳入运行实现。"
+    "scope": "历史回顾与实施规格以 a24 为基线；当前提交运行代码在 a24 上增加两路块级并行扫描。12 位行格式、int16 缓存及主动丢页实验已回退，历史数据不自动代表当前版本。"
   },
   "runtime_blob_sha1": {
     "CMakeLists.txt": "78d8497653d29085db65ae5a9e57954f1a7ac513",
     "Dockerfile": "5ca119733dfffd36fa9e11ee4612607d65ccc468",
-    "include/minivectordb/database.hpp": "dfad0aca70f24a0e2facc1769966122278ea34c4",
+    "include/minivectordb/database.hpp": "20bf4fdf52fe115b47c8aaff3cc9082a3d378a74",
     "include/minivectordb/exact.hpp": "24b82904306261449069e51164b3034d05966044",
     "include/minivectordb/profile.hpp": "0e7fe928b6fccb91a74121231d96ea9f08120482",
     "include/minivectordb/row_codec.hpp": "342e23ca1984fd88b9683b0988884e1c8d58f393",
@@ -118,7 +118,7 @@
     "src/main.cpp": "332425289b92942b44fd6aac7190855a4a745add",
     "src/protocol/jsonl.hpp": "67e5b78d27bf29921c4460d43247edda92325e34",
     "src/sql/binder.cpp": "150c4d30c05a6083786d9fbaadb022a0d3828bbc",
-    "src/sql/executor.cpp": "baea88cc11444e657e60fbfa995f5644251ade14",
+    "src/sql/executor.cpp": "baac2e9fe37570b9c4c453d8507b0484f06cad84",
     "src/sql/lexer.cpp": "5169d9257ed2e8591311a0af65435865d7f07e4a",
     "src/sql/parser.cpp": "6b9b4a855044ed3039a6e49f80990a1dcbc20fa7",
     "src/sql/projection_cache.hpp": "638e2b18f3923a1102c0db62cb8948a8fd67e9b1",
