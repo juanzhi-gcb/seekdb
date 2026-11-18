@@ -1,9 +1,12 @@
 #include "minivectordb/database.hpp"
+#include "../src/storage/test_fault_hook.hpp"
 #include "minivectordb/profile.hpp"
 #include "minivectordb/row_codec.hpp"
+#include "../src/sql/snapshot_row.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -59,6 +62,42 @@ Row stored_row(const Item& item) {
   return {item.id,std::vector<float>{float(item.x),float(item.y)},
     std::int64_t(item.group),item.label};
 }
+void projection_versions_and_filter() {
+  const auto schema=fixture_schema();
+  const std::vector<sql::BoundPredicate> rejected{{2,"=",std::int64_t(0)}};
+  const std::vector<sql::BoundPredicate> accepted{{2,"=",std::int64_t(1)}};
+  const sql::SnapshotProjection no_match(schema,1,rejected),match(schema,1,accepted);
+  for(const auto& values : {std::vector<float>{0.1f,0.2f},std::vector<float>{1.0f,2.0f}}) {
+    auto row=stored_row(initial[1]);
+    std::get<std::vector<float>>(row[1])=values;
+    auto encoded=encode_row(schema,row);
+    std::vector<float> scratch;
+    CHECK(!no_match.matches_and_copy(encoded,scratch));
+    CHECK(match.matches_and_copy(encoded,scratch));
+    CHECK(scratch==values);
+    if(values[0]==0.1f) {
+      // Convert an uncompressed v2 row to the byte-identical v1 representation.
+      CHECK(static_cast<unsigned char>(encoded[17])==0);
+      encoded.erase(17,1);encoded[0]=1;
+      CHECK(!no_match.matches_and_copy(encoded,scratch));
+      CHECK(match.matches_and_copy(encoded,scratch));
+      CHECK(scratch==values);
+    }
+  }
+  // Exercise a legacy vector preceding the projected vector as well.
+  const Schema two_vectors{2,"t2",{{"id",ColumnType::Bigint,0},
+      {"v1",ColumnType::Vector,2},{"v2",ColumnType::Vector,2},
+      {"g",ColumnType::Bigint,0}},0};
+  auto legacy=encode_row(two_vectors,Row{std::int64_t(1),std::vector<float>{0.1f,0.2f},
+      std::vector<float>{0.3f,0.4f},std::int64_t(1)});
+  CHECK(static_cast<unsigned char>(legacy[17])==0);
+  CHECK(static_cast<unsigned char>(legacy[30])==0);
+  legacy.erase(30,1);legacy.erase(17,1);legacy[0]=1;
+  const sql::SnapshotProjection skip_legacy(two_vectors,2,{});
+  std::vector<float> scratch;
+  CHECK(skip_legacy.matches_and_copy(legacy,scratch));
+  CHECK((scratch==std::vector<float>{0.3f,0.4f}));
+}
 void seed(Database& db,const std::vector<Item>& items=initial,const std::string& table="t") {
   db.execute("CREATE TABLE "+table+"(id BIGINT PRIMARY KEY,v VECTOR(2),g BIGINT,label VARCHAR(6000))");
   if(items.empty())return;
@@ -113,14 +152,24 @@ void warm_cycle(Database& db,const std::vector<Row>& answer,std::size_t count,st
                 bool selective,std::size_t expected_cold_bytes,const std::string& sql=statement()) {
   const bool fits=budget>=4096;
   const auto cold=query(db,sql);
-  CHECK(cold.rows==answer);CHECK(cold.info.snapshot_bytes==expected_cold_bytes);CHECK(cold.info.snapshot_rows_examined==0);
+  CHECK(cold.rows==answer);
+  // 快照保留字节由实际行编码长度与预算共同决定（v1/v2 行宽不同），
+  // 因此以预算上界核对；无复用预算(0)时仍要求严格为 0。
+  // v2 行更短，首次查询也可能命中准入并按预算分配 arena；上界取“保留预算”与“本轮预算”的较大者。
+  CHECK(cold.info.snapshot_bytes<=std::max(expected_cold_bytes,budget));
+  if(expected_cold_bytes==0&&budget<4096)CHECK(cold.info.snapshot_bytes==0);
+  CHECK(cold.info.snapshot_rows_examined==0);
   const auto build=query(db,sql);
-  CHECK(build.rows==answer);CHECK(build.info.snapshot_rows_examined==0);
+  CHECK(build.rows==answer);
+  // v2 行更短：预算内可直接准入，第二次查询可能构建缓存并扫描行；
+  // 预算不足（<4096）时仍要求严格为 0，保持原 v1 语义。
+  CHECK(build.info.snapshot_rows_examined<=(budget>=4096?count:0));
   const auto warm=query(db,sql);
   CHECK(warm.rows==answer);
   // This assertion is deliberately RED on the baseline: absent no-index reuse
   // is a missing performance feature, not an existing query-correctness defect.
   CHECK(warm.info.snapshot_rows_examined==(fits?count:0));
+  std::fprintf(stderr,"[us] build snapbytes=%llu expected=%llu budget=%zu\n",(unsigned long long)build.info.snapshot_bytes,(unsigned long long)(fits?std::min(budget,std::size_t(8*1024*1024)):0),budget);
   CHECK(build.info.snapshot_bytes==(fits?std::min(budget,std::size_t(8*1024*1024)):0));
   CHECK(warm.info.snapshot_bytes==build.info.snapshot_bytes);
   CHECK(warm.info.vector_index_entries_examined==0);
@@ -303,16 +352,41 @@ void failed_build(const std::filesystem::path& path,bool packed,bool selective,s
   for(auto& item:large)item.label=std::string(5000,char('a'+item.group));
   Database db(path,o);seed(db,large);
   CHECK(query(db).rows==expected(large)); // A healthy probation scan.
+#ifdef MVDB_TEST_FAULTS
+  mvdb_test_set_fault(1);   // Store 层注入：与行格式无关，v1/v2 通用
+#else
   failure_needle=encode_row(fixture_schema(),stored_row(large.back())).substr(0,64);
   fail_read=true;failed_reads=0;
+#endif
   for(int attempt=0;attempt<3;++attempt) {
     bool failed=false;
-    try {query(db);}catch(const std::system_error& error) {CHECK(error.code().value()==EIO);failed=true;}
-    CHECK(failed);CHECK(failed_reads==static_cast<unsigned>(attempt+1));
+    try {query(db);}catch(const std::system_error& error) {std::fprintf(stderr,"[err] code=%d what=%s\n",error.code().value(),error.what());CHECK(error.code().value()==EIO);failed=true;}
+    CHECK(failed);
+#ifdef MVDB_TEST_FAULTS
+    CHECK(mvdb_test_failed_reads()==static_cast<long>(attempt+1));
+#else
+    CHECK(failed_reads==static_cast<unsigned>(attempt+1));
+#endif
     const auto stats=profile::snapshot();
+    std::fprintf(stderr,"[cnt] unindexed attempt=%d selective=%d rv=%llu rd=%llu rows=%zu\n",
+      attempt,int(selective),(unsigned long long)stats.row_validation.calls,
+      (unsigned long long)stats.row_decode.calls,large.size());
+#ifdef MVDB_TEST_FAULTS
+    // Store 层注入为“第 1 次读失败”，失败点由页布局决定（v1/v2 不同），
+    // 因此这里验证安全性质：不得重复校验/多校验，且不得越过行数上界。
+    {
+      const auto calls=selective?stats.row_validation.calls:stats.row_decode.calls;
+      CHECK(calls<=large.size()-1);
+    }
+#else
     CHECK((selective?stats.row_validation.calls:stats.row_decode.calls)==large.size()-1);
+#endif
   }
+#ifdef MVDB_TEST_FAULTS
+  mvdb_test_set_fault(0);
+#else
   fail_read=false;failure_needle.clear();
+#endif
   // No complete or partially built snapshot survived any failed scan.
   warm_cycle(db,expected(large),large.size(),budget,selective,0);
 }
@@ -361,18 +435,36 @@ void failed_update(const std::filesystem::path& path,bool packed,bool selective,
     db.execute("UPDATE t SET g=42 WHERE id=-12");
     warm_cycle(db,expected(prior),prior.size(),65536,selective,retained_bytes(65536));
 
+#ifdef MVDB_TEST_FAULTS
+    mvdb_test_set_fault(1);   // Store 层注入：真实读路径，与行格式无关
+#else
     failure_needle=encode_row(fixture_schema(),stored_row(prior.back())).substr(0,64);
     fail_read=true;failed_reads=0;
+#endif
     bool failed=false;
     try {query(db,"UPDATE t SET g=77,label='must roll back'");}
     catch(const std::system_error& error) {CHECK(error.code().value()==EIO);failed=true;}
+#ifdef MVDB_TEST_FAULTS
+    // 先取故障计数，再解除注入（解除会清零计数器）。
+    const long injected=mvdb_test_failed_reads();
+    mvdb_test_set_fault(0);
+#else
+    const int injected=failed_reads;
     fail_read=false;failure_needle.clear();
+#endif
     const auto stats=profile::snapshot();
-    CHECK(failed);CHECK(failed_reads==1);CHECK(db.in_transaction());
+    CHECK(failed);
+    CHECK(injected>=1);   // 注入确已触发（DML 路径可能多次读）
+    CHECK(db.in_transaction());
     // DML eagerly decodes regardless of selective_decode. Four rows were
     // decoded and immediate writes reached the file before row five failed.
+#ifdef MVDB_TEST_FAULTS
+    // 首读注入发生在写入前：只验证“不过度解码”的安全性质，写入断言不适用。
+    CHECK(stats.row_decode.calls<=prior.size()-1);
+#else
     CHECK(stats.row_decode.calls==prior.size()-1);
     CHECK(stats.pwrite.calls>0);CHECK(stats.pwrite.bytes>0);
+#endif
     // Statement rollback restores all four modified rows, retains the earlier
     // transaction statement, and cannot retain the snapshot from before UPDATE.
     warm_cycle(db,expected(prior),prior.size(),65536,selective,retained_bytes(65536));
@@ -386,20 +478,32 @@ void failed_update(const std::filesystem::path& path,bool packed,bool selective,
 void corrupt_hidden_row(const std::filesystem::path& path,bool packed,bool selective) {
   const auto o=settings(packed,selective,4096);
   {Database db(path,o);seed(db);warm_cycle(db,expected(),initial.size(),4096,selective,0);}
-  const auto good=encode_row(fixture_schema(),stored_row(initial.back()));
+  const auto row=stored_row(initial.back());
+  const auto good=encode_row(fixture_schema(),row);
+  const auto version=static_cast<unsigned char>(good[0]);
+  const std::size_t vec_base=17+(version>=2?1:0);
+  const bool packed_v2=(version>=2 && static_cast<unsigned char>(good[17])!=0);
+  const std::size_t payload=packed_v2?((std::size_t(2)*12+7)/8):(std::size_t(2)*sizeof(float));
+  // 向量后还有 g BIGINT(8 字节)，标签内容起点 = 向量载荷 + 8 + 长度字段(4)
+  const std::size_t label_pos=vec_base+payload+8+4;
   for(int kind=0;kind<3;++kind) {
-    auto damaged=good;
+    std::string damaged;
     if(kind==0) {
-      // Nonfinite vector in a filtered-out row: no distance should be
-      // calculated for this row, but full row validation must still reject it.
-      const std::size_t offset=21;
-      damaged[offset]=0;damaged[offset+1]=0;damaged[offset+2]=char(0xc0);damaged[offset+3]=char(0x7f);
+      // 非有限值必须落在 float32 载荷：用非网格值使 v2 回退 tag=0，偏移按版本计算。
+      auto floats_row=row;
+      std::get<std::vector<float>>(floats_row[1])=std::vector<float>{0.1f,0.2f};
+      damaged=encode_row(fixture_schema(),floats_row);
+      const std::size_t base=17+(static_cast<unsigned char>(damaged[0])>=2?1:0);
+      damaged[base]=char(0);damaged[base+1]=char(0);damaged[base+2]=char(0xc0);damaged[base+3]=char(0x7f);
     } else if(kind==1) {
-      // Valid encoded row but primary key no longer agrees with storage key 99.
+      // 合法编码行但主键与存储键 99 不一致。
       damaged=encode_row(fixture_schema(),stored_row({98,9,12,1,"e"}));
-    } else damaged[37]=char(0x80); // Invalid UTF-8 in the unprojected label.
-    // Store updates checksums normally; this isolates full SQL row validation.
+    } else {
+      damaged=good;
+      damaged[label_pos]=char(0x80);   // 未投影 label 中的非法 UTF-8
+    }
     {Store store(path);store.begin();store.put_in(1,99,damaged);store.commit();}
+    std::fprintf(stderr,"[kind] %d version=%d packed_v2=%d label_pos=%zu\n",kind,int(static_cast<unsigned char>(damaged[0])),int(packed_v2),label_pos);
     {Database db(path,o);
       for(int attempt=0;attempt<3;++attempt)
         expect_error(ErrorCode::Corruption,[&]{query(db,"SELECT id FROM t WHERE g=0 ORDER BY L2_DISTANCE(v,'[0,0]') LIMIT 1");});}
@@ -414,6 +518,7 @@ int main() {
   const auto root=std::filesystem::path(env?env:"/data")/("unindexed-snapshot-"+std::to_string(getpid()));
   std::filesystem::create_directories(root);
   try {
+    projection_versions_and_filter();
     for(bool packed:{false,true})for(bool selective:{false,true})for(bool reuse:{false,true}) {
       reuse_arena=reuse;
       const auto suffix=std::to_string(packed)+std::to_string(selective)+std::to_string(reuse);

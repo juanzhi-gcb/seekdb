@@ -34,9 +34,13 @@ void vector_bits() {
   }
   CHECK(&std::get<std::vector<float>>(lazy[1])==&decoded);
   CHECK(info.cells_materialized==1&&info.vector_values_materialized==1);
+  // 版本感知的损坏注入：v1 行首分量偏移 17，v2 行多一个 tag 字节 -> 18。
+  // v2 下若该行是 12 位打包，载荷内任意 12 位码都解码为有限值，
+// 因此必须用未打包(float32)行来验证非有限值拒绝。
+  const std::size_t payload = static_cast<unsigned char>(bytes[0])>=2 ? 18u : 17u;
   for(auto invalid:{0x7f800000u,0xff800000u,0x7fc00001u}) {
     auto corrupt=bytes;
-    for(unsigned i=0;i<4;++i)corrupt[17+i]=static_cast<char>(invalid>>(8*i));
+    for(unsigned i=0;i<4;++i)corrupt[payload+i]=static_cast<char>(invalid>>(8*i));
     ExecutionInfo rejected_info;
     bool rejected=false;
     try { LazyRowView unused(schema,corrupt,rejected_info); }
@@ -86,19 +90,33 @@ void comparisons(const std::filesystem::path& p) {
 }
 void corrupt_rows(const std::filesystem::path& dir) {
   Schema s{1,"t",{{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,2},{"s",ColumnType::Varchar,20},{"n",ColumnType::Bigint,0}},0};
-  auto good=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string("ok"),std::int64_t(0)});
+  // 非网格值（0.1/0.2 不是 k/128）-> v2 也回退 float32（tag=0），
+  // 使 NaN/Inf 注入落在真实浮点载荷上；v1 布局不含 tag，偏移按版本计算。
+  auto good=encode_row(s,{std::int64_t(1),std::vector<float>{0.1f,0.2f},std::string("ok"),std::int64_t(0)});
+  const auto version=static_cast<unsigned char>(good[0]);
+  const std::size_t vector_base=17+(version>=2?1:0);          // version+count+id+vector count(+tag)
+  const std::size_t text_len_pos=vector_base+2*sizeof(float);
+  const std::size_t text_pos=text_len_pos+4;
   std::vector<std::string> bad;
-  auto nonfinite=good; nonfinite[19]=char(0x80); nonfinite[20]=char(0x7f); bad.push_back(nonfinite);
-  auto unicode=good; unicode[29]=char(0x80); bad.push_back(unicode);
-  // Invalid text beyond a complete ASCII block must still be checked even when
-  // predicates discard the row or the projection never requests the text.
-  for(std::size_t position:{7U,8U,15U}) {
-    auto long_unicode=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string(16,'a'),std::int64_t(0)});
-    long_unicode[29+position]=char(0x80);bad.push_back(std::move(long_unicode));
+  for(std::uint32_t pattern:{0x7f800000u,0xff800000u,0x7fc00001u}) {
+    auto nonfinite=good;
+    for(unsigned i=0;i<4;++i)nonfinite[vector_base+i]=static_cast<char>(pattern>>(8*i));
+    bad.push_back(std::move(nonfinite));
   }
-  auto wrongkey=good; wrongkey[5]=2; bad.push_back(wrongkey);
+  {auto unicode=good; unicode[text_pos]=char(0x80); bad.push_back(unicode);}
+  for(std::size_t position:{7U,8U,15U}) {
+    auto long_unicode=encode_row(s,{std::int64_t(1),std::vector<float>{0.1f,0.2f},std::string(16,'a'),std::int64_t(0)});
+    long_unicode[text_pos+position]=char(0x80);bad.push_back(std::move(long_unicode));
+  }
+  {auto wrongkey=good; wrongkey[5]=2; bad.push_back(wrongkey);}
   bad.push_back(good+"x");
   for(std::size_t n=0;n<good.size();++n)bad.push_back(good.substr(0,n));
+  // v2 打包行（tag=1）：截断载荷、以及 tag 与实际载荷不一致，都必须被拒绝。
+  auto packed=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string("ok"),std::int64_t(0)});
+  if(static_cast<unsigned char>(packed[0])>=2 && static_cast<unsigned char>(packed[17])==1) {
+    bad.push_back(packed.substr(0,packed.size()-1));
+    auto wrong_tag=packed; wrong_tag[17]=char(0); bad.push_back(std::move(wrong_tag));
+  }
   int index=0;
   for(const auto& bytes:bad) {
     auto path=dir/("bad-"+std::to_string(index++));

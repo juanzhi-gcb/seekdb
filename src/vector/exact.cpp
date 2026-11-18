@@ -159,10 +159,18 @@ std::vector<Neighbor> exact_top_k_transposed_validated_candidates(
           sums[lane]+=delta*delta;
         }
     }
-    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane)) {
-      Neighbor candidate{keys[lane],std::sqrt(sums[lane])};
-      if(heap.size()<k)heap.push(candidate);
-      else if(better(candidate,heap.top())){heap.pop();heap.push(candidate);}
+    // 先按 (distance,key) 排序本块候选，再与堆顶比较；一旦某候选不优于
+    // 堆顶，后续候选（更差）必然也不优于堆顶，可提前结束。堆的最终内容与
+    // 逐条 push 完全相同（比较器是全序：distance 相同时按 key）。
+    std::array<Neighbor,16> block_candidates{};
+    std::size_t block_count=0;
+    for(std::size_t lane=0;lane<keys.size();++lane)if(mask&(1U<<lane))
+      block_candidates[block_count++]=Neighbor{keys[lane],std::sqrt(sums[lane])};
+    std::sort(block_candidates.begin(),block_candidates.begin()+block_count,better);
+    for(std::size_t c=0;c<block_count;++c) {
+      if(heap.size()<k)heap.push(block_candidates[c]);
+      else if(better(block_candidates[c],heap.top())){heap.pop();heap.push(block_candidates[c]);}
+      else break;
     }
     if(screen && heap.size()==k) {
       // If RN(sqrt(S)) <= D, then sqrt(S) < nextafter(D,+inf).

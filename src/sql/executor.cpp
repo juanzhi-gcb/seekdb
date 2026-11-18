@@ -352,6 +352,7 @@ namespace minivectordb {
       bool certified=false;
       const auto [range_begin,range_end]=typed_scan_range(predicates,&certified);
       const bool bulk=certified && options.certified_block_scan && !profile::enabled();
+      const bool unfiltered=bulk && predicates.empty();
       profile::detail::Scope scan_timer(&profile::Snapshot::table_scan);
       try {
         auto run_scan=[&](std::size_t lo_range,std::size_t hi_range,ExecutionInfo& loc)->std::vector<Neighbor> {
@@ -363,7 +364,12 @@ namespace minivectordb {
           for(std::size_t r=lo_range/16*16;r<hi_range;r+=16) {
             const auto count=std::min(std::size_t(16),typed_snapshot.size()-r);
             std::uint16_t mask=0;
-            if(bulk) {
+            if(unfiltered && count==16 && r>=lo_range && r+16<=hi_range) {
+              mask=0xFFFFu;
+              loc.rows_examined+=16;loc.typed_rows_examined+=16;
+              loc.distances_computed+=16;++loc.certified_blocks_examined;
+              for(std::size_t lane=0;lane<16;++lane)keys[lane]=typed_snapshot.key(r+lane);
+            } else if(bulk) {
               const auto lane_lo=lo_range>r?lo_range-r:0,lane_hi=std::min(count,hi_range-r);
               const auto selected=lane_hi-lane_lo;
               mask=static_cast<std::uint16_t>(((1u<<selected)-1)<<lane_lo);
