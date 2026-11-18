@@ -1,23 +1,23 @@
 {
  "kind": "local-material-integrity-manifest",
- "date": "2026-11-15",
+ "date": "2026-11-18",
  "schema": "minivectordb-evidence-and-implementation-v3",
  "scope": "Local integrity and provenance only; not a platform evaluation or proof of student understanding.",
  "material_parent_commit": "a08e66e299847ca539c419cfbc67593357246627",
  "material_files": {
   "agent/conversation.json": {
-   "bytes": 104949,
-   "sha256": "4a75e1f52f6d3c64f7960f734c365cc7e1c70f240560fb708df1d50c9e1812f6"
+   "bytes": 125892,
+   "sha256": "db08d86deb057224ebbb79884653af605d089e04b09a906c5d786218159c5f67"
   },
   "conversation.json": {
-   "bytes": 104949,
-   "sha256": "4a75e1f52f6d3c64f7960f734c365cc7e1c70f240560fb708df1d50c9e1812f6"
+   "bytes": 125892,
+   "sha256": "db08d86deb057224ebbb79884653af605d089e04b09a906c5d786218159c5f67"
   }
  },
  "counts": {
   "conversations": 61,
-  "experiments": 51,
-  "evidence_chains": 19
+  "experiments": 52,
+  "evidence_chains": 20
  },
  "record_sources": [
   {
@@ -95,8 +95,8 @@
   {
    "kind": "record-archive",
    "path": "agent/records-20261118.json",
-   "bytes": 2974,
-   "sha256": "854159dc457fcd43d0e4a539083b34b4e0e90d39bdc839194843111b25f2b70e"
+   "bytes": 3782,
+   "sha256": "e57c1b69a1fe8f2824f5feb083a9ed4e3975e067265451ce386b392be1202898"
   }
  ],
  "current_source_identity": {

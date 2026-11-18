@@ -1,6 +1,6 @@
 # MiniVectorDB 当前提交材料
 
-正式入口是 `agent/conversation.json`，根目录 `conversation.json` 是相同字节的镜像。当前材料采用 `minivectordb-evidence-and-implementation-v3`，包含 51 条所选对话、45 条实验摘要、11 条导航链和内嵌实施规格；不是全文对话，也不是官方评分报告。
+正式入口是 `agent/conversation.json`，根目录 `conversation.json` 是相同字节的镜像。当前材料采用 `minivectordb-evidence-and-implementation-v3`，包含 61 条对话记录（含 q01–q03 本会话用户逐字原话）、52 条实验摘要、20 条证据链、20 条 rubric 实例和内嵌实施规格；不是全文对话，也不是官方评分报告。当前源码身份绑定 runtime_blob_sha1；本地验证为 ctest 70/70、JSONL 协议 20/20、SnapshotProjection 双向量回归通过，均非官方评测。
 
 运行源码、测试与构建文件固定为 `a24d2cd764027adec7371f268f99ccdca2307032`。JSON 开头的 `version_ledger` 区分 a24 实现、后续未采用实验和未执行计划；不能把后续 CRC、压缩段或并行绑定实验当作当前运行代码。
 

@@ -40,6 +40,14 @@
    "purpose": "SnapshotProjection 两处 bug 的分离红/绿回归（补丁与新增测试由 Codex 编写，DeepSeek 在云机隔离副本执行）",
    "output": "由 Codex 提供的修复补丁（src/sql/snapshot_row.hpp）与新增用例（tests/unindexed_snapshot_tests.cpp 双向量旧格式场景）复测：r1 变体（只修谓词返回、不修 v1 tag）红：match.matches_and_copy(encoded,scratch) line 83；r2 变体（只修 tag、不修谓词）红：!no_match.matches_and_copy(encoded,scratch) line 75；完整修复绿：unindexed snapshot tests passed，且完整 ctest 100% 70/70、JSONL 协议 20/20。红/绿与 ctest/协议日志为本机实验日志（提交仓库之外的 outputs/perf/candO2/ 目录，仅供本机复核）。",
    "original_note": "补丁与测试由 Codex 编写；DeepSeek 在云机隔离副本构建并执行红/绿与完整回归。日志不在提交内。"
+  },
+  {
+   "id": "w03",
+   "source": "current_experiment_summary",
+   "phase": "prompt_delivery",
+   "purpose": "独立 DS 子 Agent 只读盲评当前 Prompt 材料并按意见重建 rubric 实例",
+   "output": "独立子 Agent 只读评审，给出模拟区间 61–74/100（明示非官方分），并指出 /rubric_instances 缺失等 8 条缺陷；按意见新增 19 条 rubric 实例（A4/B5/C4/D4/E2）、拆分 c11 错配、扩展 15 处截断引文、更新 summary 与归属说明；完整 scripts/check-learning-material.py 通过（129,062 字节、107 引用）。报告与前后校验：outputs/perf/prompt-review/（本地，仓库外）。",
+   "original_note": "盲评由独立子 Agent 执行；材料修改由 Agent 执行；模拟分不是官方分，不据此推断官方原始分。"
   }
  ]
 }
