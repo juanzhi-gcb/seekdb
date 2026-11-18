@@ -1,0 +1,45 @@
+{
+ "schema": "minivectordb-record-archive",
+ "date": "2026-11-18",
+ "conversations": [
+  {
+   "id": "q01",
+   "role": "user",
+   "source": "current_conversation",
+   "phase": "performance_delivery",
+   "content": "我们现在只抓性能分，先不管prompt，我们将性能分提升到5500才有机会晋级，接下来我给你一切权限，操控deepseek harness进行我们的性能优化，大方向可以多试试我们没尝试过的角度，要求大幅度提升性能，越高越好，租的云服务器ip是8.136.227.198，接下来开始，未达到这个性能分之前不要停"
+  },
+  {
+   "id": "q02",
+   "role": "user",
+   "source": "current_conversation",
+   "phase": "performance_delivery",
+   "content": "我需要的是大幅提升，别纠结于小提升，在一个h内给我最终版"
+  },
+  {
+   "id": "q03",
+   "role": "user",
+   "source": "current_conversation",
+   "phase": "prompt_delivery",
+   "content": "我想先交一份，你指挥ds优化好prompt然后检查性能与prompt是否会出无效，注意prompt可以压缩一下，多放出我们后面的对话，这个对话质量更高"
+  }
+ ],
+ "experiments": [
+  {
+   "id": "w01",
+   "source": "current_experiment_summary",
+   "phase": "performance_delivery",
+   "purpose": "candN（12 位行编码 + exact 内核块内堆合并）与 cur/a24 的三轮正反交错端到端对照",
+   "output": "10k×128 网格，三轮交错，中位（写T ms / 查T ms / M MB / B MB）：candN 270.21 / 92.33 / 12.43 / 3.57；cur 274.79 / 95.35 / 14.50 / 5.39；a24 275.71 / 109.62 / 14.11 / 5.39。随机数据 candN 查 46.78ms vs cur 48.47ms，写 333.96 vs 327.44，B/M 无收益。以上为本地实验日志（位于提交仓库之外的 outputs/perf/ 目录，未包含在本仓库交付内容中，仅供本机复核）。",
+   "original_note": "Agent 执行的本机相对测量；非官方评测，不换算官方分数。原始 JSON 为本机日志，不在提交内。"
+  },
+  {
+   "id": "w02",
+   "source": "current_experiment_summary",
+   "phase": "correctness_fix",
+   "purpose": "SnapshotProjection 两处 bug 的分离红/绿回归（补丁与新增测试由 Codex 编写，DeepSeek 在云机隔离副本执行）",
+   "output": "由 Codex 提供的修复补丁（src/sql/snapshot_row.hpp）与新增用例（tests/unindexed_snapshot_tests.cpp 双向量旧格式场景）复测：r1 变体（只修谓词返回、不修 v1 tag）红：match.matches_and_copy(encoded,scratch) line 83；r2 变体（只修 tag、不修谓词）红：!no_match.matches_and_copy(encoded,scratch) line 75；完整修复绿：unindexed snapshot tests passed，且完整 ctest 100% 70/70、JSONL 协议 20/20。红/绿与 ctest/协议日志为本机实验日志（提交仓库之外的 outputs/perf/candO2/ 目录，仅供本机复核）。",
+   "original_note": "补丁与测试由 Codex 编写；DeepSeek 在云机隔离副本构建并执行红/绿与完整回归。日志不在提交内。"
+  }
+ ]
+}
