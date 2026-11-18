@@ -7,11 +7,11 @@
  "material_files": {
   "agent/conversation.json": {
    "bytes": 125892,
-   "sha256": "db08d86deb057224ebbb79884653af605d089e04b09a906c5d786218159c5f67"
+   "sha256": "53f2c3c27952ba976f65cda5cc5c99ad75bb1180757ea024e154a7140de1f4a9"
   },
   "conversation.json": {
    "bytes": 125892,
-   "sha256": "db08d86deb057224ebbb79884653af605d089e04b09a906c5d786218159c5f67"
+   "sha256": "53f2c3c27952ba976f65cda5cc5c99ad75bb1180757ea024e154a7140de1f4a9"
   }
  },
  "counts": {
@@ -100,7 +100,7 @@
   }
  ],
  "current_source_identity": {
-  "verified_engine_commit": "6e5aa500a02078137f662044e9dc359cb965ee13",
+  "verified_engine_commit": "2403b49d2bfadf11b3b7cca30f1ba669e30d44a4",
   "runtime_trees": {
    "src": "549d8689b8476595420dfb19e51830ccb4cbfbff",
    "include": "5e090e57c2804811f1387df4ee6b1cad566ae8f4",
