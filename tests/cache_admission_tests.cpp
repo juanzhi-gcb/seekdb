@@ -1,11 +1,15 @@
 #include "minivectordb/database.hpp"
 #include "../src/sql/scan_cache.hpp"
 #include "../src/sql/typed_scan_cache.hpp"
+#include "../src/storage/test_fault_hook.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <new>
 #include <string>
@@ -18,6 +22,8 @@ namespace {
 thread_local bool track_arrays=false;
 thread_local std::size_t array_allocations=0;
 bool fail_read=false;
+long pread_calls=0;
+long fail_at_pread=-1;
 std::string failure_needle;
 unsigned failed_reads=0;
 }
@@ -33,15 +39,20 @@ void* operator new[](std::size_t size) {
 void operator delete[](void* p) noexcept {std::free(p);}
 void operator delete[](void* p,std::size_t) noexcept {std::free(p);}
 extern "C" ssize_t __real_pread(int,void*,size_t,off_t);
+static bool inject_read_failure() {
+    if(!fail_read)return false;
+    ++pread_calls;
+    if(fail_at_pread>0 && pread_calls>=fail_at_pread) {++failed_reads;errno=EIO;return true;}
+    return false;
+}
 extern "C" ssize_t __wrap_pread(int fd,void* buffer,size_t size,off_t offset) {
-    const auto result=__real_pread(fd,buffer,size,offset);
-    if(fail_read&&result>0) {
-        const auto* first=static_cast<const char*>(buffer);
-        if(std::search(first,first+result,failure_needle.begin(),failure_needle.end())!=first+result) {
-            ++failed_reads;errno=EIO;return -1;
-        }
-    }
-    return result;
+    if(inject_read_failure())return -1;
+    return __real_pread(fd,buffer,size,offset);
+}
+extern "C" ssize_t __real_pread64(int fd,void* buffer,size_t size,off_t offset);
+extern "C" ssize_t __wrap_pread64(int fd,void* buffer,size_t size,off_t offset) {
+    if(inject_read_failure())return -1;
+    return __real_pread64(fd,buffer,size,offset);
 }
 namespace {
 struct Item {std::int64_t id,g;float value;std::string label;};
@@ -49,6 +60,12 @@ struct Result {std::vector<Row> rows;ExecutionInfo info;std::size_t arrays=0;};
 std::string vector_literal(float value) {
     std::string result="[";
     for(unsigned i=0;i<128;++i){if(i)result+=',';result+=std::to_string(value);}
+    return result+"]";
+}
+// 非 1/128 网格值：v1 与 v2 都必须按 float32 存储，使行宽不随格式变化。
+std::string vector_literal_unpackable(float value) {
+    std::string result="[";
+    for(unsigned i=0;i<128;++i){if(i)result+=',';result+=std::to_string(double(value)+0.1);}
     return result+"]";
 }
 std::vector<Item> fixture(unsigned count) {
@@ -108,7 +125,7 @@ void fits(Database& db,const std::string& table,const std::vector<Item>& rows,bo
     CHECK(r.arrays==0);
 }
 void lifecycle(const std::filesystem::path& path,bool typed,bool indexed) {
-    const auto large=fixture(32),small=fixture(8);
+    const auto large=fixture(64),small=fixture(8);
     Database db(path,settings(typed));seed(db,"t",large);seed(db,"u",small);
     if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
     oversize(db,"t",large);fits(db,"u",small,typed);oversize(db,"t",large);
@@ -125,16 +142,40 @@ void lifecycle(const std::filesystem::path& path,bool typed,bool indexed) {
     if(!indexed){db.execute("CREATE VECTOR INDEX tv ON t(v)");fits(db,"t",small,typed);}
 }
 void first_scan_failure(const std::filesystem::path& path,bool typed,bool indexed) {
-    const auto rows=fixture(32);Database db(path,settings(typed));seed(db,"t",rows);
-    if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
-    failure_needle=rows.back().label;fail_read=true;failed_reads=0;
+    const auto rows=fixture(64);
+    Options o=settings(typed);o.scan_snapshot_bytes=1024;
+    {
+        Database db(path,o);
+        seed(db,"t",rows);
+        if(indexed)db.execute("CREATE VECTOR INDEX tv ON t(v)");
+    }
+    // 冷读：销毁实例后重开，所有页必须从存储层重新读取。
+    Database db(path,o);
+#ifdef MVDB_TEST_FAULTS
+    mvdb_test_set_fault(1);
+#else
+    fail_read=true;failed_reads=0;fail_at_pread=1;
+#endif
     for(unsigned attempt=0;attempt<2;++attempt) {
         bool rejected=false;
         try {query(db,"t","g=99");}
         catch(const std::system_error& error){CHECK(error.code().value()==EIO);rejected=true;}
+#ifdef MVDB_TEST_FAULTS
+        const long reads=mvdb_test_read_calls(),fails=mvdb_test_failed_reads();
+        CHECK(rejected&&fails==static_cast<long>(attempt+1));
+        CHECK(reads>=1);
+#else
         CHECK(rejected&&failed_reads==attempt+1);
+        CHECK(pread_calls>=1);
+#endif
     }
-    fail_read=false;failure_needle.clear();oversize(db,"t",rows);
+#ifdef MVDB_TEST_FAULTS
+    mvdb_test_set_fault(0);
+#else
+    fail_read=false;fail_at_pread=-1;pread_calls=0;
+#endif
+    const auto recovered=query(db,"t");
+    CHECK(recovered.rows==oracle(rows));
 }
 void text_fallback(const std::filesystem::path& path,bool indexed) {
     auto rows=fixture(6);rows.back().label.clear();

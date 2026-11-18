@@ -1,5 +1,6 @@
 #pragma once
 #include "minivectordb/store.hpp"
+#include "test_fault_hook.hpp"
 #include "packed_codec.hpp"
 #include "page_checksum.hpp"
 #include <map>
@@ -47,7 +48,7 @@ class JournalStore {
   }
   std::size_t read_some(std::uint64_t offset,unsigned char* output,std::size_t size)const{
     std::size_t done=0;
-    while(done<size){ssize_t n;{profile::detail::Scope timer(&profile::Snapshot::pread);n=::pread(fd_,output+done,size-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
+    while(done<size){ssize_t n;if(mvdb_test_read_fault && mvdb_test_read_fault()){errno=EIO;io("journal pread");}{profile::detail::Scope timer(&profile::Snapshot::pread);n=::pread(fd_,output+done,size-done,off_t(offset+done));if(n>0)timer.bytes(std::uint64_t(n));}
       if(n<0){if(errno==EINTR)continue;io("journal pread");}if(!n)break;done+=std::size_t(n);
     }return done;
   }

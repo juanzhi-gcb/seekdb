@@ -1,4 +1,5 @@
 #include "minivectordb/store.hpp"
+#include "test_fault_hook.hpp"
 #include "page_checksum.hpp"
 #include "packed_codec.hpp"
 #include "packed_pointer.hpp"
@@ -74,6 +75,7 @@ Page read_raw(int fd,std::uint64_t id,bool discard=false) {
   while(done<p.size()) {
     ssize_t n;
     {
+      if(mvdb_test_read_fault && mvdb_test_read_fault()) {errno=EIO;io_error("pread");}
       profile::detail::Scope timer(&profile::Snapshot::pread);
       n=::pread(fd,p.data()+done,p.size()-done,start+static_cast<off_t>(done));
       if(n>0) timer.bytes(static_cast<std::uint64_t>(n));

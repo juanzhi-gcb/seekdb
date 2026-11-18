@@ -2,6 +2,7 @@
 #include "minivectordb/value.hpp"
 #include <algorithm>
 #include <bit>
+#include <cstring>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -48,6 +49,24 @@ std::string reference(const Schema& schema,const Row& row) {
   }
   return bytes;
 }
+bool same_row(const Row& a,const Row& b) {
+  if(a.size()!=b.size())return false;
+  for(std::size_t i=0;i<a.size();++i) {
+    if(a[i].index()!=b[i].index())return false;
+    if(const auto* p=std::get_if<std::int64_t>(&a[i])) {if(*p!=std::get<std::int64_t>(b[i]))return false;}
+    else if(const auto* t=std::get_if<std::string>(&a[i])) {if(*t!=std::get<std::string>(b[i]))return false;}
+    else {
+      const auto& x=std::get<std::vector<float>>(a[i]);
+      const auto& y=std::get<std::vector<float>>(b[i]);
+      if(x.size()!=y.size())return false;
+      for(std::size_t k=0;k<x.size();++k) {
+        std::uint32_t u,v;std::memcpy(&u,&x[k],4);std::memcpy(&v,&y[k],4);
+        if(u!=v)return false;   // 逐位比较，-0 与次正规必须保持
+      }
+    }
+  }
+  return true;
+}
 struct Outcome {std::optional<ErrorCode> error;std::string message,bytes;};
 template<class F> Outcome observe(F&& f) {
   Outcome out;
@@ -56,8 +75,19 @@ template<class F> Outcome observe(F&& f) {
 }
 void compare(const Schema& s,const Row& r) {
   auto a=observe([&]{return reference(s,r);}),b=observe([&]{return encode_row(s,r);});
-  CHECK(a.error==b.error);CHECK(a.message==b.message);CHECK(a.bytes==b.bytes);
-  if(!a.error)CHECK(encode_row(s,decode_row(s,b.bytes))==a.bytes);
+  CHECK(a.error==b.error);CHECK(a.message==b.message);
+  if(a.error)return;
+  // 旧 v1 参照字节必须仍能被解码回逐位一致的行（向后兼容）。
+  CHECK(same_row(decode_row(s,a.bytes),r));
+  const auto version=static_cast<unsigned char>(b.bytes.empty()?0:b.bytes[0]);
+  if(version==1) {
+    CHECK(a.bytes==b.bytes);                    // v1 构建：字节级契约不变
+    CHECK(encode_row(s,decode_row(s,b.bytes))==a.bytes);
+  } else {
+    CHECK(version==2);                           // v2 构建：解码逐位一致 + 重编码稳定
+    CHECK(same_row(decode_row(s,b.bytes),r));
+    CHECK(encode_row(s,decode_row(s,b.bytes))==b.bytes);
+  }
 }
 int main() {
   try {
@@ -66,7 +96,16 @@ int main() {
     Schema s{1,"gold",{{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,3},{"t",ColumnType::Varchar,3}},0};
     Row r{std::int64_t(-2),std::vector<float>{-0.f,std::bit_cast<float>(UINT32_C(1)),std::numeric_limits<float>::max()},std::string("A\0B",3)};
     const unsigned char expected[]={1,3,0,0,0,254,255,255,255,255,255,255,255,3,0,0,0,0,0,0,128,1,0,0,0,255,255,127,127,3,0,0,0,65,0,66};
-    CHECK(encode_row(s,r)==std::string(reinterpret_cast<const char*>(expected),sizeof(expected)));
+    const std::string frozen(reinterpret_cast<const char*>(expected),sizeof(expected));
+    // 旧 v1 金标准字节：必须仍可解码为逐位一致的行（含 -0、最小次正规、FLT_MAX）。
+    CHECK(same_row(decode_row(s,frozen),r));
+    const auto produced=encode_row(s,r);
+    if(static_cast<unsigned char>(produced[0])==1) CHECK(produced==frozen);
+    else {
+      CHECK(static_cast<unsigned char>(produced[0])==2);
+      CHECK(same_row(decode_row(s,produced),r));
+      CHECK(encode_row(s,decode_row(s,produced))==produced);
+    }
     compare(s,r);
     std::mt19937_64 rng(0x5bd38b17);
     std::size_t checks=1;

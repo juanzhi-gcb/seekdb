@@ -123,10 +123,21 @@ void malformed_cached_rows(const fs::path& dir) {
   for(bool packed:{false,true})for(bool overflow:{false,true}) {
     auto good=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string(overflow?13000:2,'x'),std::int64_t(0)});
     std::vector<std::string> bad;
+    // 非有限值必须注入到 float32 载荷：用非网格值使 v2 也回退 tag=0，偏移按版本计算。
+    auto floats=encode_row(s,{std::int64_t(1),std::vector<float>{0.1f,0.2f},std::string(overflow?13000:2,'x'),std::int64_t(0)});
+    const std::size_t fver=static_cast<unsigned char>(floats[0]);
+    const std::size_t fbase=17+(fver>=2?1:0);
     for(auto bits:{0x7f800000u,0xff800000u,0x7fc00001u}) {
-      auto bytes=good; for(unsigned i=0;i<4;++i)bytes[17+i]=static_cast<char>(bits>>(8*i)); bad.push_back(bytes);
+      auto bytes=floats; for(unsigned i=0;i<4;++i)bytes[fbase+i]=static_cast<char>(bits>>(8*i)); bad.push_back(bytes);
     }
-    auto unicode=good; unicode[29]=char(0x80); bad.push_back(unicode);
+    // 布局随版本变化：v2 行在向量列前多一个 tag 字节；文本列长度 4 字节 + 内容。
+  const auto version=static_cast<unsigned char>(good[0]);
+  // 文本列偏移取决于向量的实际载荷长度（v2 打包行为 12 位，未打包为 4*n）
+  const std::size_t dim=2, vec_base=17+(version>=2?1:0);
+  const std::size_t payload=(version>=2 && static_cast<unsigned char>(good[17])!=0)
+      ? (dim*12+7)/8 : dim*sizeof(float);
+  const std::size_t text_pos=vec_base+payload+4;
+  auto unicode=good; unicode[text_pos]=char(0x80); bad.push_back(unicode);
     for(const auto& bytes:bad) {
       const auto path=dir/("malformed-"+std::to_string(mode++));
       { Database db(path,options(dir,packed,true,true,0,0)); schema(db); }

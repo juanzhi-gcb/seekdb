@@ -74,8 +74,19 @@ void comparisons(const fs::path& dir) {
 void corrupt_rows(const fs::path& dir) {
   Schema s{1,"t",{{"id",ColumnType::Bigint,0},{"v",ColumnType::Vector,2},{"s",ColumnType::Varchar,20},{"n",ColumnType::Bigint,0}},0};
   auto good=encode_row(s,{std::int64_t(1),std::vector<float>{1,2},std::string("ok"),std::int64_t(0)}); std::vector<std::string> bad;
-  for(auto bits:{0x7f800000u,0xff800000u,0x7fc00001u}) { auto bytes=good; for(unsigned i=0;i<4;++i)bytes[17+i]=static_cast<char>(bits>>(8*i)); bad.push_back(bytes); }
-  auto unicode=good; unicode[29]=char(0x80); bad.push_back(unicode);
+  // 非有限值注入必须落在 float32 载荷上：用非网格值使 v2 也回退 tag=0。
+  auto floats=encode_row(s,{std::int64_t(1),std::vector<float>{0.1f,0.2f},std::string("ok"),std::int64_t(0)});
+  const std::size_t fversion=static_cast<unsigned char>(floats[0]);
+  const std::size_t fbase=17+(fversion>=2?1:0)+(fversion>=2 && static_cast<unsigned char>(floats[17])!=0?3:0);
+  for(auto bits:{0x7f800000u,0xff800000u,0x7fc00001u}) { auto bytes=floats; for(unsigned i=0;i<4;++i)bytes[fbase+i]=static_cast<char>(bits>>(8*i)); bad.push_back(bytes); }
+  // 布局随版本变化：v2 行在向量列前多一个 tag 字节；文本列长度 4 字节 + 内容。
+  const auto version=static_cast<unsigned char>(good[0]);
+  // 文本列偏移取决于向量的实际载荷长度（v2 打包行为 12 位，未打包为 4*n）
+  const std::size_t dim=2, vec_base=17+(version>=2?1:0);
+  const std::size_t payload=(version>=2 && static_cast<unsigned char>(good[17])!=0)
+      ? (dim*12+7)/8 : dim*sizeof(float);
+  const std::size_t text_pos=vec_base+payload+4;
+  auto unicode=good; unicode[text_pos]=char(0x80); bad.push_back(unicode);
   auto wrongkey=good; wrongkey[5]=2; bad.push_back(wrongkey); bad.push_back(good+"x");
   for(std::size_t n=0;n<good.size();++n)bad.push_back(good.substr(0,n));
   int index=0;
@@ -87,7 +98,8 @@ void corrupt_rows(const fs::path& dir) {
     for(bool selective:{false,true})for(std::size_t cache:{0u,262144u}) {
       Database db(path,options(dir,selective,true,true,cache));
       for(const auto* sql:{"SELECT id FROM t WHERE n=1","SELECT id FROM t WHERE id=1","SELECT id FROM t ORDER BY n","SELECT id FROM t WHERE n=1 ORDER BY L2_DISTANCE(v,[0,0]) LIMIT 1"}) {
-        bool rejected=false; try { db.execute(sql); } catch(const Error& e) { rejected=e.code()==ErrorCode::Corruption; } CHECK(rejected);
+        bool rejected=false; try { db.execute(sql); } catch(const Error& e) { rejected=e.code()==ErrorCode::Corruption; }
+        if(!rejected){std::fprintf(stderr,"[bad] idx=%d ver=%d size=%zu sql=%s bytes=",index,int((unsigned char)bytes[0]),bytes.size(),sql);for(size_t k=0;k<bytes.size()&&k<40;++k)std::fprintf(stderr,"%02x",(unsigned char)bytes[k]);std::fprintf(stderr,"\n");} CHECK(rejected);
       }
     }
   }

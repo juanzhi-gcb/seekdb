@@ -39,6 +39,7 @@ int main() {
    CHECK(read.pwrite.calls==0 && read.fsync.calls==0);
    CHECK(read.page_checksum.calls>0 && read.row_validation.calls==6);
    CHECK(read.row_materialization.calls==6 && read.vector_distance.calls==4);
+   std::fprintf(stderr,"[prof] read vsc calls=%llu bytes=%llu rv=%llu rm=%llu vd=%llu\n",(unsigned long long)read.vector_scratch_copy.calls,(unsigned long long)read.vector_scratch_copy.bytes,(unsigned long long)read.row_validation.calls,(unsigned long long)read.row_materialization.calls,(unsigned long long)read.vector_distance.calls);
    CHECK(read.vector_scratch_copy.calls==4 && read.vector_scratch_copy.bytes==32);
    CHECK(read.vector_scratch_copy.nanoseconds>0);
    CHECK(read.page_read_branch.calls>0 && read.page_read_overflow.calls>0);
@@ -61,6 +62,7 @@ int main() {
    // the two projected winners are fetched and validated again.
    CHECK(filtered.row_validation.calls==2 && filtered.vector_distance.calls==3);
    CHECK(filtered.row_materialization.calls==2);
+   std::fprintf(stderr,"[prof2] filtered calls=%llu bytes=%llu ",(unsigned long long)filtered.vector_scratch_copy.calls,(unsigned long long)filtered.vector_scratch_copy.bytes);
    CHECK(filtered.vector_scratch_copy.calls==3 && filtered.vector_scratch_copy.bytes==24);
    CHECK(filtered.table_scan.nanoseconds>=filtered.scan_consume.nanoseconds);
    CHECK(filtered.predicate_evaluation.nanoseconds>0);
